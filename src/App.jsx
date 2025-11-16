@@ -1,665 +1,832 @@
-import React, { useState, useEffect, createContext, useContext, useCallback, useMemo } from 'react';
-import {
-    Search, Brain, BookOpen, Youtube, Lightbulb, FileText, ArrowLeft, Loader, Sparkles,
-    AlertTriangle, X, School, FlaskConical, Globe, Calculator, Dna, BarChart2, Drama,
-    Computer, BookHeart, Landmark, Languages, HelpCircle, Atom, CheckCircle, ChevronRight,
-    BrainCircuit, History, BookMarked, Github, Instagram, CalendarDays
-} from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+    getAuth, 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged,
+    updateProfile,
+    signInWithCustomToken, 
+    signInAnonymously, // Tambahkan signInAnonymously
+} from 'firebase/auth';
+import { 
+    getFirestore, 
+    collection, 
+    query, 
+    onSnapshot, 
+    addDoc, 
+    doc, 
+    updateDoc, 
+    arrayUnion, 
+    arrayRemove,
+} from 'firebase/firestore';
+import { ChevronRight, Heart, MessageCircle, User, Plus, Search, LogOut, Loader, Film, Image } from 'lucide-react';
 
-// --- STYLING & ANIMASI ---
-const motionVariants = {
-    screen: { initial: { opacity: 0, scale: 0.95 }, animate: { opacity: 1, scale: 1 }, exit: { opacity: 0, scale: 0.95 }, transition: { type: "spring", stiffness: 300, damping: 30 } },
-    item: { initial: { opacity: 0, y: 30 }, animate: { opacity: 1, y: 0 }, transition: { type: "spring", stiffness: 300, damping: 20 } },
-    button: { hover: { scale: 1.05, transition: { type: 'spring', stiffness: 400, damping: 10 } }, tap: { scale: 0.95 } }
+// --- Konfigurasi dan Inisialisasi Firebase ---
+
+// KONFIGURASI PENGGUNA BARU
+const userFirebaseConfig = {
+    apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
+    authDomain: "eduku-web.firebaseapp.com",
+    projectId: "eduku-web",
+    storageBucket: "eduku-web.firebasestorage.com",
+    messagingSenderId: "662463693471",
+    appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+    measurementId: "G-G0VWNHHVB8"
 };
 
-// --- KONFIGURASI PENTING ---
-// Catatan: Sebaiknya simpan API Key di environment variable untuk keamanan.
-const GEMINI_API_KEY = "AIzaSyArJ1P8HanSQ_XVWX9m4kUlsIVXrBRInik";
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify(userFirebaseConfig));
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-social-app-id';
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : ''; // Dapatkan token
 
-// --- App Context ---
-const AppContext = createContext(null);
+let app;
+let dbInstance;
+let authInstance;
 
-// --- Custom Hook untuk LocalStorage ---
-function useLocalStorage(key, initialValue) {
-    const [storedValue, setStoredValue] = useState(() => {
-        try {
-            const item = window.localStorage.getItem(key);
-            return item ? JSON.parse(item) : initialValue;
-        } catch (error) {
-            console.error(`[LocalStorage] Gagal mengambil data untuk key: ${key}`, error);
-            return initialValue;
-        }
-    });
-
-    const setValue = (value) => {
-        try {
-            const valueToStore = value instanceof Function ? value(storedValue) : value;
-            setStoredValue(valueToStore);
-            window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        } catch (error) {
-            console.error(`[LocalStorage] Gagal menyimpan data untuk key: ${key}`, error);
-        }
-    };
-    return [storedValue, setValue];
+try {
+    app = initializeApp(firebaseConfig);
+    dbInstance = getFirestore(app);
+    authInstance = getAuth(app);
+} catch (error) {
+    console.error("Kesalahan inisialisasi Firebase:", error);
 }
 
-// --- Data Kurikulum & Ikon ---
-const curriculum = {
-  'SD': { subjects: [{ name: 'Matematika', iconName: 'Calculator' }, { name: 'IPAS', iconName: 'Globe' }, { name: 'Pendidikan Pancasila', iconName: 'Landmark' }, { name: 'Bahasa Indonesia', iconName: 'BookHeart' }] },
-  'SMP': { subjects: [{ name: 'Matematika', iconName: 'Calculator' }, { name: 'IPA Terpadu', iconName: 'FlaskConical' }, { name: 'IPS Terpadu', iconName: 'Globe' }, { name: 'Pendidikan Pancasila', iconName: 'Landmark'}, { name: 'Bahasa Indonesia', iconName: 'BookHeart' }, { name: 'Bahasa Inggris', iconName: 'Languages' }, { name: 'Informatika', iconName: 'Computer' }] },
-  'SMA': { tracks: { 'IPA': [{ name: 'Matematika Peminatan', iconName: 'Calculator' }, { name: 'Fisika', iconName: 'Atom' }, { name: 'Kimia', iconName: 'FlaskConical' }, { name: 'Biologi', iconName: 'Dna' }], 'IPS': [{ name: 'Ekonomi', iconName: 'BarChart2' }, { name: 'Geografi', iconName: 'Globe' }, { name: 'Sosiologi', iconName: 'School' }], 'Bahasa': [{ name: 'Sastra Indonesia', iconName: 'BookHeart' }, { name: 'Sastra Inggris', iconName: 'Drama' }, { name: 'Antropologi', iconName: 'Globe' }, { name: 'Bahasa Asing', iconName: 'Languages' }] } }
-};
-const iconMap = { School, Brain, BookOpen, Youtube, Lightbulb, FileText, ArrowLeft, Loader, Sparkles, AlertTriangle, X, FlaskConical, Globe, Calculator, Dna, BarChart2, Drama, Computer, BookHeart, Landmark, Languages, HelpCircle, Atom, CheckCircle, ChevronRight, BrainCircuit, History, BookMarked, Github, Instagram, CalendarDays };
+// Endpoint Upload File
+const UPLOAD_URL = 'https://api-faa.my.id/faa/tourl';
 
-// --- API Helper & Utilities ---
-const callGeminiAPI = async (prompt, isJson = true) => {
-    console.log("[API Call] Memanggil Gemini API...");
-    if (!GEMINI_API_KEY) throw new Error("Kunci API Gemini belum diatur.");
-    // Model yang digunakan adalah gemini-1.5-flash. Anda bisa menggantinya jika perlu.
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+// Fungsi Helper untuk Upload File ke api-faa.my.id
+const uploadFile = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
 
-    const payload = {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-            // Menaikkan timeout tidak bisa dilakukan di client, ini hanya contoh konfigurasi.
-            // Batas waktu sesungguhnya diatur oleh server Google.
+    const MAX_RETRIES = 3;
+    let delay = 1000;
+
+    for (let i = 0; i < MAX_RETRIES; i++) {
+        try {
+            const response = await fetch(UPLOAD_URL, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Gagal mengunggah file: Status ${response.status}. Pesan: ${errorText.substring(0, 50)}...`);
+            }
+
+            const data = await response.json();
+            
+            if (data.status && data.file && data.file.url) {
+                return data.file.url;
+            }
+            throw new Error('Respons API tidak valid atau URL file tidak ditemukan.');
+
+        } catch (error) {
+            console.error(`Upaya unggah ${i + 1} gagal:`, error.message);
+            if (i < MAX_RETRIES - 1) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff
+            } else {
+                throw new Error("Gagal mengunggah file setelah beberapa kali percobaan.");
+            }
         }
-    };
-
-    if (isJson) {
-        payload.generationConfig.response_mime_type = "application/json";
-    }
-
-    try {
-        const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json();
-            throw new Error(`Permintaan API gagal: ${errorBody.error?.message || 'Error tidak diketahui'}`);
-        }
-
-        const result = await response.json();
-        console.log("[API Success] Respons diterima dari Gemini.");
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("Respons API tidak valid atau kosong.");
-
-        // Membersihkan markdown jika respons JSON terbungkus di dalamnya
-        const cleanedText = text.replace(/^```json\s*|```$/g, '').trim();
-        return isJson ? JSON.parse(cleanedText) : cleanedText;
-
-    } catch (error) {
-        console.error("[API Exception] Terjadi kesalahan:", error);
-        throw error;
     }
 };
 
-/**
- * Mengekstrak URL tontonan YouTube standar dari kode embed HTML.
- * Ini akan digunakan untuk tombol "Tonton di YouTube" sebagai fallback.
- * @param {string} embedCode Kode embed HTML lengkap dari Gemini.
- * @returns {string|null} URL tontonan YouTube standar (misal: "https://www.youtube.com/watch?v=VIDEO_ID") atau null jika gagal.
- */
-const getYouTubeWatchUrlFromEmbedCode = (embedCode) => {
-    if (!embedCode || typeof embedCode !== 'string') return null;
-
-    let videoId = null;
-    const srcMatch = embedCode.match(/src=["']([^"']+)["']/);
-    const url = srcMatch ? srcMatch[1] : embedCode;
-
-    // Coba ekstrak ID dari berbagai pola URL YouTube
-    const idMatch = url.match(/(?:youtube\.com\/(?:embed\/|v\/|watch\?v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-    if (idMatch) {
-        videoId = idMatch[1];
+// Fungsi Helper untuk Mendapatkan Embed URL (Contoh sederhana)
+const getEmbedUrl = (url) => {
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        const videoId = url.match(/(?:\/|v=)([\w-]{11})(?:\/|&|$)/)?.[1];
+        return videoId ? { type: 'youtube', url: `https://www.youtube.com/embed/${videoId}` } : null;
     }
-
-    if (videoId) {
-        return `https://www.youtube.com/watch?v=${videoId}`;
+    if (url.includes('tiktok.com')) {
+        return { type: 'tiktok', url: url };
+    }
+    if (url.includes('instagram.com') || url.includes('instagr.am')) {
+        return { type: 'instagram', url: url };
     }
     return null;
 };
 
+// --- Komponen Kartu Postingan ---
+const PostCard = React.memo(({ post, userId, handleLike }) => {
+    const isLiked = post.likes?.includes(userId);
+    const likeCount = post.likes?.length || 0;
+    const isImageOrVideo = ['image', 'video-upload'].includes(post.mediaType);
+    const isVideoEmbed = ['youtube', 'tiktok', 'instagram'].includes(post.mediaType);
 
-// --- App Provider ---
-const AppProvider = ({ children }) => {
-    const [screen, setScreen] = useState('levelSelection');
-    const [level, setLevel] = useState('');
-    const [track, setTrack] = useState('');
-    const [subject, setSubject] = useState(null);
-    const [learningData, setLearningData] = useState(null);
-    const [recommendations, setRecommendations] = useState([]);
-    const [bankSoal, setBankSoal] = useState([]);
-    const [history, setHistory] = useLocalStorage('bdukasi-expert-history-v5', []); // Versi baru
-    const [isLoading, setIsLoading] = useState(false);
-    const [loadingMessage, setLoadingMessage] = useState('');
-    const [error, setError] = useState(null);
-    const [modal, setModal] = useState({ type: null, data: null });
+    const renderMedia = () => {
+        if (!post.mediaUrl) return null;
 
-    const contextValue = useMemo(() => ({ level, track, subject }), [level, track, subject]);
-
-    const addHistory = useCallback((item) => setHistory(prev => [item, ...prev.filter(h => h.topic !== item.topic)].slice(0, 50)), [setHistory]);
-
-    // --- FUNGSI FETCH MATERI (DIPERBARUI) ---
-    const fetchLearningMaterial = useCallback(async (searchTopic, isFromHistory = false) => {
-        console.log(`[Fetch Materi] Memulai untuk topik: "${searchTopic}"`);
-        if (!searchTopic || !contextValue.level || !contextValue.subject) {
-             console.error("[Fetch Materi] Gagal: Konteks tidak lengkap (level/mapel belum dipilih)."); return;
-        }
-        setIsLoading(true); setLoadingMessage('AI sedang menyusun materi lengkap untukmu, mohon tunggu...'); setError(null);
-        setLearningData(null); setScreen('lesson');
-        const { level, track, subject } = contextValue;
-        if (!isFromHistory) addHistory({ topic: searchTopic, level, track, subjectName: subject.name });
-
-        // Prompt meminta kode_embed langsung, seperti yang sudah berhasil Anda tempel manual
-        const prompt = `
-        Sebagai seorang ahli materi pelajaran, tolong proses permintaan berikut:
-        "Buatkan saya ringkasan dan materi lengkap tentang '${searchTopic}' untuk siswa ${level} ${track ? `jurusan ${track}`: ''} mata pelajaran '${subject.name}'. Beserta video YouTube pembelajaran yang relevan, sertakan dalam bentuk kode embed HTML iframe lengkap."
-
-        Tolong berikan respons HANYA dalam format JSON yang valid dan bersih dengan struktur berikut:
-        {
-          "judul_video": "Judul video YouTube yang relevan",
-          "kode_embed": "<iframe width='560' height='315' src='https://www.youtube.com/embed/VIDEO_ID' title='YouTube video player' frameborder='0' allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture' allowFullScreen id='youtube-embed-UNIQUE_ID'></iframe>",
-          "ringkasan": "Ringkasan singkat dan padat mengenai topik '${searchTopic}'.",
-          "materi_lengkap": "Penjelasan materi yang komprehensif dan terstruktur dengan baik dalam format Markdown. Gunakan heading, list, dan tebal untuk keterbacaan.",
-          "latihan_soal": [
-            {
-              "question": "Pertanyaan pertama terkait materi.",
-              "options": ["A. Opsi A", "B. Opsi B", "C. Opsi C", "D. Opsi D", "E. Opsi E"],
-              "correctAnswer": "A",
-              "explanation": "Penjelasan mengapa jawaban A adalah yang benar."
+        if (isImageOrVideo) {
+            const isVideo = post.mediaUrl.match(/\.(mp4|mov|webm)$/i);
+            
+            if (isVideo) {
+                return (
+                    <video 
+                        controls 
+                        src={post.mediaUrl} 
+                        className="w-full h-auto max-h-96 object-contain rounded-md mb-3 bg-black"
+                    >
+                        Browser Anda tidak mendukung tag video.
+                    </video>
+                );
             }
-          ]
-        }
-        Pastikan kode embed YouTube valid (src mengarah ke youtube.com/embed/VIDEO_ID) dan materi lengkap ditulis dalam format Markdown.
-        `;
-
-        try {
-            const data = await callGeminiAPI(prompt);
-            // Kita akan langsung menggunakan data.kode_embed untuk dangerouslySetInnerHTML
-            // Dan ekstrak URL tontonan untuk fallback link
-            data.youtubeWatchUrl = getYouTubeWatchUrlFromEmbedCode(data.kode_embed);
-
-            setLearningData({ topic: searchTopic, ...data });
-            console.log("[Fetch Materi] Sukses, data materi diatur. Kode embed diterima:", data.kode_embed);
-            console.log("[Fetch Materi] URL Tontonan YouTube untuk fallback:", data.youtubeWatchUrl);
-        } catch (err) {
-            console.error("[Fetch Materi] Error:", err);
-            setError(`Gagal memuat materi: ${err.message}. Coba lagi nanti.`); setScreen('subjectDashboard');
-        } finally { setIsLoading(false); }
-    }, [contextValue, addHistory]);
-
-    const fetchRecommendations = useCallback(async () => {
-        console.log("[Fetch Rekomendasi] Memulai...");
-        if (!contextValue.level || !contextValue.subject) return;
-        const { level, track, subject } = contextValue;
-        const prompt = `Berikan 5 rekomendasi topik yang menarik untuk dipelajari dalam mata pelajaran "${subject.name}" untuk siswa level ${level} ${track ? `jurusan ${track}`: ''}. Jawab HANYA dalam format JSON array berisi string. Contoh: ["Topik 1", "Topik 2"]`;
-        try {
-            const recs = await callGeminiAPI(prompt); setRecommendations(Array.isArray(recs) ? recs : []);
-        } catch (err) { console.error("Gagal fetch rekomendasi:", err); setRecommendations([]); }
-    }, [contextValue]);
-
-    // --- FUNGSI FETCH BANK SOAL (DIPERBARUI) ---
-    const fetchBankSoal = useCallback(async (topic, count) => {
-        console.log(`[Fetch Bank Soal] Memulai untuk topik: "${topic}" sejumlah ${count} soal.`);
-        if (!topic || !contextValue.level || !contextValue.subject || !count) {
-             console.error("[Fetch Bank Soal] Gagal: Topik, jumlah soal, atau konteks pelajaran tidak lengkap.");
-             setError("Harap masukkan topik dan jumlah soal yang valid.");
-             return;
-        }
-        setIsLoading(true); setLoadingMessage(`AI sedang membuat ${count} soal untuk topik "${topic}"...`); setError(null);
-
-        const { level, track, subject } = contextValue;
-
-        // Prompt diperbarui untuk menerima jumlah soal
-        const prompt = `
-        Tolong proses permintaan berikut:
-        "Buatkan saya soal tentang '${topic}' berjumlah ${count} butir untuk mata pelajaran '${subject.name}' level ${level} ${track ? `jurusan ${track}` : ''}. Setiap soal harus dalam bentuk pilihan ganda (A, B, C, D, E) beserta jawaban dan penjelasan yang jelas."
-
-        Berikan respons HANYA dalam format JSON array dari objek, dengan struktur berikut:
-        [
-          {
-            "question": "Isi pertanyaan di sini.",
-            "options": ["A. Opsi jawaban A", "B. Opsi jawaban B", "C. Opsi jawaban C", "D. Opsi jawaban D", "E. Opsi jawaban E"],
-            "correctAnswer": "A",
-            "explanation": "Penjelasan detail mengapa jawaban tersebut benar dan yang lain salah."
-          }
-        ]
-        `;
-        try {
-            const soal = await callGeminiAPI(prompt);
-            setBankSoal(Array.isArray(soal) ? soal : []);
-            setScreen('bankSoal');
-        } catch(err) {
-            setError(`Gagal membuat bank soal: ${err.message}`);
-            setScreen('subjectDashboard');
-        } finally {
-            setIsLoading(false);
-        }
-    }, [contextValue]);
-
-    const fetchStudyPlan = useCallback(async (goal) => {
-        console.log(`[Fetch Rencana Belajar] Memulai untuk tujuan: "${goal}"`);
-        if (!goal || !contextValue.subject) return;
-        setModal({ type: 'loading', data: 'AI sedang membuat Rencana Belajar...' });
-        const { subject, level, track } = contextValue;
-        const prompt = `Buat rencana belajar mingguan untuk mencapai tujuan: "${goal}" dalam mata pelajaran ${subject.name} untuk siswa ${level} ${track}. Jawab HANYA dalam JSON: {"title": "Rencana Belajar: ${goal}", "plan": [{"week": 1, "focus": "...", "tasks": ["...", "..."]}]}`;
-        try { setModal({ type: 'studyPlan', data: await callGeminiAPI(prompt) });
-        } catch(err) { setModal({ type: 'error', data: err.message }); }
-    }, [contextValue]);
-
-    const value = { screen, setScreen, level, setLevel, track, setTrack, subject, setSubject, learningData, recommendations, fetchRecommendations, bankSoal, fetchBankSoal, isLoading, error, setError, history, fetchLearningMaterial, modal, setModal, fetchStudyPlan };
-
-    return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-}
-
-// --- Komponen Utama & Layout ---
-export default function App() {
-    return (
-        <AppProvider>
-            <div className="bg-gray-900 min-h-screen text-gray-200 font-sans overflow-hidden relative">
-                <div className="absolute inset-0 bg-grid-pattern opacity-10"></div>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-blue-900/20 via-transparent to-purple-900/20"></div>
-                <ScreenContainer />
-                <ModalContainer />
-            </div>
-        </AppProvider>
-    );
-}
-
-const ScreenContainer = () => {
-    const { screen, isLoading, loadingMessage } = useContext(AppContext);
-    if (isLoading) return <LoadingSpinner message={loadingMessage} />;
-    const screens = {
-        levelSelection: <LevelSelectionScreen key="level" />,
-        trackSelection: <TrackSelectionScreen key="track" />,
-        subjectSelection: <SubjectSelectionScreen key="subject" />,
-        subjectDashboard: <SubjectDashboardScreen key="dashboard" />,
-        lesson: <LearningMaterialScreen key="lesson" />,
-        bankSoal: <BankSoalScreen key="bankSoal" />,
-    };
-    return <div className="relative h-full w-full">{screens[screen]}</div>;
-};
-
-// --- Komponen UI, Ilustrasi, & Modal ---
-const DynamicIcon = ({ name, ...props }) => { const IconComponent = iconMap[name]; return IconComponent ? <IconComponent {...props} /> : <HelpCircle {...props} />; };
-const AnimatedScreen = ({ children, customKey }) => <div key={customKey} className="p-4 sm:p-8 max-w-5xl mx-auto" style={{animation: 'screenIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards'}}>{children}</div>;
-const BackButton = ({ onClick }) => <button onClick={onClick} className="flex items-center gap-2 text-blue-400 font-semibold hover:underline mb-8 absolute top-8 left-8 z-10"><ArrowLeft size={20} /> Kembali</button>;
-const InfoCard = ({ icon, title, children, className = '' }) => <div className={`bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-lg overflow-hidden ${className}`} style={{animation: 'fadeInUp 0.5s ease-out forwards'}}><div className="p-4 border-b border-gray-700 flex items-center gap-3">{icon && <div className="text-blue-400">{React.cloneElement(icon, { size: 24 })}</div>}<h2 className="text-xl font-bold text-gray-100">{title}</h2></div><div className="p-4 sm:p-6">{children}</div></div>;
-const LoadingSpinner = ({ message }) => <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900"><Loader className="w-16 h-16 text-blue-500 animate-spin" /><p className="text-xl font-semibold mt-6 text-gray-300 text-center max-w-md">{message || 'AI sedang menyusun materi...'}</p></div>;
-const ErrorMessage = ({ message }) => <div className="bg-red-900/50 border-l-4 border-red-500 text-red-300 p-4 rounded-r-lg mt-4 w-full max-w-xl mx-auto flex items-center gap-4"><AlertTriangle className="h-6 w-6 text-red-500" /><p className="font-bold">{message}</p></div>;
-const Illustration = ({ className }) => <div className={`absolute -bottom-12 -right-12 w-64 h-64 opacity-10 ${className}`}><svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><path fill="#2563EB" d="M47.8,-70.7C61.4,-62.4,71.5,-48,77.4,-32.4C83.3,-16.8,85,0.2,80.1,15.1C75.2,30,63.7,42.8,51,52.3C38.3,61.8,24.3,68.1,9.8,70.5C-4.7,73,-19.8,71.7,-33.8,66.2C-47.8,60.7,-60.6,51,-68.8,38.5C-77,26,-80.6,10.7,-79.9,-4.6C-79.2,-19.9,-74.3,-35.1,-64.7,-46.8C-55.2,-58.5,-41,-66.7,-26.9,-72C-12.8,-77.3,-6.4,-79.8,2.7,-82.2C11.8,-84.7,23.6,-87.3,34.1,-82.8C44.6,-78.3,54.2,-66.8,47.8,-70.7Z" transform="translate(100 100) scale(1.2)" /></svg></div>;
-
-const ModalContainer = () => {
-    const { modal, setModal } = useContext(AppContext);
-    if (!modal.type) return null;
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setModal({ type: null, data: null })}>
-            <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl" onClick={e => e.stopPropagation()} style={{animation: 'fadeInUp 0.3s ease-out forwards'}}>
-                {modal.type === 'loading' && <div className="p-8 flex flex-col items-center gap-4"><Loader className="animate-spin" size={48} /><span>{modal.data}</span></div>}
-                {modal.type === 'error' && <div className="p-8"><ErrorMessage message={modal.data} /></div>}
-                {modal.type === 'studyPlan' && (
-                    <div className="p-6">
-                        <h3 className="text-2xl font-bold mb-4">{modal.data?.title || "Rencana Belajar"}</h3>
-                        <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">{modal.data.plan?.map((week, i) => (<div key={i}><h4 className="font-bold text-lg text-blue-400">Minggu {week.week}: {week.focus}</h4><ul className="list-disc list-inside text-gray-300 mt-1">{week.tasks.map((task, j) => <li key={j}>{task}</li>)}</ul></div>))}</div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// --- Screen Components ---
-const LevelSelectionScreen = () => {
-    const { setScreen, setLevel } = useContext(AppContext);
-    return (
-        <AnimatedScreen customKey="level">
-            <div className="flex flex-col min-h-screen justify-center">
-                <div className="text-center pt-16 relative">
-                    <Illustration className="!w-96 !h-96 -top-24 -left-24" />
-                    <Brain className="w-24 h-24 mx-auto text-blue-400 animate-pulse" />
-                    <h1 className="text-5xl font-bold mt-4 bg-gradient-to-r from-blue-400 to-purple-400 text-transparent bg-clip-text">Bdukasi Expert</h1>
-                    <p className="text-xl text-gray-400 mt-2 mb-12">Pilih jenjang pendidikanmu untuk memulai petualangan belajar.</p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {Object.keys(curriculum).map((lvl, index) => <button key={lvl} onClick={() => { setLevel(lvl); setScreen(lvl === 'SMA' ? 'trackSelection' : 'subjectSelection'); }} className="p-8 bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl shadow-lg hover:shadow-blue-500/20 hover:border-blue-500 hover:-translate-y-2 transition-all text-2xl font-bold flex flex-col items-center justify-center gap-4 cursor-pointer" style={{...motionVariants.item, animation: `fadeInUp 0.5s ease-out ${index * 0.1 + 0.3}s forwards`}}><School size={40} /> {lvl}</button>)}
-                    </div>
-                </div>
-                <div className="mt-auto"><Footer/></div>
-            </div>
-        </AnimatedScreen>
-    );
-};
-
-const TrackSelectionScreen = () => {
-    const { setScreen, setTrack } = useContext(AppContext);
-    return (
-        <AnimatedScreen customKey="track">
-            <BackButton onClick={() => setScreen('levelSelection')} />
-            <div className="text-center pt-16">
-                <h1 className="text-4xl font-bold mb-12">Pilih Jurusan</h1>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {Object.keys(curriculum.SMA.tracks).map((trackName, index) => <button key={trackName} onClick={() => { setTrack(trackName); setScreen('subjectSelection'); }} className="p-8 bg-gray-800/50 border border-gray-700 rounded-2xl shadow-lg hover:shadow-blue-500/20 hover:border-blue-500 hover:-translate-y-2 transition-all text-2xl font-bold" style={{...motionVariants.item, animation: `fadeInUp 0.5s ease-out ${index * 0.1 + 0.3}s forwards`}}>{trackName}</button>)}
-                </div>
-            </div>
-        </AnimatedScreen>
-    );
-};
-
-const SubjectSelectionScreen = () => {
-    const { level, track, setScreen, setSubject } = useContext(AppContext);
-    const subjects = level === 'SMA' ? curriculum.SMA.tracks[track] : curriculum[level].subjects;
-    const backScreen = level === 'SMA' ? 'trackSelection' : 'levelSelection';
-
-    return (
-        <AnimatedScreen customKey="subject">
-             <BackButton onClick={() => setScreen(backScreen)} />
-            <div className="pt-16">
-                 <h1 className="text-4xl font-bold mb-12 text-center">Pilih Mata Pelajaran</h1>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                    {subjects.map((s, index) => <button key={s.name} onClick={() => { setSubject(s); setScreen('subjectDashboard'); }} className="p-4 bg-gray-800/50 border border-gray-700 rounded-xl flex flex-col items-center justify-center text-center hover:border-blue-500 hover:-translate-y-1 transition-all aspect-square shadow-lg" style={{...motionVariants.item, animation: `fadeInUp 0.5s ease-out ${index * 0.05 + 0.3}s forwards`}}><DynamicIcon name={s.iconName} size={48} className="text-blue-400" /><span className="font-semibold text-gray-200 text-sm text-center mt-3">{s.name}</span></button>)}
-                </div>
-            </div>
-        </AnimatedScreen>
-    );
-};
-
-const SubjectDashboardScreen = () => {
-    const { subject, fetchLearningMaterial, fetchRecommendations, recommendations, error, setError, history, setScreen } = useContext(AppContext);
-    const [inputValue, setInputValue] = useState('');
-    const [activeTab, setActiveTab] = useState('rekomendasi');
-
-    useEffect(() => { if (subject && recommendations.length === 0) fetchRecommendations(); }, [subject, fetchRecommendations, recommendations.length]);
-
-    if (!subject) return <div>Pilih mata pelajaran.</div>;
-
-    const filteredHistory = history.filter(h => h.subjectName === subject.name);
-
-    const handleSearchSubmit = (e) => {
-        e.preventDefault();
-        if(inputValue.trim()) {
-            setError(null);
-            fetchLearningMaterial(inputValue);
-        } else {
-            setError("Topik pencarian tidak boleh kosong.");
-        }
-    };
-
-    return (
-        <AnimatedScreen customKey="dashboard">
-            <BackButton onClick={() => setScreen('subjectSelection')} />
-            <div className="text-center pt-16"><DynamicIcon name={subject.iconName} size={80} className="text-blue-400 mx-auto mb-4" /><h1 className="text-5xl font-bold">Mata Pelajaran: {subject.name}</h1></div>
-            <div className="w-full max-w-2xl mx-auto my-12">
-                <form onSubmit={handleSearchSubmit}>
-                    <div className="relative">
-                        <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Ketik topik untuk dipelajari..." className="w-full pl-6 pr-16 py-4 text-lg bg-gray-700 border-2 border-gray-600 rounded-full focus:ring-4 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all"/>
-                        <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-transform active:scale-95"><Search className="w-6 h-6" /></button>
-                    </div>
-                     {error && <ErrorMessage message={error} />}
-                </form>
-            </div>
-            <div className="max-w-4xl mx-auto"><div className="flex justify-center border-b border-gray-700 mb-6 flex-wrap">{['rekomendasi', 'riwayat', 'bank_soal', 'rencana'].map(tab => <TabButton key={tab} icon={{rekomendasi: <Sparkles/>, riwayat: <History/>, bank_soal: <BrainCircuit/>, rencana: <CalendarDays/>}[tab]} text={{rekomendasi: "Rekomendasi", riwayat: "Riwayat", bank_soal: "Bank Soal", rencana: "Rencana Belajar"}[tab]} isActive={activeTab===tab} onClick={() => setActiveTab(tab)}/>)}</div>
-                <div style={{animation: 'fadeInUp 0.5s ease-out forwards'}}>
-                    {activeTab === 'rekomendasi' && (recommendations.length > 0 ? <div className="grid md:grid-cols-2 gap-4">{recommendations.map((rec,i)=>(<ListItem key={i} text={rec} onClick={()=>fetchLearningMaterial(rec)}/>))}</div> : <p className="text-center text-gray-500">Tidak ada rekomendasi topik saat ini.</p>)}
-                    {activeTab === 'riwayat' && (filteredHistory.length > 0 ? <div className="grid md:grid-cols-2 gap-4">{filteredHistory.map((h,i)=>(<ListItem key={i} text={h.topic} onClick={()=>fetchLearningMaterial(h.topic, true)}/>))}</div> : <p className="text-center text-gray-500">Anda belum memiliki riwayat belajar untuk mata pelajaran ini.</p>)}
-                    {activeTab === 'bank_soal' && <BankSoalGenerator />}
-                    {activeTab === 'rencana' && <StudyPlanGenerator />}
-                </div>
-            </div>
-             <Footer />
-        </AnimatedScreen>
-    );
-};
-
-const StudyPlanGenerator = () => {
-    const { fetchStudyPlan } = useContext(AppContext);
-    const [goal, setGoal] = useState('');
-    return (
-        <div className="max-w-xl mx-auto bg-gray-800/50 p-6 rounded-lg border border-gray-700">
-            <h3 className="text-xl font-bold text-center mb-4">✨ Buat Rencana Belajar Kustom</h3>
-            <p className="text-center text-gray-400 mb-4">Masukkan tujuan belajarmu, dan biarkan AI menyusun jadwal mingguan untukmu.</p>
-            <form onSubmit={e => {e.preventDefault(); if(goal.trim()) fetchStudyPlan(goal)}}>
-                <input type="text" value={goal} onChange={e => setGoal(e.target.value)} placeholder='Contoh: Menguasai turunan dalam 1 minggu' className='w-full p-3 bg-gray-700 rounded-lg border border-gray-600 mb-4' />
-                <button type="submit" disabled={!goal.trim()} className="w-full p-3 font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed">Buatkan Rencana!</button>
-            </form>
-        </div>
-    );
-};
-
-// --- KOMPONEN BANK SOAL GENERATOR (DIPERBARUI) ---
-const BankSoalGenerator = () => {
-    const { fetchBankSoal, setError } = useContext(AppContext);
-    const [topic, setTopic] = useState('');
-    const [count, setCount] = useState(5); // State untuk jumlah soal
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (!topic.trim()) {
-            setError("Topik soal tidak boleh kosong.");
-            return;
-        }
-        if (count < 1 || count > 20) {
-            setError("Jumlah soal harus antara 1 dan 20.");
-            return;
-        }
-        setError(null);
-        fetchBankSoal(topic, count);
-    };
-
-    return (
-        <div className="max-w-xl mx-auto bg-gray-800/50 p-6 rounded-lg border border-gray-700">
-            <h3 className="text-xl font-bold text-center mb-4">🎯 Bank Soal Berbasis Topik</h3>
-            <p className="text-center text-gray-400 mb-4">Masukkan topik spesifik dan jumlah soal yang diinginkan.</p>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <input
-                    type="text"
-                    value={topic}
-                    onChange={e => setTopic(e.target.value)}
-                    placeholder='Contoh: Perang Diponegoro'
-                    className='w-full p-3 bg-gray-700 rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500'
+            
+            return (
+                <img 
+                    src={post.mediaUrl} 
+                    alt={post.title} 
+                    className="w-full h-48 object-cover rounded-md mb-3"
+                    onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/600x400/ef4444/ffffff?text=Error+Loading+Image"; }}
                 />
-                <div className="flex flex-col sm:flex-row gap-4">
-                    <input
-                        type="number"
-                        value={count}
-                        onChange={e => setCount(parseInt(e.target.value, 10))}
-                        min="1"
-                        max="20" // Batasi agar tidak terlalu banyak
-                        placeholder="Jumlah Soal"
-                        className='w-full sm:w-1/3 p-3 bg-gray-700 rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500'
-                    />
-                    <button type="submit" className="w-full sm:w-2/3 p-3 font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-500">
-                        Buatkan Soal Latihan!
+            );
+        }
+
+        if (isVideoEmbed) {
+            if (post.mediaType === 'youtube' && post.mediaUrl.includes('youtube.com/embed')) {
+                return (
+                    <div className="relative pt-[56.25%] mb-3 rounded-md overflow-hidden bg-gray-900">
+                        <iframe
+                            src={post.mediaUrl}
+                            title="YouTube video player"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            className="absolute top-0 left-0 w-full h-full"
+                        ></iframe>
+                    </div>
+                );
+            }
+            return (
+                <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded-md mb-3">
+                    <p className="text-sm font-medium text-red-800 flex items-center">
+                        <Film className="w-4 h-4 mr-2" />
+                        Media Tertanam ({post.mediaType})
+                    </p>
+                    <a 
+                        href={post.mediaUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-red-500 hover:text-red-600 text-sm truncate block"
+                    >
+                        {post.mediaUrl}
+                    </a>
+                </div>
+            );
+        }
+        
+        return null;
+    };
+
+    return (
+        <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100 hover:shadow-xl transition duration-300 mb-6">
+            <div className="flex items-center mb-4">
+                <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white text-lg font-bold mr-3">{post.userName ? post.userName[0].toUpperCase() : 'U'}</div>
+                <div>
+                    <p className="font-semibold text-gray-800">@{post.userName || 'Pengguna Anonim'}</p>
+                    <p className="text-xs text-gray-500">{new Date(post.timestamp?.toDate()).toLocaleString()}</p>
+                </div>
+                <p className="ml-auto text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">ID: {post.userId.substring(0, 4)}</p>
+            </div>
+            
+            <h2 className="text-2xl font-extrabold text-gray-900 mb-2">{post.title}</h2>
+            
+            {renderMedia()}
+            
+            <p className="text-gray-600 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+            
+            <div className="flex items-center mt-4 pt-4 border-t border-gray-100">
+                <button 
+                    onClick={() => handleLike(post.id, isLiked)} 
+                    className={`flex items-center p-2 rounded-full transition duration-200 ${isLiked ? 'text-red-500 hover:bg-red-100' : 'text-gray-500 hover:text-red-500 hover:bg-gray-100'}`}
+                    aria-label={isLiked ? "Batal Suka" : "Suka"}
+                >
+                    <Heart className="w-5 h-5 fill-current" />
+                    <span className="ml-2 font-medium">{likeCount} Suka</span>
+                </button>
+                <div className="flex items-center text-gray-500 ml-4 p-2">
+                    <MessageCircle className="w-5 h-5" />
+                    <span className="ml-2">{post.commentsCount || 0} Komentar</span>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+
+// --- Komponen Modal Postingan Baru ---
+const CreatePostModal = ({ isOpen, onClose, userId, userName, addPost }) => {
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
+    const [file, setFile] = useState(null);
+    const [embedUrl, setEmbedUrl] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [mode, setMode] = useState('text'); // 'text', 'image', 'video'
+
+    const handlePost = async () => {
+        if (!title || !content || loading) {
+            setError('Judul dan Konten tidak boleh kosong.');
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+        let mediaUrl = '';
+        let mediaType = 'none';
+
+        try {
+            if (mode === 'image' && file) {
+                const fileType = file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') || file.type.startsWith('audio/') ? 'video-upload' : 'file-upload');
+                mediaUrl = await uploadFile(file);
+                mediaType = fileType;
+            } else if (mode === 'video' && embedUrl) {
+                const embedInfo = getEmbedUrl(embedUrl);
+                if (embedInfo) {
+                    mediaUrl = embedInfo.url;
+                    mediaType = embedInfo.type;
+                } else {
+                    throw new Error('URL Embed Video tidak valid atau tidak didukung (Hanya YouTube yang diutamakan).');
+                }
+            }
+
+            const newPost = {
+                userId,
+                userName,
+                title,
+                content,
+                mediaUrl: mediaUrl || null,
+                mediaType: mediaType,
+                likes: [],
+                commentsCount: 0,
+                timestamp: new Date(),
+            };
+
+            await addPost(newPost);
+            
+            // Reset state
+            setTitle('');
+            setContent('');
+            setFile(null);
+            setEmbedUrl('');
+            setMode('text');
+            onClose();
+
+        } catch (err) {
+            console.error("Gagal membuat postingan:", err);
+            setError(err.message || 'Gagal membuat postingan.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl p-6">
+                <h2 className="text-2xl font-bold text-gray-800 mb-5 border-b pb-3 flex justify-between items-center">
+                    Buat Postingan Baru
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </h2>
+                
+                {/* Mode Selector */}
+                <div className="flex space-x-2 mb-4 overflow-x-auto pb-1">
+                    <button 
+                        onClick={() => { setMode('text'); setFile(null); setEmbedUrl(''); setError(''); }}
+                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'text' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    >
+                        <Plus className="w-4 h-4 mr-1"/> Teks
+                    </button>
+                    <button 
+                        onClick={() => { setMode('image'); setEmbedUrl(''); setError(''); }}
+                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'image' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    >
+                        <Image className="w-4 h-4 mr-1"/> Gambar/Video (Upload)
+                    </button>
+                    <button 
+                        onClick={() => { setMode('video'); setFile(null); setError(''); }}
+                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'video' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    >
+                        <Film className="w-4 h-4 mr-1"/> Embed Video (YT/TT/IG)
                     </button>
                 </div>
-            </form>
+
+                {error && <p className="bg-red-100 text-red-700 p-3 rounded-md mb-4">{error}</p>}
+                
+                <input
+                    type="text"
+                    placeholder="Judul Postingan (Wajib)"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    className="w-full p-3 mb-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg font-semibold"
+                />
+
+                <textarea
+                    placeholder="Tulis konten postingan Anda di sini..."
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    rows="6"
+                    className="w-full p-3 mb-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                ></textarea>
+
+                {mode === 'image' && (
+                    <div className="mb-4 p-4 border rounded-lg bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Unggah Gambar, Video, atau Audio</label>
+                        <input
+                            type="file"
+                            onChange={(e) => setFile(e.target.files[0])}
+                            className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                        />
+                         {file && <p className="mt-2 text-sm text-gray-600">File terpilih: {file.name} ({Math.round(file.size / 1024)} KB)</p>}
+                         <p className="mt-2 text-xs text-gray-500">Mendukung .jpg, .png, .mp4, .mp3, dll. (Pastikan ukuran file kecil untuk demo)</p>
+                    </div>
+                )}
+
+                {mode === 'video' && (
+                    <div className="mb-4 p-4 border rounded-lg bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">URL Video Tertanam (YouTube, TikTok, Instagram)</label>
+                        <input
+                            type="url"
+                            placeholder="Tempel URL YouTube/TikTok/IG di sini"
+                            value={embedUrl}
+                            onChange={(e) => setEmbedUrl(e.target.value)}
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                         <p className="mt-2 text-xs text-gray-500">Hanya YouTube yang akan muncul dalam bingkai, TikTok/IG akan muncul sebagai tautan.</p>
+                    </div>
+                )}
+
+                <button
+                    onClick={handlePost}
+                    disabled={!title || !content || loading}
+                    className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-300 shadow-md flex items-center justify-center"
+                >
+                    {loading ? (
+                        <>
+                            <Loader className="w-5 h-5 animate-spin mr-2"/> Mengunggah & Memposting...
+                        </>
+                    ) : (
+                        'Publikasikan Postingan'
+                    )}
+                </button>
+            </div>
         </div>
     );
-}
+};
 
-const TabButton = ({icon, text, isActive, onClick}) => <button onClick={onClick} className={`flex items-center gap-2 px-4 py-3 sm:px-6 font-semibold border-b-2 transition-all ${isActive ? 'text-blue-400 border-blue-400' : 'text-gray-500 border-transparent hover:text-blue-400'}`}>{React.cloneElement(icon, {size: 20})} <span className="hidden sm:inline">{text}</span></button>;
-const ListItem = ({text, onClick}) => <button onClick={onClick} className="w-full text-left flex justify-between items-center p-4 bg-gray-800/50 border border-gray-700 hover:border-blue-500 rounded-lg transition-all"><span className="font-semibold">{text}</span><ChevronRight /></button>;
+// --- Komponen Utama Aplikasi ---
+const App = () => {
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [currentView, setCurrentView] = useState('Beranda'); // 'Beranda', 'Akun'
+    const [posts, setPosts] = useState([]);
+    const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [feedTab, setFeedTab] = useState('Terbaru'); // 'Terbaru', 'Untukmu'
 
-const LearningMaterialScreen = () => {
-    const { learningData, setScreen } = useContext(AppContext);
-    if (!learningData) return <div className="text-center p-8">Materi tidak ditemukan atau gagal dimuat. <button onClick={() => setScreen('subjectDashboard')} className="text-blue-500 underline">Kembali ke Dashboard</button></div>;
-    const { topic, ringkasan, materi_lengkap, judul_video, kode_embed, youtubeWatchUrl, latihan_soal } = learningData;
-
+    // 1. Inisialisasi Firebase dan Autentikasi
     useEffect(() => {
-        // Log kode_embed saat komponen ini dirender untuk debugging
-        console.log("[LearningMaterialScreen] Kode embed yang diterima:", kode_embed);
-        console.log("[LearningMaterialScreen] URL tontonan untuk fallback:", youtubeWatchUrl);
-    }, [kode_embed, youtubeWatchUrl]);
+        if (!authInstance || !dbInstance) {
+            setLoading(false);
+            return;
+        }
 
+        const handleInitialAuth = async () => {
+            try {
+                // Reintroduce Canvas initial sign-in logic.
+                if (initialAuthToken) {
+                    await signInWithCustomToken(authInstance, initialAuthToken);
+                } else {
+                    await signInAnonymously(authInstance);
+                }
+            } catch (e) {
+                console.error("Kesalahan inisialisasi otentikasi Canvas:", e);
+            }
+        };
 
-    return (
-        <AnimatedScreen customKey="lesson">
-            <BackButton onClick={() => setScreen('subjectDashboard')} />
-            <div className="space-y-8 pt-16">
-                <h1 className="text-3xl sm:text-5xl font-bold text-center bg-gradient-to-r from-blue-400 to-purple-400 text-transparent bg-clip-text">{topic}</h1>
-                {judul_video && kode_embed ? (
-                    <InfoCard icon={<Youtube />} title={judul_video}>
-                        <div className="aspect-w-16 aspect-h-9 bg-black rounded-lg overflow-hidden shadow-lg">
-                            {/* Render iframe langsung menggunakan dangerouslySetInnerHTML */}
-                            {/* Tambahkan key unik berdasarkan kode_embed untuk memaksa React me-remount iframe */}
-                            <div
-                                key={kode_embed}
-                                dangerouslySetInnerHTML={{ __html: kode_embed }}
-                                // Pastikan iframe responsif
-                                style={{ width: '100%', height: '100%', pointerEvents: 'auto' }}
-                            />
-                        </div>
-                        {/* Tombol fallback jika video tidak bisa di-embed */}
-                        <div className="text-center mt-4">
-                            <p className="text-gray-400 text-sm mb-2">Jika video tidak dapat diputar di sini, coba tonton langsung di YouTube:</p>
-                            {youtubeWatchUrl && (
-                                <a href={youtubeWatchUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold">
-                                    <Youtube size={20} className="mr-2"/> Tonton di YouTube
-                                </a>
-                            )}
-                        </div>
-                    </InfoCard>
-                ) : (
-                    <InfoCard icon={<Youtube />} title="Video Pembelajaran">
-                        <p className="text-center text-gray-400">Maaf, video pembelajaran tidak tersedia atau tidak dapat dimuat saat ini.</p>
-                        <p className="text-center text-gray-500 text-sm mt-2">Ini mungkin disebabkan oleh video yang tidak ada, pembatasan geografis, atau masalah teknis dengan video yang diberikan oleh AI.</p>
-                        <p className="text-center text-gray-500 text-sm mt-2">Coba topik lain atau periksa kembali koneksi internet Anda.</p>
-                    </InfoCard>
-                )}
-                {ringkasan && <InfoCard icon={<Lightbulb />} title="Ringkasan"><p className="text-gray-300 leading-relaxed">{ringkasan}</p></InfoCard>}
-                {materi_lengkap && <InfoCard icon={<BookOpen />} title="Materi Lengkap"><div className="prose prose-invert max-w-none prose-p:text-gray-300 prose-li:text-gray-300 prose-headings:text-gray-100"><ReactMarkdown>{materi_lengkap}</ReactMarkdown></div></InfoCard>}
-                {latihan_soal?.length > 0 && <InfoCard icon={<BookMarked />} title="Latihan Soal"><QuizPlayer questions={latihan_soal} /></InfoCard>}
+        handleInitialAuth(); // Run initial sign-in logic
+
+        // 1a. Inisialisasi Auth State Listener
+        const unsubscribe = onAuthStateChanged(authInstance, (currentUser) => {
+            // HANYA terima pengguna yang sudah Login (Authenticated) dan BUKAN pengguna Anonim.
+            if (currentUser && !currentUser.isAnonymous) {
+                setUser(currentUser);
+            } else {
+                // Jika pengguna anonim (hasil dari inisiasi Canvas) atau belum login, 
+                // paksa ke AuthView dengan menyetel user ke null.
+                setUser(null); 
+            }
+            // Setelah cek status awal, matikan loading.
+            setLoading(false); 
+        });
+        
+        return () => unsubscribe();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // 2. Load Postingan dari Firestore (Real-time)
+    useEffect(() => {
+        if (!dbInstance || !user) {
+            setPosts([]); // Hapus postingan jika pengguna keluar
+            return;
+        }
+
+        const postsCollectionRef = collection(dbInstance, `/artifacts/${appId}/public/data/posts`);
+        const q = query(postsCollectionRef);
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedPosts = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp || new Date(), 
+            })).sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate()); // Urutkan berdasarkan terbaru
+
+            setPosts(fetchedPosts);
+        }, (error) => {
+            console.error("Error fetching posts:", error);
+        });
+
+        return () => unsubscribe();
+    }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // 3. Fungsi Autentikasi (sekarang menerima callback error, dan tidak menggunakan alert)
+    const handleAuth = async (email, password, isRegister, username, setErrorCallback) => {
+        if (!authInstance) return console.error("Firebase Auth tidak tersedia.");
+
+        setLoading(true);
+        setErrorCallback('');
+        try {
+            if (isRegister) {
+                if (!username || username.length < 3) throw new Error('Username harus minimal 3 karakter.');
+                
+                const userCredential = await createUserWithEmailAndPassword(authInstance, email, password);
+                
+                await updateProfile(userCredential.user, {
+                    displayName: username 
+                });
+                
+            } else {
+                await signInWithEmailAndPassword(authInstance, email, password);
+            }
+        } catch (error) {
+            console.error("Kesalahan Auth:", error.message);
+            // Terjemahkan pesan error umum
+            let errorMessage = 'Login/Daftar Gagal. Silakan coba lagi.';
+            
+            // Penanganan error spesifik untuk auth/operation-not-allowed
+            if (error.code === 'auth/operation-not-allowed') {
+                errorMessage = 'Autentikasi Email/Password Belum Diaktifkan. Anda harus mengaktifkan metode "Email/Password" di konsol Firebase (Authentication -> Sign-in method).';
+            } else if (error.code === 'auth/email-already-in-use') {
+                errorMessage = 'Email sudah terdaftar. Silakan Login.';
+            } else if (error.code === 'auth/invalid-email') {
+                errorMessage = 'Format email tidak valid.';
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = 'Password harus minimal 6 karakter.';
+            } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                errorMessage = 'Email atau password salah.';
+            }
+
+            setErrorCallback(errorMessage);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleLogout = async () => {
+        if (!authInstance) return;
+        try {
+            await signOut(authInstance);
+            setUser(null);
+            setCurrentView('Beranda'); 
+        } catch (error) {
+            console.error("Gagal Logout:", error);
+        }
+    };
+
+    // 4. Fungsi Database (Post, Like)
+    const addPost = async (newPost) => {
+        if (!dbInstance) return;
+        const postsCollectionRef = collection(dbInstance, `/artifacts/${appId}/public/data/posts`);
+        await addDoc(postsCollectionRef, newPost);
+    };
+
+    const handleLike = useCallback(async (postId, isLiked) => {
+        if (!dbInstance || !user) return;
+        
+        const postRef = doc(dbInstance, `/artifacts/${appId}/public/data/posts`, postId);
+        
+        try {
+            if (isLiked) {
+                await updateDoc(postRef, {
+                    likes: arrayRemove(user.uid)
+                });
+            } else {
+                await updateDoc(postRef, {
+                    likes: arrayUnion(user.uid)
+                });
+            }
+        } catch (error) {
+            console.error("Gagal memperbarui like:", error);
+        }
+    }, [user]);
+
+    // 5. Logika Filter dan Pencarian
+    const filteredPosts = useMemo(() => {
+        let result = posts.filter(post => 
+            post.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+            post.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            post.userName?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+        if (feedTab === 'Untukmu') {
+            // Algoritma "Untukmu": Acak
+            return result.sort(() => Math.random() - 0.5);
+        }
+        return result;
+    }, [posts, searchQuery, feedTab]);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <Loader className="w-8 h-8 text-indigo-500 animate-spin mr-3" />
+                <p className="text-gray-600">Memuat Aplikasi...</p>
             </div>
-             <Footer />
-        </AnimatedScreen>
-    );
-};
-
-const BankSoalScreen = () => {
-    const { bankSoal, setScreen } = useContext(AppContext);
-    return (
-        <AnimatedScreen customKey="bankSoal">
-            <BackButton onClick={() => setScreen('subjectDashboard')} />
-            <div className="pt-16"><InfoCard title="Bank Soal Latihan">{bankSoal && bankSoal.length > 0 ? <QuizPlayer questions={bankSoal} /> : <p className="text-center text-gray-400 p-4">Gagal memuat soal atau tidak ada soal tersedia untuk topik ini. Silakan coba lagi.</p>}</InfoCard></div>
-            <Footer />
-        </AnimatedScreen>
-    );
-};
-
-// --- Komponen Interaktif: QuizPlayer & Footer ---
-const QuizPlayer = ({ questions }) => {
-    const [answers, setAnswers] = useState({});
-    const [isSubmitted, setSubmitted] = useState(false);
-
-    if (!questions || !Array.isArray(questions) || questions.length === 0) {
-        return <p className="text-gray-400">Soal latihan tidak tersedia.</p>;
+        );
     }
 
-    const score = useMemo(() => {
-        if (!isSubmitted) return 0;
-        return questions.reduce((acc, q, i) => {
-            const selectedAnswer = answers[i];
-            if (!selectedAnswer) return acc;
+    // Redirect to AuthView if user is null (not logged in)
+    if (!user) {
+        return <AuthView handleAuth={handleAuth} loading={loading} />;
+    }
 
-            // Dapatkan huruf jawaban yang benar dari q.correctAnswer (misal "A")
-            const correctLetter = q.correctAnswer.trim().toUpperCase();
+    const userName = user.displayName || `User-${user.uid.substring(0, 6)}`;
+    
+    // --- Render Halaman Beranda ---
+    const HomeView = () => (
+        <div className="max-w-3xl mx-auto p-4 md:p-8">
+            <h1 className="text-3xl font-extrabold text-gray-900 mb-6">Beranda</h1>
 
-            // Dapatkan huruf dari opsi yang dipilih (misal "A" dari "A. Opsi A")
-            const selectedLetter = selectedAnswer.trim().toUpperCase().charAt(0);
+            {/* Kontrol Postingan dan Pencarian */}
+            <div className="flex flex-col md:flex-row gap-4 mb-8">
+                <button
+                    onClick={() => setIsPostModalOpen(true)}
+                    className="w-full md:w-auto flex items-center justify-center bg-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:bg-indigo-700 transition duration-300 shadow-lg shadow-indigo-200"
+                >
+                    <Plus className="w-5 h-5 mr-2" /> Buat Postingan
+                </button>
+                
+                <div className="relative w-full">
+                    <input
+                        type="text"
+                        placeholder="Cari postingan, judul, atau pengguna..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+                    />
+                    <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                </div>
+            </div>
 
-            return acc + (selectedLetter === correctLetter ? 1 : 0);
-        }, 0);
-    }, [answers, questions, isSubmitted]);
+            {/* Tab Filter Feed */}
+            <div className="flex border-b border-gray-200 mb-8">
+                {['Terbaru', 'Untukmu'].map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => setFeedTab(tab)}
+                        className={`px-4 py-2 text-lg font-medium transition duration-200 ${
+                            feedTab === tab 
+                                ? 'text-indigo-600 border-b-2 border-indigo-600' 
+                                : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        {tab}
+                    </button>
+                ))}
+            </div>
+
+            {/* Daftar Postingan */}
+            <div className="space-y-6">
+                {filteredPosts.length > 0 ? (
+                    filteredPosts.map(post => (
+                        <PostCard 
+                            key={post.id} 
+                            post={post} 
+                            userId={user.uid} 
+                            handleLike={handleLike} 
+                        />
+                    ))
+                ) : (
+                    <div className="text-center p-10 bg-gray-100 rounded-xl">
+                        <p className="text-gray-600">
+                            {searchQuery ? `Tidak ada postingan yang cocok dengan "${searchQuery}".` : 'Belum ada postingan. Ayo mulai buat yang pertama!'}
+                        </p>
+                    </div>
+                )}
+            </div>
+            
+            <CreatePostModal 
+                isOpen={isPostModalOpen}
+                onClose={() => setIsPostModalOpen(false)}
+                userId={user.uid}
+                userName={userName}
+                addPost={addPost}
+            />
+        </div>
+    );
+
+    // --- Render Halaman Akun ---
+    const ProfileView = () => (
+        <div className="max-w-xl mx-auto p-4 md:p-8 pt-10">
+            <div className="bg-white p-8 rounded-xl shadow-2xl border border-gray-100">
+                <div className="flex flex-col items-center">
+                    <div className="w-24 h-24 bg-indigo-500 rounded-full flex items-center justify-center text-white text-4xl font-extrabold mb-4 border-4 border-indigo-100">
+                        {userName[0].toUpperCase()}
+                    </div>
+                    <h2 className="text-3xl font-bold text-gray-900 mb-2">@{userName}</h2>
+                    <p className="text-gray-500 mb-6">ID Pengguna: <span className="font-mono text-sm bg-gray-100 px-2 py-0.5 rounded-md">{user.uid}</span></p>
+
+                    <div className="w-full space-y-3">
+                        <div className="bg-indigo-50 p-4 rounded-lg flex justify-between items-center">
+                            <span className="font-medium text-indigo-700">Email</span>
+                            <span className="text-indigo-900">{user.email || 'Tidak Tersedia'}</span>
+                        </div>
+                        <div className="bg-indigo-50 p-4 rounded-lg flex justify-between items-center">
+                            <span className="font-medium text-indigo-700">Jumlah Postingan</span>
+                            <span className="text-indigo-900 font-bold">{posts.filter(p => p.userId === user.uid).length}</span>
+                        </div>
+                    </div>
+                    
+                    <button
+                        onClick={handleLogout}
+                        className="mt-8 w-full flex items-center justify-center bg-red-600 text-white font-semibold py-3 px-6 rounded-xl hover:bg-red-700 transition duration-300 shadow-md shadow-red-200"
+                    >
+                        <LogOut className="w-5 h-5 mr-2" /> Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+    
+    // --- Render Aplikasi dengan Navigasi ---
+    return (
+        <div className="min-h-screen bg-gray-50 flex flex-col">
+            {/* Header / Navigasi */}
+            <header className="bg-white shadow-lg sticky top-0 z-40">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                    <h1 className="text-2xl font-extrabold text-indigo-600">
+                        <span className="text-indigo-800">FAA</span> Sosial
+                    </h1>
+                    
+                    <nav className="flex items-center space-x-6">
+                        <button 
+                            onClick={() => setCurrentView('Beranda')} 
+                            className={`flex items-center text-sm font-semibold transition duration-200 ${currentView === 'Beranda' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
+                        >
+                            <ChevronRight className="w-4 h-4 mr-1"/> Beranda
+                        </button>
+                        <button 
+                            onClick={() => setCurrentView('Akun')} 
+                            className={`flex items-center text-sm font-semibold transition duration-200 ${currentView === 'Akun' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
+                        >
+                            <User className="w-4 h-4 mr-1"/> Akun
+                        </button>
+                        <button
+                            onClick={handleLogout}
+                            className="text-red-500 hover:text-red-700 flex items-center text-sm font-semibold"
+                        >
+                            <LogOut className="w-4 h-4" />
+                        </button>
+                    </nav>
+                </div>
+            </header>
+
+            {/* Konten Utama */}
+            <main className="flex-grow pb-12">
+                {currentView === 'Beranda' && <HomeView />}
+                {currentView === 'Akun' && <ProfileView />}
+            </main>
+            
+            {/* Tombol Postingan Cepat untuk Mobile */}
+            <button
+                onClick={() => setIsPostModalOpen(true)}
+                className="fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-2xl hover:bg-indigo-700 transition duration-300 md:hidden z-50"
+                aria-label="Buat Postingan Baru"
+            >
+                <Plus className="w-6 h-6" />
+            </button>
+        </div>
+    );
+};
+
+// --- Komponen View Autentikasi (Login/Register) ---
+const AuthView = ({ handleAuth, loading }) => {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [username, setUsername] = useState('');
+    const [isRegister, setIsRegister] = useState(false);
+    const [authError, setAuthError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setAuthError('');
+
+        if (isRegister && username.length < 3) {
+            setAuthError('Username harus minimal 3 karakter.');
+            return;
+        }
+
+        if (password.length < 6) {
+            setAuthError('Password harus minimal 6 karakter.');
+            return;
+        }
+
+        // Panggil handleAuth dari App, dan gunakan setAuthError sebagai callback
+        await handleAuth(email, password, isRegister, username, setAuthError);
+    };
 
     return (
-        <div className="space-y-8">
-            {isSubmitted && <div className="text-center p-4 rounded-lg bg-blue-900/50 border border-blue-700"><h3 className="text-2xl font-bold">Skor Kamu: {Math.round((score / questions.length) * 100)}%</h3><p>Benar {score} dari {questions.length} pertanyaan.</p></div>}
-            {questions.map((q, qIndex) => (
-                <div key={qIndex}>
-                    <p className="font-semibold text-lg mb-3">{qIndex + 1}. {q.question}</p>
-                    <div className="space-y-2">{q.options?.map((opt, oIndex) => {
-                        const isSelected = answers[qIndex] === opt;
-                        // Dapatkan huruf jawaban yang benar dari q.correctAnswer (misal "A")
-                        const correctLetter = q.correctAnswer.trim().toUpperCase();
-                        // Dapatkan huruf dari opsi saat ini (misal "A" dari "A. Opsi A")
-                        const optionLetter = opt.trim().toUpperCase().charAt(0);
+        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+            <div className="bg-white p-8 md:p-10 rounded-xl shadow-2xl w-full max-w-md border border-gray-100">
+                <h1 className="text-3xl font-extrabold text-indigo-600 text-center mb-2">FAA Sosial</h1>
+                <h2 className="text-xl font-bold text-gray-800 text-center mb-8">
+                    {isRegister ? 'Daftar Akun Baru' : 'Login ke Akun Anda'}
+                </h2>
 
-                        const isCorrectOption = optionLetter === correctLetter;
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    {authError && <p className="bg-red-100 text-red-700 p-3 rounded-md text-sm">{authError}</p>}
 
-                        let stateClass = "border-gray-600 hover:border-blue-500 hover:bg-gray-700";
-                        if (isSubmitted) {
-                            if (isCorrectOption) stateClass = "bg-green-800/60 border-green-500 text-white";
-                            else if (isSelected && !isCorrectOption) stateClass = "bg-red-800/60 border-red-500 text-white";
-                            else stateClass = "border-gray-700 text-gray-400"
-                        } else if (isSelected) {
-                            stateClass = "border-blue-500 bg-blue-900/50";
-                        }
-                        return <button key={oIndex} onClick={() => !isSubmitted && setAnswers(p => ({ ...p, [qIndex]: opt }))} disabled={isSubmitted} className={`w-full text-left p-3 rounded-lg border-2 transition-all duration-200 ${stateClass} disabled:cursor-not-allowed`}>{opt}</button>})}
-                    </div>
-                    {isSubmitted && q.explanation && (
-                        <div className="mt-4 p-4 bg-gray-700/50 rounded-lg text-sm">
-                            <p className="font-bold text-gray-200 flex items-center gap-2">
-                                <CheckCircle size={16}/> Penjelasan:
-                            </p>
-                            <p className="text-gray-300 mt-2 pl-1">{q.explanation}</p>
-                            {/* Menampilkan jawaban yang benar secara eksplisit */}
-                            <p className="text-gray-300 mt-2 pl-1">
-                                Jawaban yang benar adalah: <span className="font-bold text-green-400">{q.correctAnswer}</span>
-                            </p>
+                    {isRegister && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="username">Username</label>
+                            <input
+                                id="username"
+                                type="text"
+                                placeholder="Pilih username unik Anda"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                                required
+                            />
                         </div>
                     )}
-                </div>
-            ))}
-            <div className="pt-4">
-            {!isSubmitted ? <button onClick={() => setSubmitted(true)} disabled={Object.keys(answers).length !== questions.length} className="w-full p-4 mt-6 font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all">Kumpulkan Jawaban</button> : <button onClick={() => { setSubmitted(false); setAnswers({}); }} className="w-full p-4 mt-6 font-bold text-white bg-gray-600 rounded-lg hover:bg-gray-700 transition-all">Coba Lagi</button>}
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="email">Email</label>
+                        <input
+                            id="email"
+                            type="email"
+                            placeholder="email@contoh.com"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="password">Password</label>
+                        <input
+                            id="password"
+                            type="password"
+                            placeholder="minimal 6 karakter"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                            required
+                        />
+                    </div>
+                    
+                    <button
+                        type="submit"
+                        disabled={loading || (isRegister && !username) || !email || !password}
+                        className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-300 shadow-md flex items-center justify-center"
+                    >
+                        {loading ? (
+                            <>
+                                <Loader className="w-5 h-5 animate-spin mr-2"/> Memproses...
+                            </>
+                        ) : (
+                            isRegister ? 'Daftar' : 'Login'
+                        )}
+                    </button>
+                </form>
+
+                <p className="mt-6 text-center text-sm text-gray-600">
+                    {isRegister ? 'Sudah punya akun?' : 'Belum punya akun?'}
+                    <button 
+                        onClick={() => { setIsRegister(!isRegister); setAuthError(''); }} 
+                        className="text-indigo-600 font-semibold ml-1 hover:text-indigo-800"
+                        disabled={loading}
+                    >
+                        {isRegister ? 'Login' : 'Daftar sekarang'}
+                    </button>
+                </p>
             </div>
         </div>
     );
 };
 
-const Footer = () => (
-    <footer className="w-full text-center p-8 mt-16 text-gray-500 text-sm">
-        <p className="font-semibold text-lg text-gray-400 mb-2">Sebuah Karya dari</p>
-        <p className="text-xl font-bold text-white">M. Irham Andika Putra</p>
-        <p>Siswa SMPN 3 Mentok, Bangka Barat</p>
-        <p>Owner Bgune - Digital & YouTuber "Pernah Mikir?"</p>
-        <div className="flex justify-center gap-4 mt-4">
-            <a href="https://www.youtube.com/@PernahMikirChannel" target="_blank" rel="noopener noreferrer" className="hover:text-white"><Youtube/></a>
-            <a href="https://github.com/irhamp" target="_blank" rel="noopener noreferrer" className="hover:text-white"><Github/>/></a>
-            <a href="https://www.instagram.com/irham_putra07" target="_blank" rel="noopener noreferrer" className="hover:text-white"><Instagram/></a>
-        </div>
-        <p className="mt-6">Dibuat dengan <Sparkles className="inline h-4 w-4 text-yellow-400"/> dan Teknologi AI</p>
-    </footer>
-);
-
-// --- Inject CSS for animations ---
-const styleSheet = document.createElement("style");
-styleSheet.type = "text/css";
-styleSheet.innerText = `
-@keyframes screenIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
-@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-.bg-grid-pattern { background-image: linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px); background-size: 2rem 2rem; }
-.prose-invert h1, .prose-invert h2, .prose-invert h3, .prose-invert h4, .prose-invert strong { color: #f3f4f6; }
-.prose-invert a { color: #60a5fa; }
-.aspect-w-16 { position: relative; padding-bottom: 56.25%; /* 9 / 16 = 0.5625 */ }
-.aspect-h-9 { height: 0; /* Untuk kombinasi aspect-w-16 dan padding-bottom */ }
-.aspect-w-16 > div { /* Target the div containing the iframe */
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex; /* Untuk memastikan iframe mengisi ruang */
-    justify-content: center;
-    align-items: center;
-}
-.aspect-w-16 > div > iframe { /* Target the iframe itself */
-    width: 100%;
-    height: 100%;
-    border: none; /* Hapus border default iframe */
-}
-`;
-document.head.appendChild(styleSheet);
+export default App;
