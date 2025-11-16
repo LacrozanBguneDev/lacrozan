@@ -1,832 +1,1008 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { 
-    getAuth, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword, 
-    signOut, 
-    onAuthStateChanged,
-    updateProfile,
-    signInWithCustomToken, 
-    signInAnonymously, // Tambahkan signInAnonymously
-} from 'firebase/auth';
-import { 
-    getFirestore, 
-    collection, 
-    query, 
-    onSnapshot, 
-    addDoc, 
-    doc, 
-    updateDoc, 
-    arrayUnion, 
-    arrayRemove,
-} from 'firebase/firestore';
-import { ChevronRight, Heart, MessageCircle, User, Plus, Search, LogOut, Loader, Film, Image } from 'lucide-react';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, collection, query, orderBy, onSnapshot, setDoc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, getDocs, deleteDoc } from 'firebase/firestore';
+import { Heart, MessageCircle, User, LogOut, Home, Send, Search, Image, Film, Trash2, Loader, LayoutList, Shuffle, X, AlertTriangle, CornerDownRight } from 'lucide-react';
+
+// --- Variabel Global Wajib dari Lingkungan Canvas ---
+const apiKey = ""; // API Key dibiarkan kosong karena akan diisi oleh Canvas
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Konfigurasi dan Inisialisasi Firebase ---
-
-// KONFIGURASI PENGGUNA BARU
-const userFirebaseConfig = {
-    apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
-    authDomain: "eduku-web.firebaseapp.com",
-    projectId: "eduku-web",
-    storageBucket: "eduku-web.firebasestorage.com",
-    messagingSenderId: "662463693471",
-    appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-    measurementId: "G-G0VWNHHVB8"
-};
-
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : JSON.stringify(userFirebaseConfig));
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-social-app-id';
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : ''; // Dapatkan token
-
-let app;
-let dbInstance;
-let authInstance;
-
+let app, auth, db;
 try {
-    app = initializeApp(firebaseConfig);
-    dbInstance = getFirestore(app);
-    authInstance = getAuth(app);
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
 } catch (error) {
-    console.error("Kesalahan inisialisasi Firebase:", error);
+  console.error("Firebase Initialization Error:", error);
 }
 
-// Endpoint Upload File
-const UPLOAD_URL = 'https://api-faa.my.id/faa/tourl';
+// --- Konstanta & Utilitas ---
+const POST_COLLECTION = `artifacts/${appId}/public/data/posts`;
+const USERS_COLLECTION = `artifacts/${appId}/public/data/users`;
 
-// Fungsi Helper untuk Upload File ke api-faa.my.id
-const uploadFile = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
+// Fungsi untuk mengunggah file ke API eksternal
+const uploadFileToService = async (file) => {
+  const url = 'https://api-faa.my.id/faa/tourl';
+  const formData = new FormData();
+  formData.append('file', file);
 
-    const MAX_RETRIES = 3;
-    let delay = 1000;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
 
-    for (let i = 0; i < MAX_RETRIES; i++) {
-        try {
-            const response = await fetch(UPLOAD_URL, {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Gagal mengunggah file: Status ${response.status}. Pesan: ${errorText.substring(0, 50)}...`);
-            }
-
-            const data = await response.json();
-            
-            if (data.status && data.file && data.file.url) {
-                return data.file.url;
-            }
-            throw new Error('Respons API tidak valid atau URL file tidak ditemukan.');
-
-        } catch (error) {
-            console.error(`Upaya unggah ${i + 1} gagal:`, error.message);
-            if (i < MAX_RETRIES - 1) {
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2; // Exponential backoff
-            } else {
-                throw new Error("Gagal mengunggah file setelah beberapa kali percobaan.");
-            }
-        }
+    if (!response.ok) {
+      throw new Error(`Gagal mengunggah file: ${response.statusText}`);
     }
+
+    const data = await response.json();
+    return data.url; // Asumsi API mengembalikan { url: "..." }
+  } catch (error) {
+    console.error("Error upload file:", error);
+    throw new Error("Gagal mengunggah file. Cek konsol untuk detail.");
+  }
 };
 
-// Fungsi Helper untuk Mendapatkan Embed URL (Contoh sederhana)
-const getEmbedUrl = (url) => {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        const videoId = url.match(/(?:\/|v=)([\w-]{11})(?:\/|&|$)/)?.[1];
-        return videoId ? { type: 'youtube', url: `https://www.youtube.com/embed/${videoId}` } : null;
+// Fungsi untuk mendeteksi jenis media (YouTube, TikTok, dll.)
+const getMediaEmbed = (url) => {
+  if (!url) return null;
+
+  // YouTube Embed
+  const ytRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const ytMatch = url.match(ytRegex);
+  if (ytMatch) {
+    return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${ytMatch[1]}` };
+  }
+
+  // TikTok Embed (Contoh sederhana, TikTok embedding lebih kompleks)
+  if (url.includes('tiktok.com/')) {
+    return { type: 'tiktok', url };
+  }
+  
+  // Instagram Embed (Contoh sederhana, IG embedding lebih kompleks)
+  if (url.includes('instagram.com/')) {
+    return { type: 'instagram', url };
+  }
+
+  // Cek apakah URL adalah gambar (asumsi berdasar ekstensi)
+  const imageRegex = /\.(jpg|jpeg|png|gif|webp)$/i;
+  if (url.match(imageRegex)) {
+      return { type: 'image', url };
+  }
+
+  return { type: 'link', url };
+};
+
+// Fungsi utilitas untuk format waktu
+const formatTimestamp = (timestamp) => {
+  if (!timestamp || !timestamp.toDate) return 'Baru saja';
+  const date = timestamp.toDate();
+  return date.toLocaleString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+
+const PostCard = ({ post, currentUserId, userProfiles, onLike, onComment, onDelete }) => {
+  const [showComments, setShowComments] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isLiked = post.likes.includes(currentUserId);
+  const authorProfile = userProfiles[post.userId] || { displayName: 'Pengguna Tidak Dikenal', email: 'anon@example.com' };
+  const mediaEmbed = getMediaEmbed(post.mediaUrl);
+  const isOwner = post.userId === currentUserId;
+
+  const handleCommentSubmit = (e) => {
+    e.preventDefault();
+    if (newComment.trim() && currentUserId) {
+      onComment(post.id, newComment.trim());
+      setNewComment('');
     }
-    if (url.includes('tiktok.com')) {
-        return { type: 'tiktok', url: url };
+  };
+
+  const handleDelete = async () => {
+      if (window.confirm("Apakah Anda yakin ingin menghapus postingan ini?")) {
+          setIsDeleting(true);
+          try {
+              await onDelete(post.id);
+          } catch (error) {
+              console.error("Gagal menghapus post:", error);
+              // Handle error visually if needed
+          } finally {
+              setIsDeleting(false);
+          }
+      }
+  };
+
+  const renderMedia = () => {
+    if (!mediaEmbed) return null;
+
+    if (mediaEmbed.type === 'image') {
+      return (
+        <img
+          src={mediaEmbed.url}
+          alt="Post media"
+          className="w-full h-auto max-h-96 object-contain rounded-lg mt-3 bg-gray-100"
+          onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/600x400/CCCCCC/333333?text=Gagal+Muat+Gambar"; }}
+        />
+      );
     }
-    if (url.includes('instagram.com') || url.includes('instagr.am')) {
-        return { type: 'instagram', url: url };
+    
+    // Untuk YouTube, gunakan iframe
+    if (mediaEmbed.type === 'youtube') {
+      return (
+        <div className="relative pt-[56.25%] mt-3 rounded-lg overflow-hidden shadow-lg"> {/* 16:9 Aspect Ratio */}
+          <iframe
+            className="absolute top-0 left-0 w-full h-full"
+            src={mediaEmbed.embedUrl}
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            title="Embedded YouTube Video"
+          ></iframe>
+        </div>
+      );
     }
+
+    // Untuk link lainnya (TikTok/IG/lainnya), tampilkan sebagai tautan
+    if (mediaEmbed.type === 'link' || mediaEmbed.type === 'tiktok' || mediaEmbed.type === 'instagram') {
+        return (
+            <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm truncate">
+                <p className="font-semibold text-indigo-700">Link Tertanam:</p>
+                <a href={mediaEmbed.url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline break-words">
+                    {mediaEmbed.url}
+                </a>
+                <p className='text-xs text-indigo-500'>*Tidak semua platform mengizinkan embed langsung, klik untuk melihat.</p>
+            </div>
+        );
+    }
+
     return null;
+  };
+
+  return (
+    <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100 transition duration-300 hover:shadow-xl mb-6">
+      <div className="flex justify-between items-start mb-3">
+        <div className="flex items-center">
+          <div className="w-10 h-10 bg-indigo-200 rounded-full flex items-center justify-center text-indigo-700 font-bold mr-3">
+            <User size={20} />
+          </div>
+          <div>
+            <p className="font-bold text-gray-800">{authorProfile.displayName || authorProfile.email.split('@')[0]}</p>
+            <p className="text-xs text-gray-500">{formatTimestamp(post.timestamp)}</p>
+          </div>
+        </div>
+        {isOwner && (
+            <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-50 disabled:opacity-50"
+                title="Hapus Postingan"
+            >
+                {isDeleting ? <Loader size={18} className='animate-spin' /> : <Trash2 size={18} />}
+            </button>
+        )}
+      </div>
+
+      {/* Judul dan Konten */}
+      <h2 className="text-2xl font-extrabold text-gray-900 mb-2">{post.title}</h2>
+      <div
+        className="text-gray-700 leading-relaxed text-base"
+        dangerouslySetInnerHTML={{ __html: post.content }}
+      />
+      
+      {/* Media */}
+      {renderMedia()}
+
+      {/* Aksi */}
+      <div className="flex items-center space-x-5 mt-4 pt-4 border-t border-gray-100">
+        <button
+          onClick={() => onLike(post.id, isLiked)}
+          className={`flex items-center space-x-1 p-2 rounded-full transition duration-150 ${
+            isLiked ? 'text-red-500 bg-red-50 hover:bg-red-100' : 'text-gray-500 hover:text-red-500 hover:bg-gray-50'
+          }`}
+        >
+          <Heart size={20} fill={isLiked ? 'currentColor' : 'none'} />
+          <span className="font-semibold">{post.likes.length} Suka</span>
+        </button>
+
+        <button
+          onClick={() => setShowComments(!showComments)}
+          className="flex items-center space-x-1 text-gray-500 hover:text-indigo-600 p-2 rounded-full hover:bg-indigo-50 transition duration-150"
+        >
+          <MessageCircle size={20} />
+          <span className="font-semibold">{post.comments.length} Komentar</span>
+        </button>
+      </div>
+
+      {/* Komentar */}
+      {showComments && (
+        <div className="mt-4 border-t border-gray-100 pt-4">
+          <h4 className="font-bold text-gray-700 mb-3">Komentar ({post.comments.length})</h4>
+          
+          {/* Form Komentar */}
+          <form onSubmit={handleCommentSubmit} className="flex mb-4">
+            <input
+              type="text"
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Tulis komentar..."
+              className="flex-grow p-2 border border-gray-300 rounded-l-lg focus:ring-indigo-500 focus:border-indigo-500"
+              required
+            />
+            <button
+              type="submit"
+              className="bg-indigo-600 text-white p-2 rounded-r-lg hover:bg-indigo-700 transition duration-150 flex items-center"
+            >
+              <CornerDownRight size={20} />
+            </button>
+          </form>
+
+          {/* Daftar Komentar */}
+          <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+            {post.comments.slice().reverse().map((comment, index) => { // Tampilkan komentar terbaru di atas
+              const commenterProfile = userProfiles[comment.userId] || { displayName: 'Anon' };
+              return (
+                <div key={index} className="flex text-sm">
+                  <span className="font-bold text-indigo-600 mr-2">{commenterProfile.displayName || comment.userId.substring(0, 5)}:</span>
+                  <p className="text-gray-700 break-words">{comment.text}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
-// --- Komponen Kartu Postingan ---
-const PostCard = React.memo(({ post, userId, handleLike }) => {
-    const isLiked = post.likes?.includes(userId);
-    const likeCount = post.likes?.length || 0;
-    const isImageOrVideo = ['image', 'video-upload'].includes(post.mediaType);
-    const isVideoEmbed = ['youtube', 'tiktok', 'instagram'].includes(post.mediaType);
+const PostModal = ({ onClose, currentUserId, userName }) => {
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [mediaUrl, setMediaUrl] = useState('');
+  const [fileToUpload, setFileToUpload] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const contentRef = React.useRef(null);
 
-    const renderMedia = () => {
-        if (!post.mediaUrl) return null;
+  const applyStyle = (style) => {
+    document.execCommand(style, false, null);
+    contentRef.current.focus();
+  };
 
-        if (isImageOrVideo) {
-            const isVideo = post.mediaUrl.match(/\.(mp4|mov|webm)$/i);
-            
-            if (isVideo) {
-                return (
-                    <video 
-                        controls 
-                        src={post.mediaUrl} 
-                        className="w-full h-auto max-h-96 object-contain rounded-md mb-3 bg-black"
-                    >
-                        Browser Anda tidak mendukung tag video.
-                    </video>
-                );
-            }
-            
-            return (
-                <img 
-                    src={post.mediaUrl} 
-                    alt={post.title} 
-                    className="w-full h-48 object-cover rounded-md mb-3"
-                    onError={(e) => { e.target.onerror = null; e.target.src = "https://placehold.co/600x400/ef4444/ffffff?text=Error+Loading+Image"; }}
-                />
-            );
-        }
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFileToUpload(file);
+      setMediaUrl(''); // Hapus URL jika file dipilih
+    }
+  };
 
-        if (isVideoEmbed) {
-            if (post.mediaType === 'youtube' && post.mediaUrl.includes('youtube.com/embed')) {
-                return (
-                    <div className="relative pt-[56.25%] mb-3 rounded-md overflow-hidden bg-gray-900">
-                        <iframe
-                            src={post.mediaUrl}
-                            title="YouTube video player"
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                            className="absolute top-0 left-0 w-full h-full"
-                        ></iframe>
-                    </div>
-                );
-            }
-            return (
-                <div className="p-3 bg-red-50 border-l-4 border-red-500 rounded-md mb-3">
-                    <p className="text-sm font-medium text-red-800 flex items-center">
-                        <Film className="w-4 h-4 mr-2" />
-                        Media Tertanam ({post.mediaType})
-                    </p>
-                    <a 
-                        href={post.mediaUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="text-red-500 hover:text-red-600 text-sm truncate block"
-                    >
-                        {post.mediaUrl}
-                    </a>
-                </div>
-            );
-        }
-        
-        return null;
-    };
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
 
-    return (
-        <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100 hover:shadow-xl transition duration-300 mb-6">
-            <div className="flex items-center mb-4">
-                <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white text-lg font-bold mr-3">{post.userName ? post.userName[0].toUpperCase() : 'U'}</div>
-                <div>
-                    <p className="font-semibold text-gray-800">@{post.userName || 'Pengguna Anonim'}</p>
-                    <p className="text-xs text-gray-500">{new Date(post.timestamp?.toDate()).toLocaleString()}</p>
-                </div>
-                <p className="ml-auto text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">ID: {post.userId.substring(0, 4)}</p>
+    if (!title.trim() || !content.trim()) {
+      setError('Judul dan konten tidak boleh kosong.');
+      return;
+    }
+
+    setIsLoading(true);
+    let finalMediaUrl = mediaUrl.trim();
+
+    try {
+      if (fileToUpload) {
+        finalMediaUrl = await uploadFileToService(fileToUpload);
+      }
+
+      const newPost = {
+        title: title.trim(),
+        content: contentRef.current.innerHTML.trim(), // Ambil HTML dari contenteditable
+        mediaUrl: finalMediaUrl,
+        userId: currentUserId,
+        userName: userName,
+        timestamp: serverTimestamp(),
+        likes: [],
+        comments: [],
+      };
+
+      const docRef = doc(collection(db, POST_COLLECTION));
+      await setDoc(docRef, newPost);
+      
+      onClose();
+    } catch (err) {
+      console.error("Gagal membuat postingan:", err);
+      setError(`Gagal memposting: ${err.message || 'Kesalahan jaringan/API.'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const richTextToolbar = (
+    <div className="mb-3 p-2 bg-gray-50 rounded-lg flex space-x-2 border border-gray-200">
+      <button type="button" onClick={() => applyStyle('bold')} className="p-1 text-sm font-bold bg-white rounded shadow hover:bg-gray-100 border">B</button>
+      <button type="button" onClick={() => applyStyle('italic')} className="p-1 text-sm italic bg-white rounded shadow hover:bg-gray-100 border">I</button>
+      <button type="button" onClick={() => applyStyle('underline')} className="p-1 text-sm underline bg-white rounded shadow hover:bg-gray-100 border">U</button>
+      <button type="button" onClick={() => applyStyle('insertUnorderedList')} className="p-1 text-sm bg-white rounded shadow hover:bg-gray-100 border">List</button>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div 
+        className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-3xl font-extrabold text-indigo-700 mb-6 border-b pb-2">Buat Postingan Baru</h2>
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 p-2 rounded-full bg-gray-100 hover:bg-gray-200">
+          <X size={24} />
+        </button>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative flex items-center space-x-2">
+              <AlertTriangle size={20} />
+              <span>{error}</span>
             </div>
+          )}
+
+          {/* Judul */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Judul Postingan</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg font-semibold"
+              placeholder="Masukkan judul yang menarik..."
+              required
+            />
+          </div>
+
+          {/* Konten (Rich Text) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Konten</label>
+            {richTextToolbar}
+            <div
+              ref={contentRef}
+              contentEditable
+              onInput={(e) => setContent(e.currentTarget.innerHTML)}
+              className="w-full p-3 border border-gray-300 rounded-lg min-h-[150px] focus:ring-indigo-500 focus:border-indigo-500 bg-white shadow-inner"
+              style={{ outline: 'none' }}
+              placeholder="Tulis konten Anda di sini..."
+            ></div>
+          </div>
+
+          {/* Media */}
+          <div className='p-4 border border-indigo-200 rounded-lg space-y-3 bg-indigo-50'>
+            <label className="block text-sm font-medium text-indigo-700">Media (Gambar/Video/Link Embed)</label>
             
-            <h2 className="text-2xl font-extrabold text-gray-900 mb-2">{post.title}</h2>
-            
-            {renderMedia()}
-            
-            <p className="text-gray-600 leading-relaxed whitespace-pre-wrap">{post.content}</p>
-            
-            <div className="flex items-center mt-4 pt-4 border-t border-gray-100">
-                <button 
-                    onClick={() => handleLike(post.id, isLiked)} 
-                    className={`flex items-center p-2 rounded-full transition duration-200 ${isLiked ? 'text-red-500 hover:bg-red-100' : 'text-gray-500 hover:text-red-500 hover:bg-gray-100'}`}
-                    aria-label={isLiked ? "Batal Suka" : "Suka"}
-                >
-                    <Heart className="w-5 h-5 fill-current" />
-                    <span className="ml-2 font-medium">{likeCount} Suka</span>
-                </button>
-                <div className="flex items-center text-gray-500 ml-4 p-2">
-                    <MessageCircle className="w-5 h-5" />
-                    <span className="ml-2">{post.commentsCount || 0} Komentar</span>
-                </div>
+            {/* Upload File */}
+            <div className='flex items-center space-x-3'>
+                <Image size={20} className='text-indigo-500' />
+                <label className="block text-sm font-medium text-gray-700 cursor-pointer p-2 bg-white rounded-lg border hover:bg-gray-100 transition">
+                    {fileToUpload ? `File Terpilih: ${fileToUpload.name}` : 'Pilih File (Gambar/Video) dari Komputer'}
+                    <input type="file" className="hidden" onChange={handleFileChange} accept="image/*,video/*" />
+                </label>
             </div>
-        </div>
-    );
-});
 
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+                <div className='w-full border-t border-indigo-300'></div>
+                ATAU
+                <div className='w-full border-t border-indigo-300'></div>
+            </div>
 
-// --- Komponen Modal Postingan Baru ---
-const CreatePostModal = ({ isOpen, onClose, userId, userName, addPost }) => {
-    const [title, setTitle] = useState('');
-    const [content, setContent] = useState('');
-    const [file, setFile] = useState(null);
-    const [embedUrl, setEmbedUrl] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [mode, setMode] = useState('text'); // 'text', 'image', 'video'
-
-    const handlePost = async () => {
-        if (!title || !content || loading) {
-            setError('Judul dan Konten tidak boleh kosong.');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-        let mediaUrl = '';
-        let mediaType = 'none';
-
-        try {
-            if (mode === 'image' && file) {
-                const fileType = file.type.startsWith('image/') ? 'image' : (file.type.startsWith('video/') || file.type.startsWith('audio/') ? 'video-upload' : 'file-upload');
-                mediaUrl = await uploadFile(file);
-                mediaType = fileType;
-            } else if (mode === 'video' && embedUrl) {
-                const embedInfo = getEmbedUrl(embedUrl);
-                if (embedInfo) {
-                    mediaUrl = embedInfo.url;
-                    mediaType = embedInfo.type;
-                } else {
-                    throw new Error('URL Embed Video tidak valid atau tidak didukung (Hanya YouTube yang diutamakan).');
-                }
-            }
-
-            const newPost = {
-                userId,
-                userName,
-                title,
-                content,
-                mediaUrl: mediaUrl || null,
-                mediaType: mediaType,
-                likes: [],
-                commentsCount: 0,
-                timestamp: new Date(),
-            };
-
-            await addPost(newPost);
-            
-            // Reset state
-            setTitle('');
-            setContent('');
-            setFile(null);
-            setEmbedUrl('');
-            setMode('text');
-            onClose();
-
-        } catch (err) {
-            console.error("Gagal membuat postingan:", err);
-            setError(err.message || 'Gagal membuat postingan.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl p-6">
-                <h2 className="text-2xl font-bold text-gray-800 mb-5 border-b pb-3 flex justify-between items-center">
-                    Buat Postingan Baru
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </h2>
-                
-                {/* Mode Selector */}
-                <div className="flex space-x-2 mb-4 overflow-x-auto pb-1">
-                    <button 
-                        onClick={() => { setMode('text'); setFile(null); setEmbedUrl(''); setError(''); }}
-                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'text' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                    >
-                        <Plus className="w-4 h-4 mr-1"/> Teks
-                    </button>
-                    <button 
-                        onClick={() => { setMode('image'); setEmbedUrl(''); setError(''); }}
-                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'image' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                    >
-                        <Image className="w-4 h-4 mr-1"/> Gambar/Video (Upload)
-                    </button>
-                    <button 
-                        onClick={() => { setMode('video'); setFile(null); setError(''); }}
-                        className={`shrink-0 px-4 py-2 rounded-full flex items-center transition duration-200 ${mode === 'video' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                    >
-                        <Film className="w-4 h-4 mr-1"/> Embed Video (YT/TT/IG)
-                    </button>
-                </div>
-
-                {error && <p className="bg-red-100 text-red-700 p-3 rounded-md mb-4">{error}</p>}
-                
+            {/* Link Embed */}
+            <div className='flex items-center space-x-3'>
+                <Film size={20} className='text-indigo-500' />
                 <input
-                    type="text"
-                    placeholder="Judul Postingan (Wajib)"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="w-full p-3 mb-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg font-semibold"
+                    type="url"
+                    value={mediaUrl}
+                    onChange={(e) => {
+                        setMediaUrl(e.target.value);
+                        setFileToUpload(null); // Hapus file jika URL dimasukkan
+                    }}
+                    className="flex-grow p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Link Embed (YouTube/TikTok/IG/Gambar URL)..."
                 />
-
-                <textarea
-                    placeholder="Tulis konten postingan Anda di sini..."
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    rows="6"
-                    className="w-full p-3 mb-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-                ></textarea>
-
-                {mode === 'image' && (
-                    <div className="mb-4 p-4 border rounded-lg bg-gray-50">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Unggah Gambar, Video, atau Audio</label>
-                        <input
-                            type="file"
-                            onChange={(e) => setFile(e.target.files[0])}
-                            className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        />
-                         {file && <p className="mt-2 text-sm text-gray-600">File terpilih: {file.name} ({Math.round(file.size / 1024)} KB)</p>}
-                         <p className="mt-2 text-xs text-gray-500">Mendukung .jpg, .png, .mp4, .mp3, dll. (Pastikan ukuran file kecil untuk demo)</p>
-                    </div>
-                )}
-
-                {mode === 'video' && (
-                    <div className="mb-4 p-4 border rounded-lg bg-gray-50">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">URL Video Tertanam (YouTube, TikTok, Instagram)</label>
-                        <input
-                            type="url"
-                            placeholder="Tempel URL YouTube/TikTok/IG di sini"
-                            value={embedUrl}
-                            onChange={(e) => setEmbedUrl(e.target.value)}
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                         <p className="mt-2 text-xs text-gray-500">Hanya YouTube yang akan muncul dalam bingkai, TikTok/IG akan muncul sebagai tautan.</p>
-                    </div>
-                )}
-
-                <button
-                    onClick={handlePost}
-                    disabled={!title || !content || loading}
-                    className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-300 shadow-md flex items-center justify-center"
-                >
-                    {loading ? (
-                        <>
-                            <Loader className="w-5 h-5 animate-spin mr-2"/> Mengunggah & Memposting...
-                        </>
-                    ) : (
-                        'Publikasikan Postingan'
-                    )}
-                </button>
             </div>
-        </div>
-    );
+            
+            {(fileToUpload || mediaUrl) && (
+                <p className='text-xs text-indigo-600 pt-2'>Media akan diunggah/digunakan: {fileToUpload ? fileToUpload.name : mediaUrl}</p>
+            )}
+          </div>
+
+
+          {/* Tombol Submit */}
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg hover:bg-indigo-700 transition duration-150 disabled:bg-indigo-400 flex items-center justify-center space-x-2"
+          >
+            {isLoading && <Loader size={20} className="animate-spin" />}
+            <span>{isLoading ? 'Mengunggah & Memposting...' : 'Posting Sekarang'}</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 };
+
+const AuthScreen = ({ onLoginSuccess, isReady }) => {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    if (!email || !password) {
+      setError('Email dan kata sandi harus diisi.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      if (isRegister) {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Tambahkan data pengguna ke Firestore
+        await setDoc(doc(db, USERS_COLLECTION, userCredential.user.uid), {
+          displayName: displayName || email.split('@')[0],
+          email: email,
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      onLoginSuccess();
+    } catch (err) {
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Email sudah terdaftar.');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('Email atau kata sandi salah.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Kata sandi harus minimal 6 karakter.');
+      } else {
+        setError(`Gagal ${isRegister ? 'mendaftar' : 'masuk'}. Cek email/password.`);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <Loader size={32} className="animate-spin text-indigo-600" />
+        <p className="ml-3 text-lg text-gray-600">Memuat konfigurasi...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      <div className="max-w-md w-full bg-white p-8 rounded-xl shadow-2xl border border-indigo-100">
+        <h2 className="text-3xl font-extrabold text-center text-indigo-700 mb-6">
+          {isRegister ? 'Daftar Akun Baru' : 'Masuk ke Komunitas'}
+        </h2>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+            <p className="font-bold">Error:</p>
+            <p className="text-sm">{error}</p>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="mt-1 w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="contoh@mail.com"
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">Kata Sandi</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="mt-1 w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Minimal 6 karakter"
+            />
+          </div>
+          {isRegister && (
+            <div>
+              <label htmlFor="displayname" className="block text-sm font-medium text-gray-700">Nama Tampilan (Opsional)</label>
+              <input
+                id="displayname"
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="mt-1 w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Nama Anda"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-indigo-700 transition duration-150 disabled:bg-indigo-400 flex items-center justify-center space-x-2"
+          >
+            {isLoading && <Loader size={20} className="animate-spin" />}
+            <span>{isRegister ? 'Daftar Sekarang' : 'Masuk'}</span>
+          </button>
+        </form>
+        
+        <div className="mt-6 text-center">
+          <button
+            onClick={() => setIsRegister(!isRegister)}
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            {isRegister ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProfilePage = ({ user, userProfile, onLogout }) => {
+  if (!userProfile) {
+    return (
+      <div className="p-8 text-center text-gray-600">
+        <Loader size={32} className="animate-spin mx-auto text-indigo-600 mb-4" />
+        Memuat profil pengguna...
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto p-6">
+      <div className="bg-white rounded-xl shadow-2xl p-8 border border-indigo-100">
+        <h1 className="text-4xl font-extrabold text-indigo-700 mb-6 border-b pb-3">Profil Pengguna</h1>
+        
+        <div className="space-y-4">
+          <div className="flex items-center space-x-4">
+            <div className="w-16 h-16 bg-indigo-500 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+              <User size={30} />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Nama Tampilan</p>
+              <p className="text-2xl font-bold text-gray-800">{userProfile.displayName}</p>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4 space-y-2">
+            <p className="text-sm font-medium text-gray-500">Email:</p>
+            <p className="text-lg text-gray-800">{user.email}</p>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4 space-y-2">
+            <p className="text-sm font-medium text-gray-500">ID Pengguna:</p>
+            <p className="text-xs break-all bg-gray-100 p-2 rounded-lg font-mono">{user.uid}</p>
+            <p className="text-xs text-red-500">*Gunakan ID ini untuk berinteraksi dengan pengguna lain.</p>
+          </div>
+        </div>
+
+        <button
+          onClick={onLogout}
+          className="mt-8 w-full flex items-center justify-center space-x-2 bg-red-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-red-700 transition duration-150"
+        >
+          <LogOut size={20} />
+          <span>Keluar</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const HomePage = ({ posts, userProfiles, currentUserId, onLike, onComment, onOpenPostModal }) => {
+  const [activeCategory, setActiveCategory] = useState('latest'); // 'latest' atau 'foryou'
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Logika pencarian dan pengurutan
+  const filteredAndSortedPosts = useMemo(() => {
+    let result = posts.slice(); // Salin array posts
+
+    // 1. Pencarian
+    if (searchTerm.trim()) {
+      const lowerSearchTerm = searchTerm.toLowerCase();
+      result = result.filter(post =>
+        post.title.toLowerCase().includes(lowerSearchTerm) ||
+        post.content.toLowerCase().includes(lowerSearchTerm) ||
+        (userProfiles[post.userId]?.displayName || '').toLowerCase().includes(lowerSearchTerm)
+      );
+    }
+
+    // 2. Kategori/Pengurutan
+    if (activeCategory === 'foryou') {
+      // Logika "Untukmu": Acak postingan
+      result.sort(() => Math.random() - 0.5);
+    } else {
+      // Logika "Terbaru": Sortir berdasarkan timestamp (sudah diurutkan dari Firestore, tapi tetap jaga)
+      result.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+    }
+
+    return result;
+  }, [posts, activeCategory, searchTerm, userProfiles]);
+
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 sm:p-6">
+      {/* Header dan Tombol Posting */}
+      <div className="sticky top-0 bg-white z-10 pt-1 pb-4 shadow-sm -mx-4 sm:-mx-6 px-4 sm:px-6 mb-4 rounded-b-xl border-b">
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-3xl font-extrabold text-indigo-700">Beranda Komunitas</h1>
+          <button
+            onClick={onOpenPostModal}
+            className="bg-indigo-600 text-white font-bold py-2 px-4 rounded-xl shadow-md hover:bg-indigo-700 transition duration-150 flex items-center space-x-1"
+          >
+            <Send size={20} />
+            <span>Posting</span>
+          </button>
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative mb-4">
+          <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Cari postingan, judul, atau pengguna..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full py-3 pl-10 pr-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-inner"
+          />
+          {searchTerm && (
+            <button 
+                onClick={() => setSearchTerm('')} 
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 p-1"
+            >
+                <X size={18} />
+            </button>
+          )}
+        </div>
+
+        {/* Kategori */}
+        <div className="flex space-x-4 border-b border-gray-200 pb-2">
+          <button
+            onClick={() => setActiveCategory('latest')}
+            className={`flex items-center space-x-1 font-semibold pb-1 transition duration-150 ${
+              activeCategory === 'latest'
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-gray-500 hover:text-indigo-600'
+            }`}
+          >
+            <LayoutList size={20} />
+            <span>Terbaru</span>
+          </button>
+          <button
+            onClick={() => setActiveCategory('foryou')}
+            className={`flex items-center space-x-1 font-semibold pb-1 transition duration-150 ${
+              activeCategory === 'foryou'
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-gray-500 hover:text-indigo-600'
+            }`}
+          >
+            <Shuffle size={20} />
+            <span>Untukmu</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Daftar Postingan */}
+      <div>
+        {posts.length === 0 ? (
+          <div className="text-center p-10 bg-white rounded-xl shadow-lg mt-6 text-gray-600">
+            <AlertTriangle size={32} className="mx-auto text-yellow-500 mb-3" />
+            <p className="text-lg font-semibold">Belum ada postingan!</p>
+            <p>Jadilah yang pertama untuk membuat konten.</p>
+          </div>
+        ) : filteredAndSortedPosts.length === 0 ? (
+            <div className="text-center p-10 bg-white rounded-xl shadow-lg mt-6 text-gray-600">
+                <Search size={32} className="mx-auto text-indigo-500 mb-3" />
+                <p className="text-lg font-semibold">Tidak ditemukan hasil untuk "{searchTerm}"</p>
+                <p>Coba kata kunci lain atau cek kategori.</p>
+            </div>
+        ) : (
+          filteredAndSortedPosts.map((post) => (
+            <PostCard
+              key={post.id}
+              post={post}
+              currentUserId={currentUserId}
+              userProfiles={userProfiles}
+              onLike={onLike}
+              onComment={onComment}
+              onDelete={(postId) => deletePost(postId, currentUserId)} // Tambahkan fungsi delete
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 
 // --- Komponen Utama Aplikasi ---
 const App = () => {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [currentView, setCurrentView] = useState('Beranda'); // 'Beranda', 'Akun'
-    const [posts, setPosts] = useState([]);
-    const [isPostModalOpen, setIsPostModalOpen] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [feedTab, setFeedTab] = useState('Terbaru'); // 'Terbaru', 'Untukmu'
+  const [user, setUser] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [userProfiles, setUserProfiles] = useState({}); // Cache profil pengguna
+  const [view, setView] = useState('home'); // 'home', 'profile'
+  const [showPostModal, setShowPostModal] = useState(false);
 
-    // 1. Inisialisasi Firebase dan Autentikasi
-    useEffect(() => {
-        if (!authInstance || !dbInstance) {
-            setLoading(false);
-            return;
+  // 1. Inisialisasi Firebase & Otentikasi
+  useEffect(() => {
+    if (!auth) return;
+
+    const initializeAuth = async () => {
+      try {
+        if (initialAuthToken) {
+          // Gunakan custom token jika tersedia
+          await signInWithCustomToken(auth, initialAuthToken);
+        } else {
+          // Jika tidak ada token, gunakan sign-in anonim (untuk testing awal)
+          await signInAnonymously(auth);
         }
+      } catch (e) {
+        console.error("Firebase Sign-In Error:", e);
+      }
+    };
 
-        const handleInitialAuth = async () => {
-            try {
-                // Reintroduce Canvas initial sign-in logic.
-                if (initialAuthToken) {
-                    await signInWithCustomToken(authInstance, initialAuthToken);
-                } else {
-                    await signInAnonymously(authInstance);
-                }
-            } catch (e) {
-                console.error("Kesalahan inisialisasi otentikasi Canvas:", e);
-            }
-        };
+    // Listener Perubahan Status Auth
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
 
-        handleInitialAuth(); // Run initial sign-in logic
+    initializeAuth();
+    return () => unsubscribe();
+  }, []);
 
-        // 1a. Inisialisasi Auth State Listener
-        const unsubscribe = onAuthStateChanged(authInstance, (currentUser) => {
-            // HANYA terima pengguna yang sudah Login (Authenticated) dan BUKAN pengguna Anonim.
-            if (currentUser && !currentUser.isAnonymous) {
-                setUser(currentUser);
-            } else {
-                // Jika pengguna anonim (hasil dari inisiasi Canvas) atau belum login, 
-                // paksa ke AuthView dengan menyetel user ke null.
-                setUser(null); 
-            }
-            // Setelah cek status awal, matikan loading.
-            setLoading(false); 
-        });
-        
-        return () => unsubscribe();
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // 2. Load Postingan dari Firestore (Real-time)
-    useEffect(() => {
-        if (!dbInstance || !user) {
-            setPosts([]); // Hapus postingan jika pengguna keluar
-            return;
-        }
-
-        const postsCollectionRef = collection(dbInstance, `/artifacts/${appId}/public/data/posts`);
-        const q = query(postsCollectionRef);
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedPosts = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                timestamp: doc.data().timestamp || new Date(), 
-            })).sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate()); // Urutkan berdasarkan terbaru
-
-            setPosts(fetchedPosts);
+  // 2. Ambil Profil Pengguna
+  useEffect(() => {
+    if (user && db) {
+      const fetchProfile = async () => {
+        const docRef = doc(db, USERS_COLLECTION, user.uid);
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setUserProfile(docSnap.data());
+          } else {
+            // Jika profil tidak ada (misalnya, sign-in anonim atau dari token lama), buat profil default
+            const defaultProfile = {
+                displayName: user.email ? user.email.split('@')[0] : 'Pengguna Anonim',
+                email: user.email || 'anon@example.com',
+                createdAt: serverTimestamp(),
+            };
+            setDoc(docRef, defaultProfile, { merge: true });
+            setUserProfile(defaultProfile);
+          }
         }, (error) => {
-            console.error("Error fetching posts:", error);
+            console.error("Error fetching user profile:", error);
         });
-
-        return () => unsubscribe();
-    }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // 3. Fungsi Autentikasi (sekarang menerima callback error, dan tidak menggunakan alert)
-    const handleAuth = async (email, password, isRegister, username, setErrorCallback) => {
-        if (!authInstance) return console.error("Firebase Auth tidak tersedia.");
-
-        setLoading(true);
-        setErrorCallback('');
-        try {
-            if (isRegister) {
-                if (!username || username.length < 3) throw new Error('Username harus minimal 3 karakter.');
-                
-                const userCredential = await createUserWithEmailAndPassword(authInstance, email, password);
-                
-                await updateProfile(userCredential.user, {
-                    displayName: username 
-                });
-                
-            } else {
-                await signInWithEmailAndPassword(authInstance, email, password);
-            }
-        } catch (error) {
-            console.error("Kesalahan Auth:", error.message);
-            // Terjemahkan pesan error umum
-            let errorMessage = 'Login/Daftar Gagal. Silakan coba lagi.';
-            
-            // Penanganan error spesifik untuk auth/operation-not-allowed
-            if (error.code === 'auth/operation-not-allowed') {
-                errorMessage = 'Autentikasi Email/Password Belum Diaktifkan. Anda harus mengaktifkan metode "Email/Password" di konsol Firebase (Authentication -> Sign-in method).';
-            } else if (error.code === 'auth/email-already-in-use') {
-                errorMessage = 'Email sudah terdaftar. Silakan Login.';
-            } else if (error.code === 'auth/invalid-email') {
-                errorMessage = 'Format email tidak valid.';
-            } else if (error.code === 'auth/weak-password') {
-                errorMessage = 'Password harus minimal 6 karakter.';
-            } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-                errorMessage = 'Email atau password salah.';
-            }
-
-            setErrorCallback(errorMessage);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleLogout = async () => {
-        if (!authInstance) return;
-        try {
-            await signOut(authInstance);
-            setUser(null);
-            setCurrentView('Beranda'); 
-        } catch (error) {
-            console.error("Gagal Logout:", error);
-        }
-    };
-
-    // 4. Fungsi Database (Post, Like)
-    const addPost = async (newPost) => {
-        if (!dbInstance) return;
-        const postsCollectionRef = collection(dbInstance, `/artifacts/${appId}/public/data/posts`);
-        await addDoc(postsCollectionRef, newPost);
-    };
-
-    const handleLike = useCallback(async (postId, isLiked) => {
-        if (!dbInstance || !user) return;
-        
-        const postRef = doc(dbInstance, `/artifacts/${appId}/public/data/posts`, postId);
-        
-        try {
-            if (isLiked) {
-                await updateDoc(postRef, {
-                    likes: arrayRemove(user.uid)
-                });
-            } else {
-                await updateDoc(postRef, {
-                    likes: arrayUnion(user.uid)
-                });
-            }
-        } catch (error) {
-            console.error("Gagal memperbarui like:", error);
-        }
-    }, [user]);
-
-    // 5. Logika Filter dan Pencarian
-    const filteredPosts = useMemo(() => {
-        let result = posts.filter(post => 
-            post.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-            post.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            post.userName?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-
-        if (feedTab === 'Untukmu') {
-            // Algoritma "Untukmu": Acak
-            return result.sort(() => Math.random() - 0.5);
-        }
-        return result;
-    }, [posts, searchQuery, feedTab]);
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-50">
-                <Loader className="w-8 h-8 text-indigo-500 animate-spin mr-3" />
-                <p className="text-gray-600">Memuat Aplikasi...</p>
-            </div>
-        );
+        return unsubscribe;
+      };
+      
+      let unsubscribe;
+      fetchProfile().then(unsub => unsubscribe = unsub);
+      return () => unsubscribe && unsubscribe();
+    } else {
+      setUserProfile(null);
     }
+  }, [user]);
 
-    // Redirect to AuthView if user is null (not logged in)
-    if (!user) {
-        return <AuthView handleAuth={handleAuth} loading={loading} />;
+  // 3. Listener Realtime Postingan & Profil Penulis
+  useEffect(() => {
+    if (!isAuthReady || !user || !db) return;
+
+    // Query untuk mengambil semua postingan, diurutkan berdasarkan waktu (terbaru di atas)
+    const postsQuery = query(collection(db, POST_COLLECTION), orderBy('timestamp', 'desc'));
+
+    const unsubscribePosts = onSnapshot(postsQuery, (snapshot) => {
+      const fetchedPosts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        // Pastikan likes dan comments selalu array
+        likes: doc.data().likes || [],
+        comments: doc.data().comments || []
+      }));
+      setPosts(fetchedPosts);
+
+      // Kumpulkan ID pengguna unik dari semua postingan
+      const userIds = [...new Set(fetchedPosts.map(p => p.userId))];
+      
+      // Ambil profil untuk semua ID yang baru
+      userIds.forEach(async (uid) => {
+        if (!userProfiles[uid]) {
+          const userDocRef = doc(db, USERS_COLLECTION, uid);
+          onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              setUserProfiles(prev => ({
+                ...prev,
+                [uid]: docSnap.data(),
+              }));
+            }
+          });
+        }
+      });
+
+    }, (error) => {
+        console.error("Error fetching posts:", error);
+    });
+
+    return () => unsubscribePosts();
+  }, [isAuthReady, user, userProfiles]);
+
+
+  // --- Fungsi Aksi CRUD Firestore ---
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOut(auth);
+      // Pindah ke AuthScreen setelah logout
+      setView('home'); 
+    } catch (error) {
+      console.error("Gagal logout:", error);
     }
+  }, []);
 
-    const userName = user.displayName || `User-${user.uid.substring(0, 6)}`;
+  const toggleLike = useCallback(async (postId, isLiked) => {
+    if (!user) return;
+    const postRef = doc(db, POST_COLLECTION, postId);
     
-    // --- Render Halaman Beranda ---
-    const HomeView = () => (
-        <div className="max-w-3xl mx-auto p-4 md:p-8">
-            <h1 className="text-3xl font-extrabold text-gray-900 mb-6">Beranda</h1>
+    try {
+      await updateDoc(postRef, {
+        likes: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid),
+      });
+    } catch (error) {
+      console.error("Gagal toggle like:", error);
+    }
+  }, [user]);
 
-            {/* Kontrol Postingan dan Pencarian */}
-            <div className="flex flex-col md:flex-row gap-4 mb-8">
-                <button
-                    onClick={() => setIsPostModalOpen(true)}
-                    className="w-full md:w-auto flex items-center justify-center bg-indigo-600 text-white font-semibold py-3 px-6 rounded-xl hover:bg-indigo-700 transition duration-300 shadow-lg shadow-indigo-200"
-                >
-                    <Plus className="w-5 h-5 mr-2" /> Buat Postingan
-                </button>
-                
-                <div className="relative w-full">
-                    <input
-                        type="text"
-                        placeholder="Cari postingan, judul, atau pengguna..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
-                    />
-                    <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-                </div>
-            </div>
+  const addComment = useCallback(async (postId, text) => {
+    if (!user) return;
+    const postRef = doc(db, POST_COLLECTION, postId);
 
-            {/* Tab Filter Feed */}
-            <div className="flex border-b border-gray-200 mb-8">
-                {['Terbaru', 'Untukmu'].map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => setFeedTab(tab)}
-                        className={`px-4 py-2 text-lg font-medium transition duration-200 ${
-                            feedTab === tab 
-                                ? 'text-indigo-600 border-b-2 border-indigo-600' 
-                                : 'text-gray-500 hover:text-gray-700'
-                        }`}
-                    >
-                        {tab}
-                    </button>
-                ))}
-            </div>
-
-            {/* Daftar Postingan */}
-            <div className="space-y-6">
-                {filteredPosts.length > 0 ? (
-                    filteredPosts.map(post => (
-                        <PostCard 
-                            key={post.id} 
-                            post={post} 
-                            userId={user.uid} 
-                            handleLike={handleLike} 
-                        />
-                    ))
-                ) : (
-                    <div className="text-center p-10 bg-gray-100 rounded-xl">
-                        <p className="text-gray-600">
-                            {searchQuery ? `Tidak ada postingan yang cocok dengan "${searchQuery}".` : 'Belum ada postingan. Ayo mulai buat yang pertama!'}
-                        </p>
-                    </div>
-                )}
-            </div>
-            
-            <CreatePostModal 
-                isOpen={isPostModalOpen}
-                onClose={() => setIsPostModalOpen(false)}
-                userId={user.uid}
-                userName={userName}
-                addPost={addPost}
-            />
-        </div>
-    );
-
-    // --- Render Halaman Akun ---
-    const ProfileView = () => (
-        <div className="max-w-xl mx-auto p-4 md:p-8 pt-10">
-            <div className="bg-white p-8 rounded-xl shadow-2xl border border-gray-100">
-                <div className="flex flex-col items-center">
-                    <div className="w-24 h-24 bg-indigo-500 rounded-full flex items-center justify-center text-white text-4xl font-extrabold mb-4 border-4 border-indigo-100">
-                        {userName[0].toUpperCase()}
-                    </div>
-                    <h2 className="text-3xl font-bold text-gray-900 mb-2">@{userName}</h2>
-                    <p className="text-gray-500 mb-6">ID Pengguna: <span className="font-mono text-sm bg-gray-100 px-2 py-0.5 rounded-md">{user.uid}</span></p>
-
-                    <div className="w-full space-y-3">
-                        <div className="bg-indigo-50 p-4 rounded-lg flex justify-between items-center">
-                            <span className="font-medium text-indigo-700">Email</span>
-                            <span className="text-indigo-900">{user.email || 'Tidak Tersedia'}</span>
-                        </div>
-                        <div className="bg-indigo-50 p-4 rounded-lg flex justify-between items-center">
-                            <span className="font-medium text-indigo-700">Jumlah Postingan</span>
-                            <span className="text-indigo-900 font-bold">{posts.filter(p => p.userId === user.uid).length}</span>
-                        </div>
-                    </div>
-                    
-                    <button
-                        onClick={handleLogout}
-                        className="mt-8 w-full flex items-center justify-center bg-red-600 text-white font-semibold py-3 px-6 rounded-xl hover:bg-red-700 transition duration-300 shadow-md shadow-red-200"
-                    >
-                        <LogOut className="w-5 h-5 mr-2" /> Logout
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-    
-    // --- Render Aplikasi dengan Navigasi ---
-    return (
-        <div className="min-h-screen bg-gray-50 flex flex-col">
-            {/* Header / Navigasi */}
-            <header className="bg-white shadow-lg sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-                    <h1 className="text-2xl font-extrabold text-indigo-600">
-                        <span className="text-indigo-800">FAA</span> Sosial
-                    </h1>
-                    
-                    <nav className="flex items-center space-x-6">
-                        <button 
-                            onClick={() => setCurrentView('Beranda')} 
-                            className={`flex items-center text-sm font-semibold transition duration-200 ${currentView === 'Beranda' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
-                        >
-                            <ChevronRight className="w-4 h-4 mr-1"/> Beranda
-                        </button>
-                        <button 
-                            onClick={() => setCurrentView('Akun')} 
-                            className={`flex items-center text-sm font-semibold transition duration-200 ${currentView === 'Akun' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
-                        >
-                            <User className="w-4 h-4 mr-1"/> Akun
-                        </button>
-                        <button
-                            onClick={handleLogout}
-                            className="text-red-500 hover:text-red-700 flex items-center text-sm font-semibold"
-                        >
-                            <LogOut className="w-4 h-4" />
-                        </button>
-                    </nav>
-                </div>
-            </header>
-
-            {/* Konten Utama */}
-            <main className="flex-grow pb-12">
-                {currentView === 'Beranda' && <HomeView />}
-                {currentView === 'Akun' && <ProfileView />}
-            </main>
-            
-            {/* Tombol Postingan Cepat untuk Mobile */}
-            <button
-                onClick={() => setIsPostModalOpen(true)}
-                className="fixed bottom-6 right-6 bg-indigo-600 text-white p-4 rounded-full shadow-2xl hover:bg-indigo-700 transition duration-300 md:hidden z-50"
-                aria-label="Buat Postingan Baru"
-            >
-                <Plus className="w-6 h-6" />
-            </button>
-        </div>
-    );
-};
-
-// --- Komponen View Autentikasi (Login/Register) ---
-const AuthView = ({ handleAuth, loading }) => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [username, setUsername] = useState('');
-    const [isRegister, setIsRegister] = useState(false);
-    const [authError, setAuthError] = useState('');
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setAuthError('');
-
-        if (isRegister && username.length < 3) {
-            setAuthError('Username harus minimal 3 karakter.');
-            return;
-        }
-
-        if (password.length < 6) {
-            setAuthError('Password harus minimal 6 karakter.');
-            return;
-        }
-
-        // Panggil handleAuth dari App, dan gunakan setAuthError sebagai callback
-        await handleAuth(email, password, isRegister, username, setAuthError);
+    const newComment = {
+      userId: user.uid,
+      text: text,
+      timestamp: serverTimestamp(),
     };
 
+    try {
+      await updateDoc(postRef, {
+        comments: arrayUnion(newComment),
+      });
+    } catch (error) {
+      console.error("Gagal menambah komentar:", error);
+    }
+  }, [user]);
+
+  const deletePost = async (postId, userId) => {
+      if (!user || user.uid !== userId) {
+          console.error("Akses ditolak: Hanya pemilik yang bisa menghapus.");
+          return;
+      }
+      try {
+          await deleteDoc(doc(db, POST_COLLECTION, postId));
+          console.log("Postingan berhasil dihapus:", postId);
+      } catch (error) {
+          console.error("Gagal menghapus postingan:", error);
+          throw error;
+      }
+  };
+
+
+  // --- Render Utama ---
+
+  if (!isAuthReady || (user && !userProfile)) {
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-            <div className="bg-white p-8 md:p-10 rounded-xl shadow-2xl w-full max-w-md border border-gray-100">
-                <h1 className="text-3xl font-extrabold text-indigo-600 text-center mb-2">FAA Sosial</h1>
-                <h2 className="text-xl font-bold text-gray-800 text-center mb-8">
-                    {isRegister ? 'Daftar Akun Baru' : 'Login ke Akun Anda'}
-                </h2>
-
-                <form onSubmit={handleSubmit} className="space-y-5">
-                    {authError && <p className="bg-red-100 text-red-700 p-3 rounded-md text-sm">{authError}</p>}
-
-                    {isRegister && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="username">Username</label>
-                            <input
-                                id="username"
-                                type="text"
-                                placeholder="Pilih username unik Anda"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                                required
-                            />
-                        </div>
-                    )}
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="email">Email</label>
-                        <input
-                            id="email"
-                            type="email"
-                            placeholder="email@contoh.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="password">Password</label>
-                        <input
-                            id="password"
-                            type="password"
-                            placeholder="minimal 6 karakter"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                            required
-                        />
-                    </div>
-                    
-                    <button
-                        type="submit"
-                        disabled={loading || (isRegister && !username) || !email || !password}
-                        className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 transition duration-300 disabled:bg-indigo-300 shadow-md flex items-center justify-center"
-                    >
-                        {loading ? (
-                            <>
-                                <Loader className="w-5 h-5 animate-spin mr-2"/> Memproses...
-                            </>
-                        ) : (
-                            isRegister ? 'Daftar' : 'Login'
-                        )}
-                    </button>
-                </form>
-
-                <p className="mt-6 text-center text-sm text-gray-600">
-                    {isRegister ? 'Sudah punya akun?' : 'Belum punya akun?'}
-                    <button 
-                        onClick={() => { setIsRegister(!isRegister); setAuthError(''); }} 
-                        className="text-indigo-600 font-semibold ml-1 hover:text-indigo-800"
-                        disabled={loading}
-                    >
-                        {isRegister ? 'Login' : 'Daftar sekarang'}
-                    </button>
-                </p>
-            </div>
-        </div>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
+        <Loader size={48} className="animate-spin text-indigo-600 mb-4" />
+        <h1 className="text-2xl font-bold text-gray-700">Memuat Aplikasi...</h1>
+        <p className="text-gray-500 mt-2">Menunggu otentikasi dan data pengguna.</p>
+      </div>
     );
+  }
+
+  if (!user || !userProfile) {
+    return <AuthScreen onLoginSuccess={() => setView('home')} isReady={isAuthReady} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans">
+      {/* Navbar */}
+      <nav className="sticky top-0 bg-white shadow-md z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <span className="text-2xl font-extrabold text-indigo-600">
+                <Heart size={24} className='inline-block mr-1 text-red-500' />
+                SosialKu
+              </span>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setView('home')}
+                className={`flex items-center p-2 rounded-lg transition duration-150 ${
+                  view === 'home' ? 'bg-indigo-50 text-indigo-600 font-bold shadow-sm' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Home size={20} className="mr-1" />
+                <span className="hidden sm:inline">Beranda</span>
+              </button>
+              <button
+                onClick={() => setView('profile')}
+                className={`flex items-center p-2 rounded-lg transition duration-150 ${
+                  view === 'profile' ? 'bg-indigo-50 text-indigo-600 font-bold shadow-sm' : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <User size={20} className="mr-1" />
+                <span className="hidden sm:inline">{userProfile.displayName || 'Akun'}</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition duration-150"
+                title="Keluar"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Konten Utama */}
+      <main className="max-w-7xl mx-auto pt-6 pb-20 px-4 sm:px-6 lg:px-8">
+        {view === 'home' && (
+          <HomePage
+            posts={posts}
+            userProfiles={userProfiles}
+            currentUserId={user.uid}
+            onLike={toggleLike}
+            onComment={addComment}
+            onOpenPostModal={() => setShowPostModal(true)}
+          />
+        )}
+        {view === 'profile' && (
+          <ProfilePage
+            user={user}
+            userProfile={userProfile}
+            onLogout={handleLogout}
+          />
+        )}
+      </main>
+
+      {/* Modal Posting */}
+      {showPostModal && (
+        <PostModal
+          onClose={() => setShowPostModal(false)}
+          currentUserId={user.uid}
+          userName={userProfile.displayName || user.email.split('@')[0]}
+        />
+      )}
+    </div>
+  );
 };
 
 export default App;
