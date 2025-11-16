@@ -129,18 +129,41 @@ const AuthScreen = ({ onLoginSuccess }) => {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
+    // --- FUNGSI YANG DIPERBAIKI ---
     const saveUserProfile = async (uid, uname, uemail) => {
         const profileRef = doc(db, getPublicCollection('userProfiles'), uid);
-        await setDoc(profileRef, {
-            username: uname || uemail.split('@')[0], // Gunakan email-prefix sebagai fallback
-            email: uemail,
-            createdAt: serverTimestamp(),
-            uid: uid,
-            photoURL: '', 
-            following: [], 
-            followers: []
-        }, { merge: true }); 
+        
+        // 1. Cek dulu apakah profil sudah ada
+        const docSnap = await getDoc(profileRef);
+
+        if (docSnap.exists()) {
+            // 2. Jika SUDAH ADA (ini terjadi saat login)
+            // Kita hanya update email jika perlu, dan JANGAN reset data lain.
+            // 'uname' akan bernilai null saat login, jadi 'username' tidak akan tertimpa.
+            const updateData = { email: uemail };
+            if (uname) {
+                // Ini seharusnya hanya terjadi saat registrasi jika username diisi
+                // tapi doc-nya sudah ada (kasus aneh, tapi aman)
+                updateData.username = uname;
+            }
+            // Gunakan updateDoc untuk menghindari penimpaan field lain
+            await updateDoc(profileRef, updateData);
+            
+        } else {
+            // 3. Jika BELUM ADA (ini adalah registrasi baru)
+            // Buat dokumen profil baru dengan data default.
+            await setDoc(profileRef, {
+                username: uname || uemail.split('@')[0], // Gunakan email-prefix sebagai fallback
+                email: uemail,
+                createdAt: serverTimestamp(),
+                uid: uid,
+                photoURL: '', // Default untuk pengguna baru
+                following: [], // Default untuk pengguna baru
+                followers: [] // Default untuk pengguna baru
+            });
+        }
     };
+    // --- AKHIR FUNGSI YANG DIPERBAIKI ---
 
     const handleAuth = async (e) => {
         e.preventDefault();
@@ -150,14 +173,17 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                // Panggilan ini sekarang aman dan tidak akan me-reset data
                 await saveUserProfile(userCredential.user.uid, null, email);
                 onLoginSuccess(); 
             } else {
                 if (!username.trim()) {
                     setError('Username harus diisi.');
+                    setIsLoading(false); // Hentikan loading jika ada error validasi
                     return;
                 }
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // Panggilan ini akan membuat profil baru
                 await saveUserProfile(userCredential.user.uid, username.trim(), email);
                 onLoginSuccess();
             }
@@ -711,7 +737,7 @@ const CreatePost = ({ setPage, userId, username }) => {
     };
 
     const handleUrlChange = (e) => {
-        setMediaUrl(e.target.value);
+        setMediaUrl(e.targe.value);
         setMediaFile(null); 
         setMediaType('link');
     };
@@ -936,9 +962,9 @@ const HomeScreen = ({ currentUserId, currentUserEmail, profile, handleFollowTogg
                 </button>
                 <button 
                     onClick={() => setFeedType('following')}
-                    disabled={profile.following.length === 0}
+                    disabled={!profile.following || profile.following.length === 0}
                     className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'following' ? 'bg-indigo-600 text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200 disabled:opacity-50'}`}
-                    title={profile.following.length === 0 ? "Ikuti seseorang untuk melihat feed ini" : "Lihat postingan dari yang diikuti"}
+                    title={!profile.following || profile.following.length === 0 ? "Ikuti seseorang untuk melihat feed ini" : "Lihat postingan dari yang diikuti"}
                 >
                     <UserCheck size={20} />
                     <span>Mengikuti</span>
@@ -1418,21 +1444,31 @@ const App = () => {
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
-                    await signInAnonymously(auth);
+                    // Jika tidak ada custom token, biarkan onAuthStateChanged menangani
+                    // Jika tidak ada user, dia akan null
                 }
             } catch (error) {
-                 console.error("Initial Auth (Custom Token/Anonim) Gagal:", error);
+                 console.error("Initial Auth (Custom Token) Gagal:", error);
+                 // Coba sign in anonim sebagai fallback jika custom token gagal
+                 try {
+                     await signInAnonymously(auth);
+                 } catch (anonError) {
+                     console.error("Auth Anonim Gagal:", anonError);
+                 }
             }
         };
 
-        handleInitialAuth();
+        // Panggil handleInitialAuth HANYA SEKALI
+        if (!auth.currentUser) {
+            handleInitialAuth();
+        }
 
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             // Hanya set user jika non-anonim
             if (user && !user.isAnonymous) { 
                 setCurrentUser(user);
             } else {
-                // Hapus state pada logout
+                // Hapus state pada logout atau jika anonim
                 setCurrentUser(null);
                 setProfile(null); 
             }
@@ -1445,7 +1481,7 @@ const App = () => {
     // 2. Langganan perubahan profil pengguna (Profile State)
     useEffect(() => {
         if (!currentUser || !currentUser.uid) {
-            setProfile(null);
+            setProfile(null); // Pastikan profile clear jika user null
             return;
         }
 
@@ -1454,14 +1490,19 @@ const App = () => {
         const unsubscribe = onSnapshot(profileRef, (snap) => {
             const userEmail = currentUser.email || 'N/A';
             if (snap.exists()) {
+                // Set profile dengan data dari Firestore
                 setProfile({ ...snap.data(), email: userEmail, uid: currentUser.uid });
             } else {
-                // FALLBACK KUAT: Set profile sementara jika dokumen belum ada
+                // INI SEHARUSNYA TIDAK TERJADI JIKA AuthScreen bekerja
+                // Tapi sebagai fallback, kita set profile minimal
+                console.warn(`Profil Firestore untuk UID ${currentUser.uid} tidak ditemukan. AuthScreen seharusnya membuatnya.`);
                 setProfile({ 
                     username: currentUser.email?.split('@')[0] || 'Nama Pengguna', 
                     email: userEmail, 
                     uid: currentUser.uid,
-                    photoURL: '', following: [], followers: [] 
+                    photoURL: '', 
+                    following: [], 
+                    followers: [] 
                 });
             }
         }, (error) => {
@@ -1469,11 +1510,12 @@ const App = () => {
         });
 
         return unsubscribe;
-    }, [currentUser]);
+    }, [currentUser]); // Hanya bergantung pada currentUser
 
 
     // 3. Langganan real-time untuk semua postingan publik
     useEffect(() => {
+        // Jangan muat postingan jika user belum login
         if (isAuthChecking || !currentUser) {
             setAllPosts([]);
             setIsLoadingPosts(false);
@@ -1492,6 +1534,14 @@ const App = () => {
             
             // Map user profiles to posts
             const uniqueUserIds = [...new Set(fetchedPosts.map(p => p.userId))];
+            
+            // Hindari error jika tidak ada postingan
+            if (uniqueUserIds.length === 0) {
+                setAllPosts([]);
+                setIsLoadingPosts(false);
+                return;
+            }
+
             const profilePromises = uniqueUserIds.map(uid => 
                 uid ? getDoc(doc(db, getPublicCollection('userProfiles'), uid)) : Promise.resolve(null)
             );
@@ -1505,12 +1555,13 @@ const App = () => {
             }, {});
 
             const postsWithProfiles = fetchedPosts.map((post) => {
-                const postUser = profilesMap[post.userId] || post.user;
+                const postUser = profilesMap[post.userId] || post.user; // Ambil dari map, fallback ke data 'user' di post
                 return { 
                     ...post, 
                     commentsCount: post.commentsCount || 0, 
                     likes: post.likes || [],
-                    user: postUser || { username: 'Pengguna Dihapus', uid: post.userId } 
+                    // Pastikan 'user' adalah objek yang valid
+                    user: (postUser && postUser.username) ? postUser : { username: 'Pengguna Dihapus', uid: post.userId } 
                 };
             });
             
@@ -1523,10 +1574,11 @@ const App = () => {
         });
 
         return unsubscribe;
-    }, [isAuthChecking, currentUser]);
+    }, [isAuthChecking, currentUser]); // Hanya bergantung pada status auth
     
     // 4. Langganan real-time untuk semua profil pengguna (untuk fitur search & following)
      useEffect(() => {
+        // Jangan muat data user jika belum login
         if (isAuthChecking || !currentUser) {
             setAllUsers([]);
             return;
@@ -1535,18 +1587,18 @@ const App = () => {
         const usersQuery = query(collection(db, getPublicCollection('userProfiles')));
 
         const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
-            const fetchedUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            const fetchedUsers = snapshot.docs.map(d => ({ ...d.data(), id: d.id, uid: d.id })); // Pastikan uid ada
             setAllUsers(fetchedUsers);
         }, (error) => {
             console.error("Error fetching all users:", error);
         });
 
         return unsubscribe;
-    }, [isAuthChecking, currentUser]);
+    }, [isAuthChecking, currentUser]); // Hanya bergantung pada status auth
 
     // FUNGSI TOGGLE FOLLOW
     const handleFollowToggle = async (targetUid, isCurrentlyFollowing) => {
-        if (!profile || targetUid === profile.uid) return;
+        if (!profile || !profile.uid || targetUid === profile.uid) return;
         
         const userRef = doc(db, getPublicCollection('userProfiles'), profile.uid);
         const targetRef = doc(db, getPublicCollection('userProfiles'), targetUid);
@@ -1568,15 +1620,20 @@ const App = () => {
     
     // FUNGSI PINDAH KE PROFIL ORANG LAIN
     const goToProfile = (uid) => {
-        setTargetProfileId(uid);
-        setPage('other-profile');
+        if (uid === profile?.uid) {
+            setPage('profile'); // Jika itu profil sendiri, buka halaman profil
+            setTargetProfileId(null);
+        } else {
+            setTargetProfileId(uid);
+            setPage('other-profile');
+        }
     };
 
 
     const handleLogout = async () => {
         try {
             await signOut(auth);
-            // State will be cleared by onAuthStateChanged listener
+            // State akan di-clear oleh onAuthStateChanged listener
             setPage('home'); 
             setTargetProfileId(null);
         } catch (error) {
@@ -1593,8 +1650,12 @@ const App = () => {
         );
     }
     
+    // Jika tidak sedang loading auth, dan TIDAK ADA currentUser, tampilkan AuthScreen
     if (!currentUser) {
-        return <AuthScreen onLoginSuccess={() => setPage('home')} />;
+        return <AuthScreen onLoginSuccess={() => {
+            setPage('home'); // Arahkan ke home setelah login berhasil
+            setIsAuthChecking(true); // Set checking lagi agar profile dimuat ulang
+        }} />;
     }
     
     // FIX BUG: Tampilkan loader jika currentUser ada, tapi profile belum dimuat
@@ -1625,11 +1686,11 @@ const App = () => {
                         username={targetUser.username}
                         email={targetUser.email}
                         allPosts={allPosts} 
-                        currentUserEmail={currentUser.email}
+                        currentUserEmail={currentUser.email} // Ini email yang login
                         photoURL={targetUser.photoURL}
                         isSelf={false}
                         handleFollowToggle={handleFollowToggle}
-                        profile={profile} 
+                        profile={profile} // Ini profil yang login (untuk cek following)
                     />;
         }
 
@@ -1667,6 +1728,7 @@ const App = () => {
                             goToProfile={goToProfile}
                         />;
             default:
+                setPage('home'); // Fallback ke home jika page tidak valid
                 return <HomeScreen 
                             currentUserId={currentUser.uid} 
                             currentUserEmail={currentUser.email}
@@ -1695,7 +1757,7 @@ const App = () => {
                     <nav className="flex items-center space-x-2 sm:space-x-4">
                         <button 
                             onClick={() => {setPage('home'); setTargetProfileId(null);}}
-                            className={`p-2 rounded-full transition ${page === 'home' ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
+                            className={`p-2 rounded-full transition ${page === 'home' && !targetProfileId ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
                             title="Beranda"
                         >
                             <Home size={24} />
@@ -1711,7 +1773,7 @@ const App = () => {
 
                         <button 
                             onClick={() => setPage('create')}
-                            className="bg-green-600 text-white p-3 rounded-full shadow-xl hover:bg-green-700 transition flex items-center justify-center font-semibold transform hover:scale-105"
+                            className={`p-2 rounded-full transition ${page === 'create' ? 'bg-green-100 text-green-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
                             title="Buat Postingan Baru"
                         >
                             <PlusCircle size={24} /> 
@@ -1719,7 +1781,7 @@ const App = () => {
 
                         <button 
                             onClick={() => {setPage('profile'); setTargetProfileId(null);}}
-                            className={`p-1 rounded-full transition ${page === 'profile' ? 'bg-indigo-100 ring-2 ring-indigo-500' : 'text-gray-600 hover:bg-gray-100'}`}
+                            className={`p-1 rounded-full transition ${page === 'profile' && !targetProfileId ? 'bg-indigo-100 ring-2 ring-indigo-500' : 'text-gray-600 hover:bg-gray-100'}`}
                             title={`Akun Saya: ${profile.username}`}
                         >
                             {profile.photoURL ? (
