@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, onAuthStateChanged, signOut, 
@@ -13,17 +13,20 @@ import {
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image, Loader2, Link, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
-    Edit, Trash2, X, Check, Save, PlusCircle, Search, UserCheck, ChevronRight
+    Edit, Trash2, X, Check, Save, PlusCircle, Search, UserCheck, ChevronRight,
+    Share2, Film, TrendingUp, Flame, ArrowLeft
 } from 'lucide-react';
 
-// Atur log level debug untuk melihat detail Firestore
-setLogLevel('debug');
+// Atur log level ke 'warn' atau 'error' agar tidak terlalu berisik di konsol
+setLogLevel('warn');
 
 // --- KONSTANTA GLOBAL ---
 const DEVELOPER_EMAIL = 'irhamdika00@gmail.com'; 
 
 // --- 1. KONFIGURASI DAN INISIALISASI FIREBASE ---
-const firebaseConfig = {
+// PERBAIKAN: Gunakan config dari environment jika ada (untuk menghindari custom-token-mismatch),
+// jika tidak ada baru gunakan config hardcoded Anda.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
@@ -363,6 +366,17 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
         }
     };
 
+    const handleShare = async () => {
+        const url = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
+        try {
+            await navigator.clipboard.writeText(url);
+            alert("Link postingan berhasil disalin! Anda bisa membagikannya sekarang.");
+        } catch (err) {
+            console.error('Gagal menyalin link:', err);
+            alert("Gagal menyalin link. Browser Anda mungkin tidak mendukung fitur ini.");
+        }
+    };
+
     const handleComment = async (e) => {
         e.preventDefault();
         if (!newComment.trim()) return;
@@ -462,7 +476,14 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
     const isImage = (post.mediaUrl && (/\.(jpg|jpeg|png|gif|webp)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !mediaEmbed;
 
     return (
-        <div className="bg-white p-6 rounded-2xl shadow-xl mb-6 border border-gray-100 transition-all duration-300 hover:border-indigo-200">
+        <div className="bg-white p-6 rounded-2xl shadow-xl mb-6 border border-gray-100 transition-all duration-300 hover:border-indigo-200 relative">
+             {/* Label Shorts */}
+             {post.isShort && (
+                <div className="absolute top-6 right-6 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded flex items-center shadow-sm">
+                    <Film size={12} className="mr-1" /> SHORTS
+                </div>
+            )}
+
             <div className="flex items-start justify-between mb-4">
                 <div className="flex items-start space-x-3">
                     {post.user?.photoURL ? (
@@ -495,7 +516,7 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
                     </div>
                 </div>
 
-                <div className='flex space-x-2 items-center'>
+                <div className='flex space-x-2 items-center mt-8 sm:mt-0'>
                     {!isOwner && post.userId !== currentUserId && (
                         <button
                             onClick={() => handleFollowToggle(post.userId, isFollowing)}
@@ -660,6 +681,14 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
                         <MessageSquare size={20} />
                         <span className="text-sm font-medium">{post.commentsCount || 0} Komentar</span>
                     </button>
+                    <button 
+                        onClick={handleShare} 
+                        className={`flex items-center space-x-1 px-3 py-2 rounded-full transition text-gray-600 hover:text-green-600 hover:bg-green-50`}
+                        title="Bagikan Postingan Ini"
+                    >
+                        <Share2 size={20} />
+                        <span className="text-sm font-medium hidden sm:inline">Bagikan</span>
+                    </button>
                 </div>
             </div>
 
@@ -720,6 +749,7 @@ const CreatePost = ({ setPage, userId, username }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [uploadError, setUploadError] = useState('');
     const [progress, setProgress] = useState(0); 
+    const [isShort, setIsShort] = useState(false);
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];
@@ -728,18 +758,21 @@ const CreatePost = ({ setPage, userId, username }) => {
             setMediaUrl(''); 
             if (file.type.startsWith('image/')) {
                 setMediaType('image');
+                setIsShort(false);
             } else if (file.type.startsWith('video/')) {
                  setMediaType('video');
             } else {
                 setMediaType('media');
+                setIsShort(false);
             }
         }
     };
 
     const handleUrlChange = (e) => {
-        setMediaUrl(e.targe.value);
+        setMediaUrl(e.target.value);
         setMediaFile(null); 
         setMediaType('link');
+        setIsShort(false);
     };
 
     const handleProgressUpdate = useCallback((newProgress) => {
@@ -788,6 +821,7 @@ const CreatePost = ({ setPage, userId, username }) => {
                 timestamp: serverTimestamp(),
                 likes: [],
                 commentsCount: 0,
+                isShort: isShort && finalMediaType === 'video', // Flag untuk Shorts
                 user: { username: username, uid: userId } 
             });
             
@@ -799,7 +833,9 @@ const CreatePost = ({ setPage, userId, username }) => {
             setMediaFile(null);
             setMediaUrl('');
             setMediaType('text');
-            setPage('home');
+            setIsShort(false);
+            // Arahkan ke Shorts jika itu Shorts, jika tidak ke Home
+            setPage(isShort && finalMediaType === 'video' ? 'shorts' : 'home');
         } catch (error) {
             console.error("Gagal memposting:", error);
             setUploadError(`Gagal memposting: ${error.message || 'Terjadi kesalahan tidak dikenal.'}`);
@@ -892,6 +928,19 @@ const CreatePost = ({ setPage, userId, username }) => {
                         </div>
                     </div>
                 </div>
+                
+                {/* Pilihan Shorts - Muncul hanya jika Video */}
+                {mediaType === 'video' && (
+                    <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 cursor-pointer" onClick={() => setIsShort(!isShort)}>
+                        <div className={`w-6 h-6 rounded border border-red-600 flex items-center justify-center transition ${isShort ? 'bg-red-600' : 'bg-white'}`}>
+                            {isShort && <Check size={16} className="text-white" />}
+                        </div>
+                        <div className="flex items-center">
+                            <Film size={18} className="mr-2" />
+                            <span className="font-semibold">Posting sebagai Video Pendek (Shorts)</span>
+                        </div>
+                    </div>
+                )}
 
                 <p className="text-xs text-gray-500 text-center pt-2">
                     {mediaFile ? `File: ${mediaFile.name} akan diunggah.` : mediaUrl ? `Link: ${mediaUrl} akan di-embed.` : 'Pilih file atau masukkan link untuk media.'}
@@ -919,74 +968,84 @@ const CreatePost = ({ setPage, userId, username }) => {
 
 // --- 7. KOMPONEN BERANDA (HomeScreen) ---
 const HomeScreen = ({ currentUserId, currentUserEmail, profile, handleFollowToggle, goToProfile, allPosts, isLoadingPosts }) => {
-    const [feedType, setFeedType] = useState('latest'); 
+    const [feedType, setFeedType] = useState('foryou'); 
 
     // Filter post based on feed type and sort
     const processedPosts = useMemo(() => {
         let list = [...allPosts];
 
-        // 1. Filter: If 'following' is selected, only show posts from followed users + own posts
-        if (feedType === 'following' && profile.following?.length > 0) {
-            const followedIds = [...profile.following, currentUserId];
-            list = list.filter(post => followedIds.includes(post.userId));
-        }
-        
-        // 2. Sort: Always sort by latest timestamp
-        list.sort((a, b) => {
-            const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : new Date(a.timestamp).getTime();
-            const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : new Date(b.timestamp).getTime();
-            return timeB - timeA; 
-        });
-
-        // 3. Shuffle (if 'foryou' is selected, otherwise latest sort is kept)
+        // 1. "Untuk Anda" (For You) - Algoritma Kompleks (Simulasi)
+        // Filter: Campuran Postingan Baru + Postingan dengan Like Banyak + Random
         if (feedType === 'foryou') {
-             list.sort(() => Math.random() - 0.5);
+             // Berikan skor: (Likes * 2) + (Komentar * 3)
+             // Tapi acak sedikit agar tidak membosankan
+             list = list.sort((a, b) => {
+                const scoreA = (a.likes?.length || 0) * 2 + (a.commentsCount || 0) * 3 + Math.random() * 5;
+                const scoreB = (b.likes?.length || 0) * 2 + (b.commentsCount || 0) * 3 + Math.random() * 5;
+                return scoreB - scoreA;
+             });
+             // Ambil 50 teratas saja agar performa bagus
+             return list.slice(0, 50);
+        }
+
+        // 2. "Terpopuler" - Urutkan berdasarkan Likes terbanyak
+        if (feedType === 'popular') {
+            list.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+            return list;
+        }
+
+        // 3. "Terbaru" - Murni kronologis
+        if (feedType === 'latest') {
+            list.sort((a, b) => {
+                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : new Date(a.timestamp).getTime();
+                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : new Date(b.timestamp).getTime();
+                return timeB - timeA; 
+            });
+            return list;
         }
 
         return list;
 
-    }, [allPosts, feedType, profile.following, currentUserId]);
+    }, [allPosts, feedType]);
 
 
     return (
         <div className="max-w-2xl mx-auto">
-            <h1 className="text-3xl font-extrabold text-gray-900 mb-6">Beranda Komunitas</h1>
+            <h1 className="text-3xl font-extrabold text-gray-900 mb-2">Beranda Untuk Anda</h1>
+            <p className="text-gray-500 mb-6 text-sm">Konten yang dipilih khusus berdasarkan interaksi komunitas.</p>
             
-            <div className="flex space-x-4 border-b pb-3 mb-6 overflow-x-auto">
-                <button 
-                    onClick={() => setFeedType('latest')}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'latest' ? 'bg-indigo-600 text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}
-                >
-                    <ListOrdered size={20} />
-                    <span>Terbaru</span>
-                </button>
-                <button 
-                    onClick={() => setFeedType('following')}
-                    disabled={!profile.following || profile.following.length === 0}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'following' ? 'bg-indigo-600 text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200 disabled:opacity-50'}`}
-                    title={!profile.following || profile.following.length === 0 ? "Ikuti seseorang untuk melihat feed ini" : "Lihat postingan dari yang diikuti"}
-                >
-                    <UserCheck size={20} />
-                    <span>Mengikuti</span>
-                </button>
+            <div className="flex space-x-2 border-b pb-3 mb-6 overflow-x-auto no-scrollbar">
                 <button 
                     onClick={() => setFeedType('foryou')}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'foryou' ? 'bg-indigo-600 text-white' : 'text-gray-600 bg-gray-100 hover:bg-gray-200'}`}
+                    className={`flex-shrink-0 flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'foryou' ? 'bg-indigo-600 text-white' : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50'}`}
                 >
-                    <Shuffle size={20} />
-                    <span>Untukmu</span>
+                    <Shuffle size={18} />
+                    <span>Untuk Anda</span>
+                </button>
+                <button 
+                    onClick={() => setFeedType('popular')}
+                    className={`flex-shrink-0 flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'popular' ? 'bg-red-500 text-white' : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    <Flame size={18} />
+                    <span>Terpopuler</span>
+                </button>
+                <button 
+                    onClick={() => setFeedType('latest')}
+                    className={`flex-shrink-0 flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition shadow-sm ${feedType === 'latest' ? 'bg-green-600 text-white' : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50'}`}
+                >
+                    <TrendingUp size={18} />
+                    <span>Terbaru</span>
                 </button>
             </div>
 
             {isLoadingPosts ? (
                 <div className="flex flex-col items-center justify-center h-48 text-indigo-600 bg-white p-8 rounded-xl shadow-md">
                     <Loader2 className="animate-spin" size={32} />
-                    <p className="mt-2 text-lg">Memuat Postingan...</p>
+                    <p className="mt-2 text-lg">Meracik Algoritma...</p>
                 </div>
             ) : processedPosts.length === 0 ? (
                 <div className="text-center p-8 bg-white rounded-xl text-gray-500 shadow-md border border-gray-200">
-                    <p>Tidak ada postingan di *feed* ini.</p>
-                    {feedType === 'following' && <p className='mt-2 text-sm'>Coba beralih ke feed **Terbaru** atau cari pengguna lain untuk diikuti.</p>}
+                    <p>Tidak ada postingan di filter ini.</p>
                 </div>
             ) : (
                 <div className="space-y-6">
@@ -1007,8 +1066,150 @@ const HomeScreen = ({ currentUserId, currentUserEmail, profile, handleFollowTogg
     );
 };
 
+// --- 8. KOMPONEN SHORTS (Baru) ---
+const ShortsScreen = ({ allPosts, currentUserId, handleFollowToggle, profile }) => {
+    // Filter hanya video yang ditandai short atau tipe video
+    const shortVideos = useMemo(() => {
+        return allPosts.filter(p => 
+            (p.mediaType === 'video' || p.isShort === true) && p.mediaUrl
+        );
+    }, [allPosts]);
 
-// --- 8. KOMPONEN AKUN (ProfileScreen) ---
+    return (
+        <div className="fixed inset-0 bg-black z-50 flex justify-center overflow-hidden pt-16 sm:pt-0">
+            <div className="w-full max-w-md h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar">
+                {shortVideos.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-white p-8 text-center">
+                        <Film size={48} className="mb-4 text-gray-500"/>
+                        <p className="text-xl font-bold">Belum ada video Shorts.</p>
+                        <p className="text-gray-400 mt-2">Jadilah yang pertama memposting video pendek!</p>
+                    </div>
+                ) : (
+                    shortVideos.map((post) => (
+                        <ShortItem 
+                            key={post.id} 
+                            post={post} 
+                            currentUserId={currentUserId}
+                            handleFollowToggle={handleFollowToggle}
+                            profile={profile}
+                        />
+                    ))
+                )}
+            </div>
+        </div>
+    );
+};
+
+const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
+    const isLiked = post.likes && post.likes.includes(currentUserId);
+    const isFollowing = profile.following?.includes(post.userId);
+    
+    const handleLike = async (e) => {
+        e.stopPropagation();
+        if (!currentUserId) return;
+        const postRef = doc(db, `artifacts/${appId}/public/data/posts`, post.id);
+        try {
+            if (isLiked) {
+                await updateDoc(postRef, { likes: arrayRemove(currentUserId) });
+            } else {
+                await updateDoc(postRef, { likes: arrayUnion(currentUserId) });
+            }
+        } catch (error) {
+            console.error("Like Error:", error);
+        }
+    };
+
+    return (
+        <div className="snap-start w-full h-full relative bg-gray-900 flex items-center justify-center border-b border-gray-800">
+            {/* Video Container */}
+            <video 
+                src={post.mediaUrl} 
+                className="w-full h-full object-contain" 
+                controls={false}
+                autoPlay 
+                muted 
+                loop 
+                playsInline
+                onClick={(e) => e.target.muted = !e.target.muted} // Klik untuk unmute
+            />
+            
+            {/* Overlay Info */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 to-transparent text-white">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-2">
+                        <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold">
+                             {post.user?.username?.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <p className="font-bold text-shadow-sm">{post.user?.username}</p>
+                            {!isFollowing && post.userId !== currentUserId && (
+                                <button 
+                                    onClick={() => handleFollowToggle(post.userId, false)}
+                                    className="text-xs bg-red-600 px-2 py-1 rounded text-white font-bold mt-1"
+                                >
+                                    Ikuti
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+                <p className="text-sm line-clamp-2 mb-2">{post.content}</p>
+                <p className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</p>
+            </div>
+
+            {/* Action Buttons (Right Side) */}
+            <div className="absolute right-2 bottom-20 flex flex-col items-center space-y-6 z-10">
+                <button onClick={handleLike} className="flex flex-col items-center">
+                    <div className={`p-3 rounded-full bg-black/40 backdrop-blur-sm ${isLiked ? 'text-red-500' : 'text-white'}`}>
+                        <Heart size={28} fill={isLiked ? 'currentColor' : 'none'} />
+                    </div>
+                    <span className="text-white text-xs mt-1 font-bold drop-shadow-md">{post.likes?.length || 0}</span>
+                </button>
+                
+                <button className="flex flex-col items-center">
+                    <div className="p-3 rounded-full bg-black/40 backdrop-blur-sm text-white">
+                        <MessageSquare size={28} />
+                    </div>
+                    <span className="text-white text-xs mt-1 font-bold drop-shadow-md">{post.commentsCount || 0}</span>
+                </button>
+
+                <button onClick={() => navigator.clipboard.writeText(window.location.origin + '?post=' + post.id)} className="flex flex-col items-center">
+                     <div className="p-3 rounded-full bg-black/40 backdrop-blur-sm text-white">
+                        <Share2 size={28} />
+                    </div>
+                    <span className="text-white text-xs mt-1 font-bold drop-shadow-md">Share</span>
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// --- 9. KOMPONEN SINGLE POST (Tampilan Dari Share Link) ---
+const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
+    const post = allPosts.find(p => p.id === postId);
+
+    if (!post) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6">
+                <Loader2 className="animate-spin text-indigo-600 mb-4" size={40} />
+                <p className="text-gray-600">Mencari postingan atau postingan telah dihapus...</p>
+                <button onClick={goBack} className="mt-4 text-indigo-600 font-bold hover:underline">Kembali ke Beranda</button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="max-w-2xl mx-auto pt-4">
+            <button onClick={goBack} className="flex items-center text-indigo-600 font-semibold mb-4 hover:bg-indigo-50 p-2 rounded-lg w-fit transition">
+                <ArrowLeft size={20} className="mr-2" /> Kembali ke Beranda
+            </button>
+            <PostItem post={post} {...props} />
+        </div>
+    );
+}
+
+
+// --- 10. KOMPONEN AKUN (ProfileScreen) ---
 const ProfileScreen = ({ currentUserId, username, email, allPosts, currentUserEmail, photoURL, isSelf, handleFollowToggle, profile }) => {
     const [userPosts, setUserPosts] = useState([]);
     const [isEditingPFP, setIsEditingPFP] = useState(false);
@@ -1294,7 +1495,7 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, currentUserEm
 };
 
 
-// --- 9. KOMPONEN PENCARIAN (SearchScreen) ---
+// --- 11. KOMPONEN PENCARIAN (SearchScreen) ---
 
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollowToggle, goToProfile }) => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -1424,7 +1625,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollowToggle, goToPro
 };
 
 
-// --- 10. KOMPONEN UTAMA (App) ---
+// --- 12. KOMPONEN UTAMA (App) ---
 
 const App = () => {
     const [currentUser, setCurrentUser] = useState(null);
@@ -1435,27 +1636,33 @@ const App = () => {
     const [isLoadingPosts, setIsLoadingPosts] = useState(true);
     const [allPosts, setAllPosts] = useState([]);
     const [allUsers, setAllUsers] = useState([]);
+    const [targetPostId, setTargetPostId] = useState(null); // Untuk fitur Share/Deep link
 
+    // Cek apakah ada parameter 'post' di URL saat web dimuat (Deep Link)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const postId = params.get('post');
+        if (postId) {
+            console.log("Deep link terdeteksi ke post:", postId);
+            setTargetPostId(postId);
+            setPage('view_post');
+        }
+    }, []);
 
     // 1. Langganan perubahan otentikasi (Auth State)
     useEffect(() => {
         const handleInitialAuth = async () => {
-            try {
-                if (initialAuthToken) {
+            // PERBAIKAN: Penanganan error yang lebih aman
+            if (initialAuthToken) {
+                try {
                     await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    // Jika tidak ada custom token, biarkan onAuthStateChanged menangani
-                    // Jika tidak ada user, dia akan null
+                } catch (error) {
+                     console.warn("Otentikasi token kustom gagal, silakan login manual:", error.message);
+                     // JANGAN mencoba signInAnonymously di sini jika menyebabkan error 'admin-restricted-operation'.
+                     // Biarkan aplikasi mengalir ke state 'no user' sehingga AuthScreen muncul.
                 }
-            } catch (error) {
-                 console.error("Initial Auth (Custom Token) Gagal:", error);
-                 // Coba sign in anonim sebagai fallback jika custom token gagal
-                 try {
-                     await signInAnonymously(auth);
-                 } catch (anonError) {
-                     console.error("Auth Anonim Gagal:", anonError);
-                 }
-            }
+            } 
+            // Tidak ada 'else' untuk mencoba anonim secara otomatis untuk menghindari error di konsol.
         };
 
         // Panggil handleInitialAuth HANYA SEKALI
@@ -1653,7 +1860,12 @@ const App = () => {
     // Jika tidak sedang loading auth, dan TIDAK ADA currentUser, tampilkan AuthScreen
     if (!currentUser) {
         return <AuthScreen onLoginSuccess={() => {
-            setPage('home'); // Arahkan ke home setelah login berhasil
+            // Cek ulang apakah ada target post setelah login
+            if (targetPostId) {
+                setPage('view_post');
+            } else {
+                setPage('home');
+            }
             setIsAuthChecking(true); // Set checking lagi agar profile dimuat ulang
         }} />;
     }
@@ -1692,6 +1904,30 @@ const App = () => {
                         handleFollowToggle={handleFollowToggle}
                         profile={profile} // Ini profil yang login (untuk cek following)
                     />;
+        }
+        
+        // RENDER HALAMAN KHUSUS POST (DEEP LINK)
+        if (page === 'view_post' && targetPostId) {
+            return <SinglePostView 
+                        postId={targetPostId} 
+                        allPosts={allPosts}
+                        currentUserId={currentUser.uid} 
+                        currentUserEmail={currentUser.email}
+                        profile={profile}
+                        handleFollowToggle={handleFollowToggle}
+                        goToProfile={goToProfile}
+                        goBack={() => {setPage('home'); setTargetPostId(null); window.history.replaceState({}, '', window.location.pathname);}}
+                    />
+        }
+        
+        // RENDER HALAMAN SHORTS
+        if (page === 'shorts') {
+            return <ShortsScreen 
+                allPosts={allPosts}
+                currentUserId={currentUser.uid}
+                handleFollowToggle={handleFollowToggle}
+                profile={profile}
+            />
         }
 
         switch (page) {
@@ -1743,82 +1979,105 @@ const App = () => {
 
     return (
         <div className="min-h-screen bg-gray-100">
-            {/* Header / Navbar */}
-            <header className="sticky top-0 z-10 bg-white shadow-lg border-b border-gray-200">
-                <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-3">
-                    <h1 
-                        className="text-2xl font-bold text-indigo-600 cursor-pointer"
-                        onClick={() => {setPage('home'); setTargetProfileId(null);}}
-                    >
-                        Sosial Komunitas
-                    </h1>
-
-                    {/* Navigasi Utama */}
-                    <nav className="flex items-center space-x-2 sm:space-x-4">
-                        <button 
+            {/* Header / Navbar - Sembunyikan jika di Shorts */}
+            {page !== 'shorts' && (
+                <header className="sticky top-0 z-40 bg-white shadow-lg border-b border-gray-200">
+                    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center py-3">
+                        <h1 
+                            className="text-2xl font-bold text-indigo-600 cursor-pointer"
                             onClick={() => {setPage('home'); setTargetProfileId(null);}}
-                            className={`p-2 rounded-full transition ${page === 'home' && !targetProfileId ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
-                            title="Beranda"
                         >
-                            <Home size={24} />
-                        </button>
-                        
-                        <button 
-                            onClick={() => setPage('search')}
-                            className={`p-2 rounded-full transition ${page === 'search' ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
-                            title="Cari Pengguna/Postingan"
-                        >
-                            <Search size={24} />
-                        </button>
+                            Sosial Komunitas
+                        </h1>
 
-                        <button 
-                            onClick={() => setPage('create')}
-                            className={`p-2 rounded-full transition ${page === 'create' ? 'bg-green-100 text-green-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
-                            title="Buat Postingan Baru"
-                        >
-                            <PlusCircle size={24} /> 
-                        </button>
+                        {/* Navigasi Utama */}
+                        <nav className="flex items-center space-x-2 sm:space-x-4">
+                            <button 
+                                onClick={() => {setPage('home'); setTargetProfileId(null);}}
+                                className={`p-2 rounded-full transition ${page === 'home' && !targetProfileId ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
+                                title="Beranda"
+                            >
+                                <Home size={24} />
+                            </button>
+                            
+                            {/* TOMBOL SHORTS */}
+                            <button 
+                                onClick={() => setPage('shorts')}
+                                className={`p-2 rounded-full transition ${page === 'shorts' ? 'bg-red-100 text-red-600 shadow-inner' : 'text-gray-600 hover:bg-red-50'}`}
+                                title="Shorts (Video Pendek)"
+                            >
+                                <Film size={24} />
+                            </button>
+                            
+                            <button 
+                                onClick={() => setPage('search')}
+                                className={`p-2 rounded-full transition ${page === 'search' ? 'bg-indigo-100 text-indigo-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
+                                title="Cari Pengguna/Postingan"
+                            >
+                                <Search size={24} />
+                            </button>
 
-                        <button 
-                            onClick={() => {setPage('profile'); setTargetProfileId(null);}}
-                            className={`p-1 rounded-full transition ${page === 'profile' && !targetProfileId ? 'bg-indigo-100 ring-2 ring-indigo-500' : 'text-gray-600 hover:bg-gray-100'}`}
-                            title={`Akun Saya: ${profile.username}`}
-                        >
-                            {profile.photoURL ? (
-                                <img 
-                                    src={profile.photoURL}
-                                    alt="PFP"
-                                    className="w-8 h-8 rounded-full object-cover"
-                                />
-                            ) : (
-                                <div className='w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-semibold'>
-                                    {profile.username.charAt(0).toUpperCase()}
-                                </div>
-                            )}
-                        </button>
-                    </nav>
+                            <button 
+                                onClick={() => setPage('create')}
+                                className={`p-2 rounded-full transition ${page === 'create' ? 'bg-green-100 text-green-600 shadow-inner' : 'text-gray-600 hover:bg-gray-100'}`}
+                                title="Buat Postingan Baru"
+                            >
+                                <PlusCircle size={24} /> 
+                            </button>
 
-                    {/* Logout */}
-                    <button 
-                        onClick={handleLogout}
-                        className="p-2 rounded-full text-red-500 hover:bg-red-100 transition flex items-center space-x-1"
-                        title="Logout"
-                    >
-                        <span className='hidden sm:inline text-sm font-medium'>Keluar</span>
-                        <LogOut size={24} />
-                    </button>
-                </div>
-            </header>
+                            <button 
+                                onClick={() => {setPage('profile'); setTargetProfileId(null);}}
+                                className={`p-1 rounded-full transition ${page === 'profile' && !targetProfileId ? 'bg-indigo-100 ring-2 ring-indigo-500' : 'text-gray-600 hover:bg-gray-100'}`}
+                                title={`Akun Saya: ${profile.username}`}
+                            >
+                                {profile.photoURL ? (
+                                    <img 
+                                        src={profile.photoURL}
+                                        alt="PFP"
+                                        className="w-8 h-8 rounded-full object-cover"
+                                    />
+                                ) : (
+                                    <div className='w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-semibold'>
+                                        {profile.username.charAt(0).toUpperCase()}
+                                    </div>
+                                )}
+                            </button>
+                        </nav>
+
+                        {/* Logout */}
+                        <button 
+                            onClick={handleLogout}
+                            className="p-2 rounded-full text-red-500 hover:bg-red-100 transition flex items-center space-x-1"
+                            title="Logout"
+                        >
+                            <span className='hidden sm:inline text-sm font-medium'>Keluar</span>
+                            <LogOut size={24} />
+                        </button>
+                    </div>
+                </header>
+            )}
+            
+            {/* TOMBOL KELUAR DARI SHORTS (Hanya muncul di Shorts) */}
+            {page === 'shorts' && (
+                <button 
+                    onClick={() => setPage('home')}
+                    className="fixed top-4 left-4 z-[60] bg-white/20 backdrop-blur-md text-white p-2 rounded-full hover:bg-white/40 transition"
+                >
+                    <ArrowLeft size={28} />
+                </button>
+            )}
 
             {/* Konten Halaman */}
-            <main className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
+            <main className={page === 'shorts' ? '' : "max-w-4xl mx-auto p-4 sm:p-6 lg:p-8"}>
                 {renderPage()}
             </main>
             
-            {/* Footer sederhana */}
-            <footer className="mt-10 p-4 text-center text-xs text-gray-500 border-t bg-white">
-                Aplikasi Komunitas Sederhana | Masuk sebagai **{profile.username}**
-            </footer>
+            {/* Footer sederhana - Hide di shorts */}
+            {page !== 'shorts' && (
+                 <footer className="mt-10 p-4 text-center text-xs text-gray-500 border-t bg-white">
+                    Selamat datang kembali, {profile.username}! | Sosial Komunitas
+                </footer>
+            )}
         </div>
     );
 };
