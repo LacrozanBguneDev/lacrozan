@@ -8,13 +8,13 @@ import {
 import { 
     getFirestore, doc, collection, query, onSnapshot, 
     updateDoc, arrayUnion, arrayRemove, setDoc, 
-    serverTimestamp, addDoc, getDoc, setLogLevel, deleteDoc, where
+    serverTimestamp, addDoc, getDoc, setLogLevel, deleteDoc, where, orderBy, limit
 } from 'firebase/firestore';
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image, Loader2, Link, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
     Edit, Trash2, X, Check, Save, PlusCircle, Search, UserCheck, ChevronRight,
-    Share2, Film, TrendingUp, Flame, ArrowLeft, AlertTriangle
+    Share2, Film, TrendingUp, Flame, ArrowLeft, AlertTriangle, Bell, Volume2, VolumeX
 } from 'lucide-react';
 
 // Atur log level ke 'warn' atau 'error' agar tidak terlalu berisik di konsol
@@ -43,6 +43,25 @@ const getPublicCollection = (collectionName) =>
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// --- HELPER NOTIFIKASI ---
+const sendNotification = async (toUserId, type, message, fromUser) => {
+    if (!toUserId || !fromUser || toUserId === fromUser.uid) return; // Jangan notif ke diri sendiri
+    try {
+        await addDoc(collection(db, getPublicCollection('notifications')), {
+            toUserId: toUserId,
+            fromUserId: fromUser.uid,
+            fromUsername: fromUser.username,
+            fromPhoto: fromUser.photoURL || '',
+            type: type, // 'like', 'comment', 'follow', 'system'
+            message: message,
+            isRead: false,
+            timestamp: serverTimestamp()
+        });
+    } catch (error) {
+        console.error("Gagal kirim notifikasi:", error);
+    }
+};
 
 // --- 2. FUNGSI UNGGAH API EKSTERNAL (Modified) ---
 const uploadToFaaAPI = async (file, onProgress) => {
@@ -132,7 +151,6 @@ const renderMarkdown = (text) => {
 
 
 // --- 4. LAYAR OTENTIKASI FIREBASE (AuthScreen) ---
-// ... (Kode AuthScreen SAMA PERSIS tidak diubah logic intinya) ...
 const AuthScreen = ({ onLoginSuccess }) => {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
@@ -241,7 +259,6 @@ const AuthScreen = ({ onLoginSuccess }) => {
 
 // --- 5. KOMPONEN POSTINGAN (PostItem) ---
 const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollowToggle, goToProfile }) => {
-    // ... (Logic PostItem SAMA, tidak diubah) ...
     const [showComments, setShowComments] = useState(false);
     const [newComment, setNewComment] = useState('');
     const [comments, setComments] = useState([]);
@@ -274,7 +291,13 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
         const postRef = doc(db, getPublicCollection('posts'), post.id);
         try {
             if (isLiked) await updateDoc(postRef, { likes: arrayRemove(currentUserId) });
-            else await updateDoc(postRef, { likes: arrayUnion(currentUserId) });
+            else {
+                await updateDoc(postRef, { likes: arrayUnion(currentUserId) });
+                // Notifikasi Like
+                if (post.userId !== currentUserId) {
+                    sendNotification(post.userId, 'like', 'menyukai postingan anda.', profile);
+                }
+            }
         } catch (error) { console.error("Gagal like:", error); }
     };
 
@@ -299,6 +322,12 @@ const PostItem = ({ post, currentUserId, currentUserEmail, profile, handleFollow
             });
             const postRef = doc(db, getPublicCollection('posts'), post.id);
             await updateDoc(postRef, { commentsCount: (post.commentsCount || 0) + 1 });
+            
+            // Notifikasi Comment
+            if (post.userId !== currentUserId) {
+                sendNotification(post.userId, 'comment', `mengomentari: "${newComment.trim().substring(0,20)}${newComment.length>20?'...':''}"`, profile);
+            }
+            
             setNewComment('');
         } catch (error) { console.error("Gagal komen:", error); }
     };
@@ -432,13 +461,11 @@ const CreatePost = ({ setPage, userId, username }) => {
     const [uploadError, setUploadError] = useState('');
     const [progress, setProgress] = useState(0); 
     const [isShort, setIsShort] = useState(false);
-    // State baru untuk handling file besar
     const [isLargeFile, setIsLargeFile] = useState(false);
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];
         if (file) {
-            // Cek ukuran file (misal > 25MB dianggap besar)
             if (file.size > 25 * 1024 * 1024) {
                 setIsLargeFile(true);
             } else {
@@ -466,7 +493,6 @@ const CreatePost = ({ setPage, userId, username }) => {
         setMediaType('link');
         setIsLargeFile(false);
 
-        // LOGIKA BARU: Deteksi YouTube Shorts Link otomatis
         if (val.includes('youtube.com/shorts/')) {
             setIsShort(true);
         } else {
@@ -503,10 +529,6 @@ const CreatePost = ({ setPage, userId, username }) => {
                 setProgress(100); 
             }
 
-            // Tambahan logic: Jika Link tapi isShort dicentang, anggap sebagai 'video' untuk Shorts Screen
-            // Tapi di sini kita simpan mediaType tetap 'link' agar renderer tahu itu embed, 
-            // tapi isShort=true akan membuatnya muncul di menu Shorts.
-
             const postsRef = collection(db, getPublicCollection('posts'));
             await addDoc(postsRef, {
                 userId,
@@ -517,7 +539,6 @@ const CreatePost = ({ setPage, userId, username }) => {
                 timestamp: serverTimestamp(),
                 likes: [],
                 commentsCount: 0,
-                // Modifikasi: isShort bisa true untuk video upload ATAU link YouTube Shorts
                 isShort: isShort, 
                 user: { username: username, uid: userId } 
             });
@@ -525,9 +546,7 @@ const CreatePost = ({ setPage, userId, username }) => {
             setProgress(100);
             await new Promise(resolve => setTimeout(resolve, 300));
 
-            // Reset
             setTitle(''); setContent(''); setMediaFile(null); setMediaUrl(''); setIsShort(false);
-            // Arahkan ke Shorts jika isShort
             setPage(isShort ? 'shorts' : 'home');
         } catch (error) {
             console.error("Gagal memposting:", error);
@@ -546,7 +565,6 @@ const CreatePost = ({ setPage, userId, username }) => {
             {uploadError && <div className="p-3 mb-4 rounded-lg text-sm bg-red-100 text-red-700 border border-red-300">{uploadError}</div>}
             
             <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Progress Bar yang Diperbaiki UX nya */}
                 {isLoading && (
                     <div className="mt-4">
                         <div className="text-sm font-semibold text-indigo-600 mb-1 flex justify-between">
@@ -556,18 +574,12 @@ const CreatePost = ({ setPage, userId, username }) => {
                         <div className="w-full bg-gray-200 rounded-full h-2.5">
                             <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${progress}%` }}></div>
                         </div>
-                        {isLargeFile && progress < 90 && (
-                            <p className="text-xs text-orange-600 mt-1 animate-pulse">
-                                File berukuran besar sedang diproses. Jangan tutup halaman ini.
-                            </p>
-                        )}
                     </div>
                 )}
                 
                 <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Judul (Opsional)" className="w-full p-3 border rounded-lg" disabled={isLoading}/>
                 <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Apa yang Anda pikirkan?" rows="6" className="w-full p-3 border rounded-lg" disabled={isLoading}/>
 
-                {/* Alert jika file besar */}
                 {isLargeFile && (
                     <div className="flex items-start space-x-2 bg-orange-50 p-3 rounded-lg border border-orange-200 text-orange-800 text-sm">
                         <AlertTriangle size={18} className="mt-0.5 flex-shrink-0"/>
@@ -589,7 +601,6 @@ const CreatePost = ({ setPage, userId, username }) => {
                     </div>
                 </div>
                 
-                {/* Checkbox Shorts: Muncul untuk Video Upload ATAU Link YouTube */}
                 {(mediaType === 'video' || (mediaType === 'link' && mediaUrl.includes('youtube'))) && (
                     <div className={`flex items-center space-x-2 p-3 border rounded-lg cursor-pointer transition ${isShort ? 'bg-red-50 border-red-200 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`} onClick={() => setIsShort(!isShort)}>
                         <div className={`w-6 h-6 rounded border flex items-center justify-center ${isShort ? 'bg-red-600 border-red-600' : 'bg-white border-gray-400'}`}>
@@ -617,6 +628,9 @@ const HomeScreen = ({ currentUserId, currentUserEmail, profile, handleFollowTogg
 
     const processedPosts = useMemo(() => {
         let list = [...allPosts];
+        // Filter keluar yang isShort = true di home agar tidak duplikat, opsional.
+        // list = list.filter(p => !p.isShort);
+        
         if (feedType === 'foryou') {
              list = list.sort((a, b) => {
                 const scoreA = (a.likes?.length || 0) * 2 + (a.commentsCount || 0) * 3 + Math.random() * 5;
@@ -664,25 +678,36 @@ const HomeScreen = ({ currentUserId, currentUserEmail, profile, handleFollowTogg
     );
 };
 
-// --- 8. KOMPONEN SHORTS (DIPERBAIKI) ---
+// --- 8. KOMPONEN SHORTS DENGAN ALGORITMA DAN AUTO-PLAY ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollowToggle, profile }) => {
-    // Filter video shorts ATAU link youtube shorts yang ditandai
-    const shortVideos = useMemo(() => {
-        return allPosts.filter(p => 
-            p.isShort === true && p.mediaUrl
-        );
+    // 1. ALGORITMA SHORTS: Filter & Sort
+    const shortsFeed = useMemo(() => {
+        // Ambil semua video yang ditandai short
+        let videos = allPosts.filter(p => p.isShort === true && p.mediaUrl);
+
+        // Algoritma sederhana: Campur antara Terbaru (Fresh) dan Populer
+        // Skor = (WaktuUnix / 100000) + (Likes * 50)
+        videos = videos.sort((a, b) => {
+            const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+            const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+            const scoreA = timeA + ((a.likes?.length || 0) * 3600000); // Setiap like "bernilai" 1 jam kesegaran
+            const scoreB = timeB + ((b.likes?.length || 0) * 3600000);
+            return scoreB - scoreA;
+        });
+
+        return videos;
     }, [allPosts]);
 
     return (
         <div className="fixed inset-0 bg-black z-50 flex justify-center overflow-hidden pt-16 sm:pt-0">
             <div className="w-full max-w-md h-full overflow-y-scroll snap-y snap-mandatory no-scrollbar">
-                {shortVideos.length === 0 ? (
+                {shortsFeed.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-white p-8 text-center">
                         <Film size={48} className="mb-4 text-gray-500"/>
                         <p className="text-xl font-bold">Belum ada video Shorts.</p>
                     </div>
                 ) : (
-                    shortVideos.map((post) => (
+                    shortsFeed.map((post) => (
                         <ShortItem key={post.id} post={post} currentUserId={currentUserId} handleFollowToggle={handleFollowToggle} profile={profile} />
                     ))
                 )}
@@ -691,31 +716,69 @@ const ShortsScreen = ({ allPosts, currentUserId, handleFollowToggle, profile }) 
     );
 };
 
-// Komponen Item Shorts yang sudah DIPERBAIKI
+// Komponen Item Shorts dengan Auto-Play & User PP Fix
 const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
+    const containerRef = useRef(null);
+    const videoRef = useRef(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [muted, setMuted] = useState(false);
+
     const isLiked = post.likes && post.likes.includes(currentUserId);
     const isFollowing = profile.following?.includes(post.userId);
     
-    // State untuk komentar di shorts
     const [showComments, setShowComments] = useState(false);
     const [comments, setComments] = useState([]);
     const [newComment, setNewComment] = useState('');
     const [isLoadingComments, setIsLoadingComments] = useState(false);
 
-    // Cek apakah ini YouTube Embed
     const embedData = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     
+    // LOGIKA AUTO PLAY & AUTO CLOSE SAAT SCROLL/TUTUP
+    useEffect(() => {
+        const options = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.6 // Video harus terlihat 60% untuk play
+        };
+
+        const handleIntersection = (entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    setIsPlaying(true);
+                    if (videoRef.current) {
+                        videoRef.current.play().catch(e => console.log("Auto-play blocked", e));
+                    }
+                } else {
+                    setIsPlaying(false);
+                    if (videoRef.current) {
+                        videoRef.current.pause();
+                        videoRef.current.currentTime = 0; // Reset video biasa
+                    }
+                }
+            });
+        };
+
+        const observer = new IntersectionObserver(handleIntersection, options);
+        if (containerRef.current) observer.observe(containerRef.current);
+
+        return () => {
+            if (containerRef.current) observer.unobserve(containerRef.current);
+        };
+    }, []);
+
     const handleLike = async (e) => {
         e.stopPropagation();
         if (!currentUserId) return;
         const postRef = doc(db, getPublicCollection('posts'), post.id);
         try {
             if (isLiked) await updateDoc(postRef, { likes: arrayRemove(currentUserId) });
-            else await updateDoc(postRef, { likes: arrayUnion(currentUserId) });
+            else {
+                await updateDoc(postRef, { likes: arrayUnion(currentUserId) });
+                if (post.userId !== currentUserId) sendNotification(post.userId, 'like', 'menyukai video shorts anda.', profile);
+            }
         } catch (error) { console.error("Like Error:", error); }
     };
 
-    // LOGIKA BARU: Handle Share dengan Feedback
     const handleShareShort = async () => {
         const url = `${window.location.origin}${window.location.pathname}?post=${post.id}`;
         try {
@@ -726,7 +789,6 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
         }
     };
 
-    // LOGIKA BARU: Fetch Comment untuk Shorts
     useEffect(() => {
         if (!showComments) return;
         setIsLoadingComments(true);
@@ -748,35 +810,46 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                 postId: post.id, userId: currentUserId, text: newComment.trim(), username: profile.username, timestamp: serverTimestamp() 
             });
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: (post.commentsCount || 0) + 1 });
+             if (post.userId !== currentUserId) sendNotification(post.userId, 'comment', `mengomentari shorts: "${newComment.trim().substring(0,15)}.."`, profile);
             setNewComment('');
         } catch (error) { console.error("Gagal komen:", error); }
     };
 
+    // Fix User Photo Profile
+    // Pastikan App mengirim data user lengkap di dalam object post. Jika tidak, fallback ke inisial.
+    const userPhoto = post.user?.photoURL || post.user?.photoUrl; 
+    const userInitial = post.user?.username?.charAt(0).toUpperCase() || '?';
+
     return (
-        <div className="snap-start w-full h-full relative bg-gray-900 flex items-center justify-center border-b border-gray-800">
-            {/* Video Container: Support Native Video & YouTube Iframe */}
+        <div ref={containerRef} className="snap-start w-full h-full relative bg-gray-900 flex items-center justify-center border-b border-gray-800">
             {embedData && embedData.type === 'youtube' ? (
-                <div className="w-full h-full pointer-events-auto">
-                     <iframe
-                        src={`${embedData.embedUrl}&controls=0&showinfo=0&loop=1`}
-                        title="YouTube Shorts"
-                        className="w-full h-full object-cover"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                    ></iframe>
-                    {/* Layer transparan agar gesture swipe tetap jalan jika perlu, tapi ini akan blokir kontrol youtube */}
+                <div className="w-full h-full pointer-events-auto relative">
+                    {/* Trik untuk "Auto Stop" Youtube Iframe: Hapus/Unmount saat tidak playing */}
+                    {isPlaying ? (
+                        <iframe
+                            src={`${embedData.embedUrl}&autoplay=1&mute=0&controls=0&loop=1&playlist=${embedData.id}`}
+                            title="YouTube Shorts"
+                            className="w-full h-full object-cover"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                        ></iframe>
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-black">
+                            <p className="text-gray-500">Memuat Video...</p>
+                        </div>
+                    )}
                     <div className="absolute inset-0 bg-transparent pointer-events-none"></div>
                 </div>
             ) : (
                 <video 
+                    ref={videoRef}
                     src={post.mediaUrl} 
                     className="w-full h-full object-contain bg-black" 
                     controls={false}
-                    autoPlay 
-                    muted 
+                    muted={muted} 
                     loop 
                     playsInline
-                    onClick={(e) => e.target.muted = !e.target.muted} 
+                    onClick={() => setMuted(!muted)} 
                 />
             )}
             
@@ -784,11 +857,16 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
             <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 to-transparent text-white pointer-events-none">
                 <div className="flex items-center justify-between mb-2 pointer-events-auto">
                     <div className="flex items-center space-x-2">
-                        <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold">
-                             {post.user?.username?.charAt(0).toUpperCase()}
+                        {/* PERBAIKAN TAMPILAN PP USER */}
+                        <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold overflow-hidden border-2 border-white">
+                             {userPhoto ? (
+                                <img src={userPhoto} alt="User" className="w-full h-full object-cover" />
+                             ) : (
+                                <span>{userInitial}</span>
+                             )}
                         </div>
                         <div>
-                            <p className="font-bold text-shadow-sm">{post.user?.username}</p>
+                            <p className="font-bold text-shadow-sm">{post.user?.username || "User"}</p>
                             {!isFollowing && post.userId !== currentUserId && (
                                 <button onClick={() => handleFollowToggle(post.userId, false)} className="text-xs bg-red-600 px-2 py-1 rounded text-white font-bold mt-1">Ikuti</button>
                             )}
@@ -798,7 +876,6 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                 <p className="text-sm line-clamp-2 mb-2">{post.content}</p>
             </div>
 
-            {/* Action Buttons (Right Side) */}
             <div className="absolute right-2 bottom-20 flex flex-col items-center space-y-6 z-10 pointer-events-auto">
                 <button onClick={handleLike} className="flex flex-col items-center">
                     <div className={`p-3 rounded-full bg-black/40 backdrop-blur-sm ${isLiked ? 'text-red-500' : 'text-white'}`}>
@@ -807,7 +884,6 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                     <span className="text-white text-xs mt-1 font-bold drop-shadow-md">{post.likes?.length || 0}</span>
                 </button>
                 
-                {/* Tombol Komentar yang FIX */}
                 <button onClick={() => setShowComments(true)} className="flex flex-col items-center">
                     <div className="p-3 rounded-full bg-black/40 backdrop-blur-sm text-white">
                         <MessageSquare size={28} />
@@ -815,7 +891,6 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                     <span className="text-white text-xs mt-1 font-bold drop-shadow-md">{post.commentsCount || 0}</span>
                 </button>
 
-                {/* Tombol Share yang FIX */}
                 <button onClick={handleShareShort} className="flex flex-col items-center">
                      <div className="p-3 rounded-full bg-black/40 backdrop-blur-sm text-white">
                         <Share2 size={28} />
@@ -824,7 +899,6 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                 </button>
             </div>
 
-            {/* MODAL KOMENTAR SHORTS (BARU) */}
             {showComments && (
                 <div className="absolute inset-0 z-20 flex items-end bg-black/50 backdrop-blur-sm">
                     <div className="w-full h-[70%] bg-white rounded-t-3xl p-4 flex flex-col animate-in slide-in-from-bottom duration-300">
@@ -850,16 +924,8 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
                         </div>
 
                         <form onSubmit={handlePostComment} className="flex items-center space-x-2 pt-2 border-t">
-                            <input 
-                                type="text" 
-                                value={newComment} 
-                                onChange={(e) => setNewComment(e.target.value)} 
-                                placeholder="Tambahkan komentar..." 
-                                className="flex-1 bg-gray-100 border-none rounded-full px-4 py-2 focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <button type="submit" disabled={!newComment.trim()} className="p-2 bg-indigo-600 text-white rounded-full disabled:bg-gray-300">
-                                <Send size={18} />
-                            </button>
+                            <input type="text" value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tambahkan komentar..." className="flex-1 bg-gray-100 border-none rounded-full px-4 py-2 focus:ring-2 focus:ring-indigo-500"/>
+                            <button type="submit" disabled={!newComment.trim()} className="p-2 bg-indigo-600 text-white rounded-full disabled:bg-gray-300"><Send size={18} /></button>
                         </form>
                     </div>
                 </div>
@@ -868,9 +934,22 @@ const ShortItem = ({ post, currentUserId, handleFollowToggle, profile }) => {
     );
 }
 
-// --- 9. KOMPONEN SINGLE POST (Tampilan Dari Share Link) ---
+// --- 9. KOMPONEN SINGLE POST & META TAG DINAMIS ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
+
+    // FITUR BARU: Update Judul Tab Browser untuk SEO/Share Link
+    useEffect(() => {
+        if (post) {
+            document.title = `${post.title || 'Postingan Baru'} - Eduku Sosial`;
+        } else {
+            document.title = "Eduku Sosial Media";
+        }
+        return () => {
+            document.title = "Eduku Sosial Media"; // Reset saat keluar
+        };
+    }, [post]);
+
     if (!post) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6">
@@ -975,7 +1054,49 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, currentUserEm
     );
 };
 
-// --- 11. KOMPONEN PENCARIAN (SearchScreen) ---
+// --- 11. KOMPONEN NOTIFIKASI (NotificationScreen - BARU) ---
+const NotificationScreen = ({ userId }) => {
+    const [notifications, setNotifications] = useState([]);
+    
+    useEffect(() => {
+        const q = query(
+            collection(db, getPublicCollection('notifications')), 
+            where('toUserId', '==', userId),
+            orderBy('timestamp', 'desc'),
+            limit(20)
+        );
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setNotifications(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
+        });
+        return unsubscribe;
+    }, [userId]);
+
+    return (
+        <div className="max-w-2xl mx-auto p-4">
+            <h1 className="text-2xl font-bold mb-6">Notifikasi</h1>
+            {notifications.length === 0 ? <p className="text-gray-500">Belum ada notifikasi baru.</p> : (
+                <div className="space-y-3">
+                    {notifications.map(notif => (
+                        <div key={notif.id} className={`flex items-center p-4 rounded-xl border ${notif.isRead ? 'bg-white' : 'bg-indigo-50 border-indigo-200'}`}>
+                            <div className="mr-4">
+                                {notif.fromPhoto ? <img src={notif.fromPhoto} className="w-10 h-10 rounded-full object-cover"/> : <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center font-bold">{notif.fromUsername?.charAt(0)}</div>}
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-800">
+                                    <span className="font-bold">{notif.fromUsername}</span> {notif.message}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">{formatTimeAgo(notif.timestamp).relative}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// --- 12. KOMPONEN PENCARIAN (SearchScreen) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollowToggle, goToProfile }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('posts'); 
@@ -1018,7 +1139,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollowToggle, goToPro
     );
 };
 
-// --- 12. KOMPONEN UTAMA (App) ---
+// --- 13. KOMPONEN UTAMA (App) ---
 const App = () => {
     const [currentUser, setCurrentUser] = useState(null);
     const [profile, setProfile] = useState(null); 
@@ -1029,6 +1150,7 @@ const App = () => {
     const [allPosts, setAllPosts] = useState([]);
     const [allUsers, setAllUsers] = useState([]);
     const [targetPostId, setTargetPostId] = useState(null); 
+    const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -1050,6 +1172,29 @@ const App = () => {
         });
         return unsubscribe; 
     }, []);
+
+    // NOTIFIKASI RUTIN JAM 5 PAGI
+    useEffect(() => {
+        if (!currentUser) return;
+        
+        const checkTime = () => {
+            const now = new Date();
+            // Cek apakah jam 5 pagi (05:xx) dan user belum diingatkan hari ini
+            const dateKey = `lastPostPrompt_${now.toDateString()}`;
+            const alreadyPrompted = localStorage.getItem(dateKey);
+
+            if (now.getHours() === 5 && !alreadyPrompted) {
+                // Trigger Notifikasi Lokal / System
+                sendNotification(currentUser.uid, 'system', 'Selamat pagi! Jangan lupa posting sesuatu yang menarik hari ini.', {uid: 'system', username: 'System'});
+                localStorage.setItem(dateKey, 'true');
+            }
+        };
+
+        const interval = setInterval(checkTime, 60000); // Cek setiap menit
+        checkTime(); // Cek saat mounting
+
+        return () => clearInterval(interval);
+    }, [currentUser]);
     
     useEffect(() => {
         if (!currentUser?.uid) { setProfile(null); return; }
@@ -1059,6 +1204,14 @@ const App = () => {
         });
         return unsubscribe;
     }, [currentUser]); 
+
+    // FETCH NOTIF COUNT
+    useEffect(() => {
+        if(!currentUser?.uid) return;
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', currentUser.uid), where('isRead', '==', false));
+        const unsubscribe = onSnapshot(q, (snap) => setUnreadNotifCount(snap.size));
+        return unsubscribe;
+    }, [currentUser]);
 
     useEffect(() => {
         if (isAuthChecking || !currentUser) { setAllPosts([]); setIsLoadingPosts(false); return; } 
@@ -1093,6 +1246,10 @@ const App = () => {
                 updateDoc(doc(db, getPublicCollection('userProfiles'), targetUid), { followers: isFollowing ? arrayRemove(profile.uid) : arrayUnion(profile.uid) })
             ];
             await Promise.all(batch);
+            
+            if (!isFollowing) {
+                sendNotification(targetUid, 'follow', 'mulai mengikuti anda.', profile);
+            }
         } catch (error) { console.error("Follow error"); }
     };
     
@@ -1117,6 +1274,7 @@ const App = () => {
         if (page === 'create') return <CreatePost setPage={setPage} userId={currentUser.uid} username={profile.username} />;
         if (page === 'profile') return <ProfileScreen currentUserId={currentUser.uid} username={profile.username} email={profile.email} allPosts={allPosts} currentUserEmail={currentUser.email} photoURL={profile.photoURL} isSelf={true} handleFollowToggle={handleFollowToggle} profile={profile} />;
         if (page === 'search') return <SearchScreen allPosts={allPosts} allUsers={allUsers} profile={profile} handleFollowToggle={handleFollowToggle} goToProfile={goToProfile} />;
+        if (page === 'notifications') return <NotificationScreen userId={currentUser.uid} />;
         return <HomeScreen currentUserId={currentUser.uid} currentUserEmail={currentUser.email} profile={profile} handleFollowToggle={handleFollowToggle} goToProfile={goToProfile} allPosts={allPosts} isLoadingPosts={isLoadingPosts} />;
     };
 
@@ -1131,6 +1289,10 @@ const App = () => {
                             <button onClick={() => setPage('shorts')} className={`p-2 rounded-full ${page === 'shorts' ? 'bg-red-100 text-red-600' : 'text-gray-600'}`}><Film size={24} /></button>
                             <button onClick={() => setPage('search')} className={`p-2 rounded-full ${page === 'search' ? 'bg-indigo-100 text-indigo-600' : 'text-gray-600'}`}><Search size={24} /></button>
                             <button onClick={() => setPage('create')} className={`p-2 rounded-full ${page === 'create' ? 'bg-green-100 text-green-600' : 'text-gray-600'}`}><PlusCircle size={24} /></button>
+                            <button onClick={() => setPage('notifications')} className={`p-2 rounded-full relative ${page === 'notifications' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'}`}>
+                                <Bell size={24} />
+                                {unreadNotifCount > 0 && <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">{unreadNotifCount}</span>}
+                            </button>
                             <button onClick={() => setPage('profile')} className={`p-1 rounded-full ${page === 'profile' ? 'ring-2 ring-indigo-500' : ''}`}>{profile.photoURL ? <img src={profile.photoURL} className="w-8 h-8 rounded-full object-cover"/> : <div className='w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center'>{profile.username.charAt(0).toUpperCase()}</div>}</button>
                         </nav>
                         <button onClick={handleLogout} className="p-2 text-red-500"><LogOut size={24} /></button>
