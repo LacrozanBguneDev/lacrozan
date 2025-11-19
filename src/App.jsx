@@ -239,7 +239,7 @@ const LandingPage = ({ onGetStarted }) => {
                 </div>
             </div>
             
-            <p className="text-center text-gray-400 text-xs mt-10">© 2024 {APP_NAME} • Aman & Nyaman</p>
+            <p className="text-center text-gray-400 text-xs mt-10">© 2025 {APP_NAME} • Aman & Nyaman</p>
         </div>
     );
 };
@@ -352,7 +352,7 @@ const AuthScreen = ({ onLoginSuccess }) => {
                             <div className="text-left">
                                 <p className="text-[10px] text-gray-400 font-semibold uppercase">Lupa Kata Sandi?</p>
                                 <p className="text-sky-700 font-bold text-sm flex items-center">
-                                    <Phone size={12} className="mr-1"/> Hubungi: 0827378
+                                    <Phone size={12} className="mr-1"/> Hubungi: 087796179293
                                 </p>
                             </div>
                         </div>
