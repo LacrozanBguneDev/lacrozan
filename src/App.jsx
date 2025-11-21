@@ -1267,7 +1267,11 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
     if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
     // FIX UI: Menambahkan padding bottom (pb-40) agar tidak tertutup navbar
-    return <div className="max-w-lg mx-auto p-4 pb-40 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/></div>;
+    return <div className="max-w-lg mx-auto p-4 pb-40 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/>
+    
+    
+    
+    </div>;
 };
 
 // --- 11. APP UTAMA (LOGIKA FIXED) ---
