@@ -1261,17 +1261,50 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
-
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-    const post = allPosts.find(p => p.id === postId);
-    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
-    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
-    // FIX UI: Menambahkan padding bottom (pb-40) agar tidak tertutup navbar
-    return <div className="max-w-lg mx-auto p-4 pb-40 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/>
-    
-    
-    
-    </div>;
+  const [bottomPad, setBottomPad] = React.useState(0);
+
+  React.useEffect(() => {
+    const nav = document.getElementById("bottomNavbar");
+    if (nav) setBottomPad(nav.offsetHeight + 20);
+  }, []);
+
+  const post = allPosts.find(p => p.id === postId);
+
+  const handleBack = () => {
+    const url = new URL(window.location);
+    url.searchParams.delete('post');
+    window.history.pushState({}, '', url);
+    goBack();
+  };
+
+  if (!post) {
+    return (
+      <div className="p-10 text-center text-gray-400 mt-20">
+        Postingan hilang.
+        <br />
+        <button onClick={handleBack} className="text-sky-600 font-bold mt-4">
+          Kembali
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="max-w-lg mx-auto p-4 pt-6"
+      style={{ paddingBottom: bottomPad }}
+    >
+      <button
+        onClick={handleBack}
+        className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"
+      >
+        <ArrowLeft size={18} className="mr-2" /> Kembali
+      </button>
+
+      <PostItem post={post} {...props} />
+    </div>
+  );
 };
 
 // --- 11. APP UTAMA (LOGIKA FIXED) ---
