@@ -38,7 +38,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// Import Icons (Lucide React) - Ditambahkan 'Bookmark' untuk fitur baru
+// Import Icons (Lucide React) - Lengkap termasuk Bookmark, Sun, Moon
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -47,7 +47,7 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark // <-- Ikon baru untuk fitur simpan
+    Award, Crown, Gem, Medal, Bookmark // <-- Ikon Simpan
 } from 'lucide-react';
 
 // Atur Log Level Firebase (Supaya tidak berisik di console saat development)
@@ -62,6 +62,7 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KONFIGURASI FIREBASE ---
+// Menggunakan konfigurasi environment jika tersedia, atau fallback ke config default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -699,7 +700,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.0</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.4 (Stable)</div>
                     </div>
                     
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
@@ -754,6 +755,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     // Fitur Baca Selengkapnya
     const [isExpanded, setIsExpanded] = useState(false);
 
+    // INOVASI BARU: State untuk Animasi Like (Double Tap)
+    const [showHeartOverlay, setShowHeartOverlay] = useState(false);
+
     const isOwner = post.userId === currentUserId;
     const isFollowing = profile.following?.includes(post.userId);
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
@@ -782,6 +786,18 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 await updateDoc(ref, { likes: arrayRemove(currentUserId) });
             }
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
+    };
+
+    // FUNGSI BARU: Double Tap Like Logic (Seperti Instagram)
+    const handleDoubleTap = () => {
+        // Trigger animasi hati
+        setShowHeartOverlay(true);
+        setTimeout(() => setShowHeartOverlay(false), 800);
+
+        // Jika belum dilike, jalankan fungsi like
+        if (!liked) {
+            handleLike();
+        }
     };
 
     // FUNGSI BARU: Simpan/Hapus Bookmark
@@ -907,8 +923,19 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         {isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 dark:text-sky-400 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}
                     </div>
                     {(isImage || isVideo || embed) && (
-                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 dark:border-gray-700 relative">
-                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover"/>}
+                        // FEATURE: DOUBLE TAP TO LIKE (INOVASI KEREN)
+                        <div 
+                            className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 dark:border-gray-700 relative select-none"
+                            onDoubleClick={handleDoubleTap}
+                        >
+                            {/* Animasi Hati Overlay */}
+                            {showHeartOverlay && (
+                                <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700">
+                                    <Heart size={100} className="text-white drop-shadow-2xl fill-white" />
+                                </div>
+                            )}
+
+                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
                             {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                             {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 dark:bg-gray-700 text-sky-600 dark:text-sky-400 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
@@ -1030,7 +1057,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                         </div>
                     ))}
                     
-                    {/* Scroll Trigger */}
+                    {/* Scroll Trigger (Tanpa Tombol Kembali ke Atas) */}
                     <div ref={bottomRef} className="h-10 w-full flex items-center justify-center">
                         {loadingMore && <Loader2 className="animate-spin text-sky-500"/>}
                         {!loadingMore && stableFeed.length <= displayCount && stableFeed.length > 0 && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
@@ -1199,7 +1226,6 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 <div className="flex justify-center gap-8 mt-6 border-t pt-6 dark:border-gray-700"><div><span className="font-bold text-xl block dark:text-white">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block dark:text-white">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
             </div>
             
-            {/* TAB NAVIGASI PROFIL (Baru V17) */}
             {isSelf && (
                 <div className="flex gap-2 px-4 mb-6">
                     <button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button>
@@ -1240,10 +1266,11 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
     if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
-    return <div className="max-w-lg mx-auto p-4 pb-20 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/></div>;
+    // FIX UI: Menambahkan padding bottom (pb-40) agar tidak tertutup navbar
+    return <div className="max-w-lg mx-auto p-4 pb-40 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/></div>;
 };
 
-// --- 11. APP UTAMA ---
+// --- 11. APP UTAMA (LOGIKA FIXED) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1256,17 +1283,32 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
-    // PERBAIKAN FITUR DARK MODE V17: Menggunakan localStorage
+    // --- LOGIKA SCROLL OTOMATIS ---
+    // Setiap kali 'page' berubah, scroll window ke paling atas (0,0)
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [page]);
+
+    // --- LOGIKA BARU: MANUAL ONLY (FIX BUG MODE GELAP) ---
+    // 1. Cek apakah ada simpanan di localStorage (hanya 'dark' atau 'light').
+    // 2. Jika KOSONG/NULL, maka DEFAULT = FALSE (Mode Cerah).
+    // 3. JANGAN cek system preference (window.matchMedia) agar tidak bentrok.
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') === 'dark';
+            const saved = localStorage.getItem('theme');
+            return saved === 'dark'; // Hanya true jika history-nya 'dark'
         }
-        return false;
+        return false; // Default Selalu Cerah
     });
 
-    // Efek samping untuk Dark Mode
+    const toggleTheme = () => {
+        setDarkMode(prev => !prev);
+    };
+
+    // Effect ini memastikan class 'dark' ditambahkan ke HTML tag root
+    // Ini penting agar Tailwind mendeteksi perubahan mode
     useEffect(() => {
-        const root = window.document.documentElement;
+        const root = document.documentElement;
         if (darkMode) {
             root.classList.add('dark');
             localStorage.setItem('theme', 'dark');
@@ -1336,32 +1378,37 @@ const App = () => {
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
+    // WRAPPER UTAMA: Class 'dark' dipasang di sini juga untuk keamanan ganda
     return (
-        <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
-            {page!=='shorts' && (
-                <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-700 shadow-sm">
-                    <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
-                    <div className="flex gap-3">
-                        <button onClick={()=>setDarkMode(!darkMode)} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
-                            {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
-                        </button>
-                        <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
-                        <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-gray-300 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button>
-                        <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
-                    </div>
-                </header>
-            )}
-            <main className={page!=='shorts'?'pt-16':''}>
-                {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
-                {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
-                {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
-                {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                {page==='profile' && <ProfileScreen currentUserId={user.uid} username={profile.username} email={profile.email} allPosts={posts} photoURL={profile.photoURL} isSelf={true} handleFollow={handleFollow} profile={profile}/>}
-                {page==='other-profile' && <ProfileScreen currentUserId={targetUid} username={users.find(u=>u.uid===targetUid)?.username} email={''} allPosts={posts} photoURL={users.find(u=>u.uid===targetUid)?.photoURL} isSelf={false} handleFollow={handleFollow} profile={profile}/>}
-                {page==='view_post' && <div className="max-w-lg mx-auto pt-6 px-4"><button onClick={handleGoBack} className="mb-4 flex items-center font-bold text-gray-500 hover:text-sky-600"><ArrowLeft size={18} className="mr-2"/> Kembali</button>{posts.find(p=>p.id===targetPid) ? <PostItem post={posts.find(p=>p.id===targetPid)} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/> : <div className="text-center p-10 text-gray-400">Postingan tidak ditemukan.</div>}</div>}
-            </main>
-            {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+        <div className={darkMode ? "dark" : ""}>
+            <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
+                {page!=='shorts' && (
+                    <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-700 shadow-sm transition-colors duration-300">
+                        <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
+                        <div className="flex gap-3">
+                            {/* TOMBOL DARK MODE */}
+                            <button onClick={toggleTheme} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
+                                {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
+                            </button>
+                            
+                            <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
+                            <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-gray-300 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button>
+                            <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
+                        </div>
+                    </header>
+                )}
+                <main className={page!=='shorts'?'pt-16':''}>
+                    {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
+                    {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
+                    {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
+                    {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='profile' && <ProfileScreen currentUserId={user.uid} username={profile.username} email={profile.email} allPosts={posts} photoURL={profile.photoURL} isSelf={true} handleFollow={handleFollow} profile={profile}/>}
+                    {page==='other-profile' && <ProfileScreen currentUserId={targetUid} username={users.find(u=>u.uid===targetUid)?.username} email={''} allPosts={posts} photoURL={users.find(u=>u.uid===targetUid)?.photoURL} isSelf={false} handleFollow={handleFollow} profile={profile}/>}
+                    {page==='view_post' && <div className="max-w-lg mx-auto pt-6 px-4"><button onClick={handleGoBack} className="mb-4 flex items-center font-bold text-gray-500 hover:text-sky-600"><ArrowLeft size={18} className="mr-2"/> Kembali</button>{posts.find(p=>p.id===targetPid) ? <PostItem post={posts.find(p=>p.id===targetPid)} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/> : <div className="text-center p-10 text-gray-400">Postingan tidak ditemukan.</div>}</div>}
+                </main>
+                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+            </div>
         </div>
     );
 };
