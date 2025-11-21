@@ -46,7 +46,8 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark, Coffee
+    Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
+    Hash, Tag
 } from 'lucide-react';
 
 // Atur Log Level Firebase
@@ -83,7 +84,7 @@ const db = getFirestore(app);
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// 1. Algoritma Acak (Fisher-Yates Shuffle)
+// 1. Algoritma Acak
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -173,7 +174,7 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-// 6. Kalkulator Reputasi & Badge
+// 6. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -182,8 +183,15 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
+// 7. Ekstraktor Hashtag (FITUR BARU)
+const extractHashtags = (text) => {
+    if (!text) return [];
+    const matches = text.match(/#[\w]+/g);
+    return matches ? matches : [];
+};
+
 // ==========================================
-// BAGIAN 3: KOMPONEN-KOMPONEN UI (KECIL)
+// BAGIAN 3: KOMPONEN UI KECIL
 // ==========================================
 
 const ImageWithRetry = ({ src, alt, className }) => {
@@ -243,7 +251,6 @@ const SkeletonPost = () => (
     </div>
 );
 
-// --- FORMAT TEKS LANJUTAN ---
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text;
@@ -413,7 +420,7 @@ const AuthScreen = ({ onLoginSuccess }) => {
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [] });
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [], mood: '' });
             }
             onLoginSuccess();
         } catch (err) {
@@ -460,7 +467,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V18.0 (Stable)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V19.0 (Stable)</div>
                     </div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
                     <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna yang aman, modern, dan interaktif untuk semua kalangan. 🌍✨</p>
@@ -514,9 +521,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
 
     const isOwner = post.userId === currentUserId;
-    const isFollowing = profile.following?.includes(post.userId);
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
+
+    // LOGIKA BARU: Cek status pertemanan yang akurat
+    // 1. Apakah saya mengikuti dia?
+    const isFollowing = (profile.following || []).includes(post.userId);
+    // 2. Apakah dia mengikuti saya? (Cek di array followers saya)
+    const isFollowedByTarget = (profile.followers || []).includes(post.userId);
+    // 3. Apakah berteman? (Saling follow)
+    const isFriend = isFollowing && isFollowedByTarget;
 
     const MAX_CHARS = 250;
     const isLongText = post.content && post.content.length > MAX_CHARS;
@@ -631,7 +645,18 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 
                 <div className="flex gap-2">
                     {!isOwner && post.userId !== currentUserId && (
-                        <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFollowing ? 'Teman' : 'Ikuti'}</button>
+                        <button 
+                            onClick={() => handleFollow(post.userId, isFollowing)} 
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+                                isFriend 
+                                    ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' // Berteman (Hijau)
+                                    : isFollowing 
+                                        ? 'bg-gray-100 text-gray-500' // Cuma Follow (Abu)
+                                        : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md' // Belum Follow (Biru)
+                            }`}
+                        >
+                            {isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
+                        </button>
                     )}
                     {(isOwner || isMeDeveloper) && (
                         <>
@@ -693,7 +718,38 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// --- 7. HOME SCREEN (AUTO SCROLL INFINITE) ---
+// --- FITUR BARU: TRENDING HASHTAGS ---
+const TrendingTags = ({ posts }) => {
+    const tags = useMemo(() => {
+        const tagCounts = {};
+        posts.forEach(p => {
+            const extracted = extractHashtags(p.content);
+            extracted.forEach(tag => {
+                tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+            });
+        });
+        return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    }, [posts]);
+
+    if (tags.length === 0) return null;
+
+    return (
+        <div className="mb-4 overflow-x-auto no-scrollbar py-2">
+            <div className="flex gap-3">
+                <div className="flex items-center gap-1 text-xs font-bold text-sky-600 whitespace-nowrap mr-2">
+                    <TrendingUp size={16}/> Trending:
+                </div>
+                {tags.map(([tag, count]) => (
+                    <div key={tag} className="px-3 py-1 bg-white border border-sky-100 rounded-full text-[10px] font-bold text-gray-600 shadow-sm whitespace-nowrap flex items-center gap-1">
+                        <Hash size={10} className="text-sky-500"/> {tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+// --- 7. HOME SCREEN ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
@@ -746,7 +802,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
-            <div className="flex items-center justify-between mb-6 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 backdrop-blur-md py-2 -mx-4 px-4">
+            <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 backdrop-blur-md py-2 -mx-4 px-4">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                      <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Terbaru</button>
                      <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white text-gray-500'}`}>Populer</button>
@@ -754,6 +810,10 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                 </div>
                 <button onClick={manualRefresh} className="p-2 bg-white text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
+
+            {/* FITUR BARU: TRENDING TAGS */}
+            <TrendingTags posts={allPosts} />
+
             {loadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-3xl shadow-sm border border-dashed border-gray-200"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
             ) : (
@@ -878,19 +938,54 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- 10. PROFILE (LEVELING SYSTEM) ---
+// --- 10. PROFILE (LEVELING SYSTEM + FEATURE BARU MOOD) ---
 const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isSelf, handleFollow, profile }) => {
-    const [edit, setEdit] = useState(false); const [name, setName] = useState(username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false);
+    const [edit, setEdit] = useState(false); 
+    const [name, setName] = useState(username); 
+    const [file, setFile] = useState(null); 
+    const [load, setLoad] = useState(false);
     const [showDev, setShowDev] = useState(false);
     const [activeTab, setActiveTab] = useState('posts'); 
+    const [mood, setMood] = useState(profile.mood || '');
+    const [isEditingMood, setIsEditingMood] = useState(false);
 
     const userPosts = allPosts.filter(p=>p.userId===currentUserId).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
     const savedPostsData = allPosts.filter(p => profile.savedPosts?.includes(p.id));
     const isDev = email === DEVELOPER_EMAIL;
-    const save = async () => { setLoad(true); try { const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
+    
+    // LOGIKA PERTEMANAN YANG DIPERBAIKI
+    // Hitung Teman: Irisan antara Following dan Followers
+    // Pastikan followers & following ada (tidak undefined)
+    const myFollowers = profile.followers || [];
+    const myFollowing = profile.following || [];
+    
+    const friendsCount = myFollowing.filter(id => myFollowers.includes(id)).length;
+    const followingCount = myFollowing.length;
+    const followersCount = myFollowers.length;
+
+    const save = async () => { 
+        setLoad(true); 
+        try { 
+            const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; 
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); 
+            setEdit(false); 
+        } catch(e){alert(e.message)} finally{setLoad(false)}; 
+    };
+
+    const saveMood = async () => {
+        try {
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), { mood: mood });
+            setIsEditingMood(false);
+        } catch(e) { console.error(e); }
+    };
 
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
+
+    // Logika Tombol Follow di Profil Orang Lain
+    const isFollowing = myFollowing.includes(currentUserId); // Apakah saya follow orang ini?
+    const isFollowedByTarget = myFollowers.includes(currentUserId); // Apakah dia follow saya?
+    const isFriend = isFollowing && isFollowedByTarget; // Berteman?
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
@@ -900,13 +995,60 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                     <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white shadow-lg bg-gray-100">{photoURL?<ImageWithRetry src={photoURL} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{username?.[0]}</div>}</div>
                     {isSelf && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
-                {edit ? <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button></div> : <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>}
-                <p className="text-gray-400 text-xs mb-4">{email}</p>
+
+                {edit ? (
+                    <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in">
+                        <input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/>
+                        <input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/>
+                        <button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button>
+                    </div> 
+                ) : (
+                    <>
+                        <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>
+                        
+                        {/* FITUR BARU: STATUS MOOD */}
+                        {isSelf ? (
+                            isEditingMood ? (
+                                <div className="flex items-center justify-center gap-2 mt-2">
+                                    <input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/>
+                                    <button onClick={saveMood} className="text-green-500"><Check size={14}/></button>
+                                </div>
+                            ) : (
+                                <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">
+                                    {profile.mood ? `"${profile.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/>
+                                </div>
+                            )
+                        ) : (
+                            profile.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profile.mood}"</p>
+                        )}
+                    </>
+                )}
                 
-                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs mb-6 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
-                {!isSelf && <button onClick={()=>handleFollow(currentUserId, profile.following?.includes(currentUserId))} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition ${profile.following?.includes(currentUserId)?'bg-gray-100 text-gray-600':'bg-sky-500 text-white shadow-sky-200'}`}>{profile.following?.includes(currentUserId)?'Berteman':'Ikuti'}</button>}
+                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
+                
+                {!isSelf && (
+                    <button 
+                        onClick={()=>handleFollow(currentUserId, isFollowing)} 
+                        className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${
+                            isFriend 
+                                ? 'bg-emerald-500 text-white shadow-emerald-200' // Berteman
+                                : isFollowing 
+                                    ? 'bg-gray-200 text-gray-600' // Mengikuti
+                                    : 'bg-sky-500 text-white shadow-sky-200' // Ikuti
+                        }`}
+                    >
+                        {isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
+                    </button>
+                )}
+                
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-                <div className="flex justify-center gap-8 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
+                
+                {/* STATISTIK TEMAN / PENGIKUT (FIXED) */}
+                <div className="flex justify-center gap-6 mt-6 border-t pt-6">
+                    <div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div>
+                    <div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div>
+                    <div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div>
+                </div>
             </div>
             
             {isSelf && (
@@ -929,7 +1071,18 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
     const [term, setTerm] = useState(''); const [tab, setTab] = useState('posts');
     const posts = allPosts.filter(p=>p.content?.toLowerCase().includes(term.toLowerCase()) || p.title?.toLowerCase().includes(term.toLowerCase()));
     const users = allUsers.filter(u=>u.username?.toLowerCase().includes(term.toLowerCase()) && u.uid!==profile.uid);
-    return <div className="max-w-lg mx-auto p-4 pb-24"><input value={term} onChange={e=>setTerm(e.target.value)} placeholder="Cari..." className="w-full p-3 bg-white rounded-xl border mb-4 outline-none focus:ring-2 focus:ring-sky-200"/><div className="flex gap-2 mb-4"><button onClick={()=>setTab('posts')} className={`flex-1 py-2 rounded-lg font-bold transition ${tab==='posts'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Postingan</button><button onClick={()=>setTab('users')} className={`flex-1 py-2 rounded-lg font-bold transition ${tab==='users'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Pengguna</button></div>{term.length<2?<div className="text-center py-20 text-gray-400">Ketik minimal 2 huruf</div>:(tab==='posts'?posts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile}/>):users.map(u=><div key={u.uid} className="flex justify-between p-4 bg-white rounded-xl mb-2 shadow-sm"><div className="font-bold cursor-pointer flex items-center gap-2" onClick={()=>goToProfile(u.uid)}><div className="w-8 h-8 bg-sky-100 rounded-full flex items-center justify-center text-sky-600">{u.username[0]}</div>{u.username}</div><button onClick={()=>handleFollow(u.uid, profile.following?.includes(u.uid))} className="text-xs bg-sky-100 text-sky-600 px-3 py-1.5 rounded-full font-bold">{profile.following?.includes(u.uid)?'Teman':'Ikuti'}</button></div>))}</div>;
+    
+    // Helper di Search untuk status follow
+    const checkStatus = (targetUid) => {
+        const isFollowing = (profile.following || []).includes(targetUid);
+        const isFriend = isFollowing && (profile.followers || []).includes(targetUid);
+        return { isFollowing, isFriend };
+    };
+
+    return <div className="max-w-lg mx-auto p-4 pb-24"><input value={term} onChange={e=>setTerm(e.target.value)} placeholder="Cari..." className="w-full p-3 bg-white rounded-xl border mb-4 outline-none focus:ring-2 focus:ring-sky-200"/><div className="flex gap-2 mb-4"><button onClick={()=>setTab('posts')} className={`flex-1 py-2 rounded-lg font-bold transition ${tab==='posts'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Postingan</button><button onClick={()=>setTab('users')} className={`flex-1 py-2 rounded-lg font-bold transition ${tab==='users'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Pengguna</button></div>{term.length<2?<div className="text-center py-20 text-gray-400">Ketik minimal 2 huruf</div>:(tab==='posts'?posts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile}/>):users.map(u=>{
+        const status = checkStatus(u.uid);
+        return <div key={u.uid} className="flex justify-between p-4 bg-white rounded-xl mb-2 shadow-sm"><div className="font-bold cursor-pointer flex items-center gap-2" onClick={()=>goToProfile(u.uid)}><div className="w-8 h-8 bg-sky-100 rounded-full flex items-center justify-center text-sky-600">{u.username[0]}</div>{u.username}</div><button onClick={()=>handleFollow(u.uid, status.isFollowing)} className={`text-xs px-3 py-1.5 rounded-full font-bold ${status.isFriend ? 'bg-emerald-100 text-emerald-600' : status.isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-sky-100 text-sky-600'}`}>{status.isFriend?'Berteman':status.isFollowing?'Mengikuti':'Ikuti'}</button></div>
+    }))}</div>;
 };
 
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
@@ -954,8 +1107,6 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
                 <ArrowLeft size={18} className="mr-2"/> Kembali
             </button>
             <PostItem post={post} {...props}/>
-            
-            {/* FITUR BARU: PENANDA AKHIR HALAMAN POSTINGAN */}
             <div className="mt-8 text-center p-6 bg-gray-50 rounded-2xl border border-gray-200 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2">
                 <Coffee size={24} className="opacity-50"/>
                 Gaada lagi postingan di bawah
@@ -978,20 +1129,8 @@ const App = () => {
     const [showSplash, setShowSplash] = useState(true);
 
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
-
-    // FIX THEME: Hapus state darkMode dan biarkan default (light)
-    // Membersihkan class 'dark' jika pernah tersimpan sebelumnya
-    useEffect(() => {
-        document.documentElement.classList.remove('dark');
-        localStorage.removeItem('theme');
-    }, []);
-
-    useEffect(() => {
-        const timer = setTimeout(() => setShowSplash(false), 3000);
-        const p = new URLSearchParams(window.location.search).get('post');
-        if (p) setTargetPid(p);
-        return () => clearTimeout(timer);
-    }, []);
+    useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
+    useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
 
     useEffect(() => onAuthStateChanged(auth, u => { 
         if(u) { setUser(u); updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); } 
@@ -1046,7 +1185,6 @@ const App = () => {
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
-    // TAMPILAN UTAMA TANPA DARK MODE
     return (
         <div>
             <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
