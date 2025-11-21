@@ -47,7 +47,7 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag
+    Hash, Tag, Wifi
 } from 'lucide-react';
 
 // Atur Log Level Firebase
@@ -183,11 +183,19 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
-// 7. Ekstraktor Hashtag (FITUR BARU)
+// 7. Ekstraktor Hashtag
 const extractHashtags = (text) => {
     if (!text) return [];
     const matches = text.match(/#[\w]+/g);
     return matches ? matches : [];
+};
+
+// 8. Cek Online Status (Helper Baru)
+const isUserOnline = (lastSeen) => {
+    if (!lastSeen) return false;
+    const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
+    const diff = Date.now() - last.getTime();
+    return diff < 10 * 60 * 1000; // Online jika aktif dalam 10 menit terakhir
 };
 
 // ==========================================
@@ -467,7 +475,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V19.0 (Stable)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V20.0 (Stable)</div>
                     </div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
                     <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna yang aman, modern, dan interaktif untuk semua kalangan. 🌍✨</p>
@@ -938,43 +946,45 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- 10. PROFILE (LEVELING SYSTEM + FEATURE BARU MOOD) ---
-const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isSelf, handleFollow, profile }) => {
+// --- 10. PROFILE (LEVELING SYSTEM + MOOD + FIX STATS) ---
+// PERBAIKAN: Sekarang menerima 'viewerProfile' (Yang melihat) dan 'profileData' (Yang dilihat)
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
     const [edit, setEdit] = useState(false); 
-    const [name, setName] = useState(username); 
+    const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
     const [load, setLoad] = useState(false);
     const [showDev, setShowDev] = useState(false);
     const [activeTab, setActiveTab] = useState('posts'); 
-    const [mood, setMood] = useState(profile.mood || '');
+    const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
 
-    const userPosts = allPosts.filter(p=>p.userId===currentUserId).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
-    const savedPostsData = allPosts.filter(p => profile.savedPosts?.includes(p.id));
-    const isDev = email === DEVELOPER_EMAIL;
+    const isSelf = viewerProfile.uid === profileData.uid; // Cek apakah ini profil sendiri
+    const isDev = profileData.email === DEVELOPER_EMAIL;
+
+    // DATA YANG DITAMPILKAN (REAL DARI PROFILE DATA)
+    const userPosts = allPosts.filter(p=>p.userId===profileData.uid).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
     
-    // LOGIKA PERTEMANAN YANG DIPERBAIKI
-    // Hitung Teman: Irisan antara Following dan Followers
-    // Pastikan followers & following ada (tidak undefined)
-    const myFollowers = profile.followers || [];
-    const myFollowing = profile.following || [];
+    // PERBAIKAN STATISTIK
+    const followersCount = (profileData.followers || []).length;
+    const followingCount = (profileData.following || []).length;
     
-    const friendsCount = myFollowing.filter(id => myFollowers.includes(id)).length;
-    const followingCount = myFollowing.length;
-    const followersCount = myFollowers.length;
+    // Hitung Teman (Mutual di profil target)
+    const targetFollowers = profileData.followers || [];
+    const targetFollowing = profileData.following || [];
+    const friendsCount = targetFollowing.filter(id => targetFollowers.includes(id)).length;
 
     const save = async () => { 
         setLoad(true); 
         try { 
-            const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; 
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); 
+            const url = file ? await uploadToFaaAPI(file, ()=>{}) : profileData.photoURL; 
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
             setEdit(false); 
         } catch(e){alert(e.message)} finally{setLoad(false)}; 
     };
 
     const saveMood = async () => {
         try {
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), { mood: mood });
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood });
             setIsEditingMood(false);
         } catch(e) { console.error(e); }
     };
@@ -982,17 +992,28 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
 
-    // Logika Tombol Follow di Profil Orang Lain
-    const isFollowing = myFollowing.includes(currentUserId); // Apakah saya follow orang ini?
-    const isFollowedByTarget = myFollowers.includes(currentUserId); // Apakah dia follow saya?
-    const isFriend = isFollowing && isFollowedByTarget; // Berteman?
+    // Logika Tombol Follow (Berdasarkan viewerProfile)
+    const isFollowing = (viewerProfile.following || []).includes(profileData.uid); 
+    const isFollowedByTarget = (viewerProfile.followers || []).includes(profileData.uid);
+    const isFriend = isFollowing && isFollowedByTarget; 
+
+    // Bonus: Indikator Online
+    const isOnline = isUserOnline(profileData.lastSeen);
+
+    // Saved posts hanya ditampilkan jika profil sendiri (Privasi)
+    const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
             <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
-                    <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white shadow-lg bg-gray-100">{photoURL?<ImageWithRetry src={photoURL} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{username?.[0]}</div>}</div>
+                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'}`}>
+                        {profileData.photoURL ? <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{profileData.username?.[0]}</div>}
+                    </div>
+                    {/* Indikator Online (Bulatan) */}
+                    <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    
                     {isSelf && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
 
@@ -1004,9 +1025,9 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                     </div> 
                 ) : (
                     <>
-                        <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>
+                        <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>
                         
-                        {/* FITUR BARU: STATUS MOOD */}
+                        {/* STATUS MOOD */}
                         {isSelf ? (
                             isEditingMood ? (
                                 <div className="flex items-center justify-center gap-2 mt-2">
@@ -1015,11 +1036,11 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                                 </div>
                             ) : (
                                 <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">
-                                    {profile.mood ? `"${profile.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/>
+                                    {profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/>
                                 </div>
                             )
                         ) : (
-                            profile.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profile.mood}"</p>
+                            profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p>
                         )}
                     </>
                 )}
@@ -1028,13 +1049,13 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 
                 {!isSelf && (
                     <button 
-                        onClick={()=>handleFollow(currentUserId, isFollowing)} 
+                        onClick={()=>handleFollow(profileData.uid, isFollowing)} 
                         className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${
                             isFriend 
-                                ? 'bg-emerald-500 text-white shadow-emerald-200' // Berteman
+                                ? 'bg-emerald-500 text-white shadow-emerald-200' 
                                 : isFollowing 
-                                    ? 'bg-gray-200 text-gray-600' // Mengikuti
-                                    : 'bg-sky-500 text-white shadow-sky-200' // Ikuti
+                                    ? 'bg-gray-200 text-gray-600' 
+                                    : 'bg-sky-500 text-white shadow-sky-200'
                         }`}
                     >
                         {isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
@@ -1043,7 +1064,7 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
                 
-                {/* STATISTIK TEMAN / PENGIKUT (FIXED) */}
+                {/* STATISTIK YANG BENAR SESUAI PROFILE DATA */}
                 <div className="flex justify-center gap-6 mt-6 border-t pt-6">
                     <div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div>
                     <div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div>
@@ -1059,8 +1080,8 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
             )}
 
             <div className="px-4 space-y-6">
-                {activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
-                ) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}
+                {activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
+                ) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}
             </div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
@@ -1072,7 +1093,6 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
     const posts = allPosts.filter(p=>p.content?.toLowerCase().includes(term.toLowerCase()) || p.title?.toLowerCase().includes(term.toLowerCase()));
     const users = allUsers.filter(u=>u.username?.toLowerCase().includes(term.toLowerCase()) && u.uid!==profile.uid);
     
-    // Helper di Search untuk status follow
     const checkStatus = (targetUid) => {
         const isFollowing = (profile.following || []).includes(targetUid);
         const isFriend = isFollowing && (profile.followers || []).includes(targetUid);
@@ -1095,12 +1115,10 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
-// --- UPDATE: HALAMAN POSTINGAN TUNGGAL ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
     if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
-    
     return (
         <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit">
@@ -1115,7 +1133,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- 11. APP UTAMA (LOGIKA FIXED) ---
+// --- 11. APP UTAMA ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1184,6 +1202,9 @@ const App = () => {
     if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
+    
+    // FIX: Pastikan targetUser ada saat membuka profil orang lain
+    const targetUser = users.find(u => u.uid === targetUid);
 
     return (
         <div>
@@ -1204,8 +1225,11 @@ const App = () => {
                     {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='profile' && <ProfileScreen currentUserId={user.uid} username={profile.username} email={profile.email} allPosts={posts} photoURL={profile.photoURL} isSelf={true} handleFollow={handleFollow} profile={profile}/>}
-                    {page==='other-profile' && <ProfileScreen currentUserId={targetUid} username={users.find(u=>u.uid===targetUid)?.username} email={''} allPosts={posts} photoURL={users.find(u=>u.uid===targetUid)?.photoURL} isSelf={false} handleFollow={handleFollow} profile={profile}/>}
+                    
+                    {/* LOGIKA PROFILE DIPERBAIKI DISINI */}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
+                    
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                 </main>
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
