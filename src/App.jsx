@@ -5,7 +5,6 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // ==========================================
 
 // Import Firebase Core & Services
-// Pastikan library firebase sudah terinstall di project (npm install firebase)
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -38,7 +37,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// Import Icons (Lucide React) - Lengkap termasuk Bookmark, Sun, Moon
+// Import Icons (Lucide React)
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -47,10 +46,10 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark // <-- Ikon Simpan
+    Award, Crown, Gem, Medal, Bookmark, Coffee
 } from 'lucide-react';
 
-// Atur Log Level Firebase (Supaya tidak berisik di console saat development)
+// Atur Log Level Firebase
 setLogLevel('warn');
 
 // --- KONSTANTA GLOBAL ---
@@ -62,7 +61,6 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KONFIGURASI FIREBASE ---
-// Menggunakan konfigurasi environment jika tersedia, atau fallback ke config default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -86,7 +84,6 @@ const db = getFirestore(app);
 // ==========================================
 
 // 1. Algoritma Acak (Fisher-Yates Shuffle)
-// Digunakan untuk fitur "Random Feed" dan "Shorts" agar konten selalu segar
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -100,16 +97,14 @@ const shuffleArray = (array) => {
 
 // 2. Sistem Notifikasi
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
-    // Mencegah notifikasi spam ke diri sendiri
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
-    
     try {
         await addDoc(collection(db, getPublicCollection('notifications')), {
             toUserId: toUserId,
             fromUserId: fromUser.uid,
             fromUsername: fromUser.username,
             fromPhoto: fromUser.photoURL || '',
-            type: type, // 'like', 'comment', 'follow', 'system', 'bookmark'
+            type: type,
             message: message,
             postId: postId,
             isRead: false,
@@ -120,38 +115,28 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 3. Upload API (Faa API) - Dengan Progress Bar Simulasi
+// 3. Upload API (Faa API)
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
-    
-    // Reset progress
     onProgress(0);
     formData.append('file', file, file.name);
 
     try {
-        // Simulasi progress awal (0-50%) agar UX terasa responsif bagi pengguna
         for (let i = 0; i <= 50; i += 5) {
             onProgress(i);
             await new Promise(resolve => setTimeout(resolve, 50)); 
         }
-
         const response = await fetch(apiUrl, { method: 'POST', body: formData });
-        
         onProgress(80);
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
+        if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); }
         
         const data = await response.json();
         onProgress(100);
         
-        if (data && data.status) {
-            return data.url;
-        } else {
-            throw new Error(data.message || 'Gagal mengunggah file. Respon tidak valid.');
-        }
+        if (data && data.status) { return data.url; } 
+        else { throw new Error(data.message || 'Gagal mengunggah file.'); }
     } catch (error) {
         onProgress(0); 
         console.error('Upload error:', error);
@@ -159,55 +144,36 @@ const uploadToFaaAPI = async (file, onProgress) => {
     }
 };
 
-// 4. Formatter Waktu (Relative Time)
-// Mengubah timestamp menjadi "2 jam lalu", "Baru saja", dll.
+// 4. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
-    
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
     const seconds = Math.floor((now - date) / 1000);
-
-    const fullDate = date.toLocaleDateString('id-ID', { 
-        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-    });
+    const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     if (seconds > 86400) return { relative: fullDate, full: fullDate };
     if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
-    
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return { relative: `${minutes} menit lalu`, full: fullDate };
-    
     const hours = Math.floor(minutes / 60);
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 5. Detektor Media Embed (YouTube / TikTok / IG)
+// 5. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
-    
-    // Regex YouTube (Standard & Shorts)
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
     if (youtubeMatch) {
-        return { 
-            type: 'youtube', 
-            embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, 
-            id: youtubeMatch[1] 
-        };
+        return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, id: youtubeMatch[1] };
     }
-    
-    // Link TikTok / Instagram (Deteksi sederhana)
     if (url.includes('tiktok.com') || url.includes('instagram.com')) {
-        return { 
-            type: 'link', 
-            embedUrl: url, 
-            displayUrl: url 
-        };
+        return { type: 'link', embedUrl: url, displayUrl: url };
     }
     return null;
 };
 
-// 6. Kalkulator Reputasi & Badge (INOVASI V16 & V17)
+// 6. Kalkulator Reputasi & Badge
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -220,135 +186,76 @@ const getReputationBadge = (reputation, isDev) => {
 // BAGIAN 3: KOMPONEN-KOMPONEN UI (KECIL)
 // ==========================================
 
-// Komponen Gambar dengan Indikator Loading & Retry
 const ImageWithRetry = ({ src, alt, className }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
 
     const handleRetry = (e) => {
-        e.stopPropagation();
-        setError(false);
-        setLoading(true);
-        setRetryCount(prev => prev + 1);
+        e.stopPropagation(); setError(false); setLoading(true); setRetryCount(prev => prev + 1);
     };
-
-    // Force reload dengan query param timestamp untuk menghindari cache browser yang rusak
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}` : src;
 
     if (error) {
         return (
-            <div className={`bg-gray-100 dark:bg-gray-800 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 ${className}`} style={{minHeight: '200px'}}>
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-500 ${className}`} style={{minHeight: '200px'}}>
                 <ImageIcon size={32} className="mb-2 opacity-50"/>
                 <p className="text-xs mb-2">Gagal memuat gambar</p>
-                <button 
-                    onClick={handleRetry} 
-                    className="flex items-center gap-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition text-gray-800 dark:text-white"
-                >
-                    <RotateCw size={12}/> Coba Lagi
-                </button>
+                <button onClick={handleRetry} className="flex items-center gap-1 bg-white border border-gray-300 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-gray-50 transition text-gray-800"><RotateCw size={12}/> Coba Lagi</button>
             </div>
         );
     }
 
     return (
         <div className={`relative ${className}`}>
-            {loading && (
-                <div className="absolute inset-0 bg-gray-100 dark:bg-gray-800 animate-pulse flex items-center justify-center">
-                    <Loader2 className="animate-spin text-gray-400" size={24}/>
-                </div>
-            )}
-            <img 
-                src={displaySrc} 
-                alt={alt} 
-                className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setError(true); }}
-            />
+            {loading && <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-gray-400" size={24}/></div>}
+            <img src={displaySrc} alt={alt} className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError(true); }}/>
         </div>
     );
 };
 
-// Komponen Splash Screen (Loading Awal)
 const SplashScreen = () => {
-    const quotes = [
-        "Menghubungkan ke dunia...", 
-        "Membangun komunitas positif...", 
-        "Berbagi cerita, berbagi inspirasi...", 
-        "Siapkan konten terbaikmu..."
-    ];
+    const quotes = ["Menghubungkan ke dunia...", "Membangun komunitas positif...", "Berbagi cerita, berbagi inspirasi...", "Siapkan konten terbaikmu..."];
     const [quote] = useState(quotes[Math.floor(Math.random() * quotes.length)]);
-
     return (
-        <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white dark:from-gray-900 dark:to-black z-[100] flex flex-col items-center justify-center">
+        <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
             <div className="relative mb-8 animate-bounce-slow">
                 <img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/>
                 <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div>
             </div>
-            <h1 className="text-3xl font-black text-sky-600 dark:text-sky-400 mb-2 tracking-widest">{APP_NAME}</h1>
-            <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4">
-                <div className="h-full bg-sky-500 animate-progress-indeterminate"></div>
-            </div>
+            <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest">{APP_NAME}</h1>
+            <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
             <p className="text-gray-400 text-xs font-medium animate-pulse">{quote}</p>
         </div>
     );
 };
 
-// Komponen Skeleton Loading (Untuk Feed)
 const SkeletonPost = () => (
-    <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
+    <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
         <div className="flex items-center gap-3 mb-4">
-            <div className="w-11 h-11 rounded-full bg-gray-200 dark:bg-gray-700"></div>
-            <div className="flex-1">
-                <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-2"></div>
-                <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-1/4"></div>
-            </div>
+            <div className="w-11 h-11 rounded-full bg-gray-200"></div>
+            <div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div>
         </div>
-        <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div>
-        <div className="space-y-2 mb-4">
-            <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-full"></div>
-            <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded w-2/3"></div>
-        </div>
-        <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-4"></div>
-        <div className="flex gap-4">
-            <div className="h-8 w-16 bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-            <div className="h-8 w-16 bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-        </div>
+        <div className="h-6 bg-gray-200 rounded w-3/4 mb-3"></div>
+        <div className="space-y-2 mb-4"><div className="h-3 bg-gray-100 rounded w-full"></div><div className="h-3 bg-gray-100 rounded w-2/3"></div></div>
+        <div className="h-48 bg-gray-200 rounded-2xl mb-4"></div>
+        <div className="flex gap-4"><div className="h-8 w-16 bg-gray-100 rounded-full"></div><div className="h-8 w-16 bg-gray-100 rounded-full"></div></div>
     </div>
 );
 
 // --- FORMAT TEKS LANJUTAN ---
-// Fungsi ini mengubah teks biasa menjadi HTML yang aman dengan format Bold, Italic, dan Link
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text;
-
-    // Sanitasi untuk keamanan XSS
     html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
-
-    // Format Link Custom: [Judul](Url)
-    html = html.replace(
-        /\[([^\]]+)\]\(([^)]+)\)/g, 
-        '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>'
-    );
-
-    // Auto Detect Link HTTPS
-    html = html.replace(
-        /(https?:\/\/[^\s<]+)/g, 
-        (match) => {
-            if (match.includes('href="')) return match;
-            return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`;
-        }
-    );
-
-    // Format Style (Bold, Italic, Code, Hashtag)
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>');
+    html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { if (match.includes('href="')) return match; return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; });
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-gray-700 px-1 rounded text-sm text-sky-700 dark:text-sky-300 font-mono border border-sky-100 dark:border-gray-600">$1</code>');
+    html = html.replace(/`(.*?)`/g, '<code class="bg-sky-50 px-1 rounded text-sm text-sky-700 font-mono border border-sky-100">$1</code>');
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>'); 
     html = html.replace(/\n/g, '<br>');
-
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
+    return <div className="text-gray-800 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
 // ==========================================
@@ -364,37 +271,20 @@ const DeveloperDashboard = ({ onClose }) => {
 
     useEffect(() => {
         const fetchData = async () => {
-            // 1. Ambil data users untuk statistik & online status
-            const usersSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => {
-                    resolve(snap);
-                    unsub();
-                });
-            });
-
-            // 2. Ambil data posts untuk statistik grafik
-            const postsSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => {
-                    resolve(snap);
-                    unsub();
-                });
-            });
-
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => { resolve(snap); unsub(); }); });
+            
             const totalUsers = usersSnap.size;
             const totalPosts = postsSnap.size;
             
-            // Hitung Post Hari Ini
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const rawPosts = postsSnap.docs.map(d => d.data());
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
 
-            // Hitung User Online (Aktif dalam 10 menit terakhir)
             const tenMinAgo = Date.now() - 10 * 60 * 1000;
-            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()}))
-                .filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
+            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
 
-            // Data Grafik 7 Hari
             const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
             const last7Days = [];
             for (let i = 6; i >= 0; i--) {
@@ -402,12 +292,7 @@ const DeveloperDashboard = ({ onClose }) => {
                 d.setDate(d.getDate() - i);
                 const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
                 const dayEnd = dayStart + 86400000;
-                
-                const count = rawPosts.filter(p => {
-                    const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0;
-                    return t >= dayStart && t < dayEnd;
-                }).length;
-                
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
                 last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
             }
 
@@ -416,142 +301,82 @@ const DeveloperDashboard = ({ onClose }) => {
             setChartData(last7Days);
             setLoading(false);
         };
-
         fetchData();
     }, []);
 
     const handleBroadcast = async () => {
         if(!broadcastMsg.trim()) return;
         if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
-        
         setSendingBC(true);
         try {
-            // Ambil semua user ID
-            const usersSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); });
-            });
-            
-            // Kirim notifikasi batch
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
             const promises = usersSnap.docs.map(docSnap => {
                 return addDoc(collection(db, getPublicCollection('notifications')), {
-                    toUserId: docSnap.id,
-                    fromUserId: 'admin',
-                    fromUsername: 'Developer System',
-                    fromPhoto: APP_LOGO,
-                    type: 'system',
-                    message: `📢 PENGUMUMAN: ${broadcastMsg}`,
-                    isRead: false,
-                    timestamp: serverTimestamp()
+                    toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO,
+                    type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
                 });
             });
-            
             await Promise.all(promises);
             alert("Pengumuman berhasil dikirim!");
             setBroadcastMsg('');
-        } catch(e) {
-            alert("Gagal kirim broadcast: " + e.message);
-        } finally {
-            setSendingBC(false);
-        }
+        } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-100 dark:bg-gray-900 z-[60] overflow-y-auto p-4 pb-20">
+        <div className="fixed inset-0 bg-gray-100 z-[60] overflow-y-auto p-4 pb-20">
             <div className="max-w-2xl mx-auto">
                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-black text-gray-800 dark:text-white flex items-center gap-2">
-                        <ShieldCheck className="text-sky-600"/> Developer Panel
-                    </h2>
-                    <button onClick={onClose} className="bg-white dark:bg-gray-800 p-2 rounded-full shadow hover:bg-gray-200 dark:text-white">
-                        <X/>
-                    </button>
+                    <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2>
+                    <button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button>
                 </div>
-
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
                     <div className="space-y-6">
-                        {/* Statistik Utama */}
                         <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-sky-100 dark:border-gray-700 text-center">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center">
                                 <Users className="mx-auto text-sky-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800 dark:text-white">{stats.users}</h3>
-                                <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Total User</p>
+                                <h3 className="text-2xl font-bold text-gray-800">{stats.users}</h3>
+                                <p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p>
                             </div>
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-purple-100 dark:border-gray-700 text-center">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center">
                                 <ImageIcon className="mx-auto text-purple-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800 dark:text-white">{stats.posts}</h3>
-                                <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Total Post</p>
+                                <h3 className="text-2xl font-bold text-gray-800">{stats.posts}</h3>
+                                <p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p>
                             </div>
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-emerald-100 dark:border-gray-700 text-center">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center">
                                 <Activity className="mx-auto text-emerald-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800 dark:text-white">{stats.postsToday}</h3>
-                                <p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Post Hari Ini</p>
+                                <h3 className="text-2xl font-bold text-gray-800">{stats.postsToday}</h3>
+                                <p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p>
                             </div>
                         </div>
-
-                        {/* Broadcast Tool */}
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
-                                <Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman
-                            </h3>
-                            <textarea 
-                                value={broadcastMsg} 
-                                onChange={e=>setBroadcastMsg(e.target.value)} 
-                                className="w-full bg-gray-50 dark:bg-gray-700 p-3 rounded-xl text-sm border border-gray-200 dark:border-gray-600 mb-3 dark:text-white outline-none"
-                                rows="3" 
-                                placeholder="Tulis pesan untuk semua user..."
-                            />
-                            <button 
-                                onClick={handleBroadcast} 
-                                disabled={sendingBC} 
-                                className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition"
-                            >
-                                {sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}
-                            </button>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                            <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
-
-                        {/* Grafik Aktivitas */}
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                                <BarChart3 size={18}/> Aktivitas Minggu Ini
-                            </h3>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
                             <div className="flex items-end justify-between h-32 gap-2">
                                 {chartData.map((d, i) => (
                                     <div key={i} className="flex flex-col items-center w-full group">
                                         <div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div>
-                                        <div 
-                                            className="w-full bg-sky-100 dark:bg-sky-900 rounded-t-lg hover:bg-sky-300 dark:hover:bg-sky-700 transition-all relative" 
-                                            style={{height: `${d.height}%`}}
-                                        ></div>
+                                        <div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div>
                                         <div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
-                        {/* User Online */}
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                                <Globe size={18}/> Pengguna Online ({onlineUsers.length})
-                            </h3>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
                             <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">
-                                {onlineUsers.length === 0 ? (
-                                    <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p>
-                                ) : (
-                                    onlineUsers.map(u => (
-                                        <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-xl">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div>
-                                                <div>
-                                                    <p className="text-sm font-bold text-gray-800 dark:text-white">{u.username}</p>
-                                                    <p className="text-[10px] text-gray-500 dark:text-gray-400">{u.email}</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full">
-                                                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online
-                                            </div>
+                                {onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => (
+                                    <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div>
+                                            <div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div>
                                         </div>
-                                    ))
-                                )}
+                                        <div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
@@ -578,27 +403,17 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                // Update lastSeen saat login
                 const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
                 const snap = await getDoc(ref);
                 if(!snap.exists()) {
-                    // Buat profil jika belum ada (fallback)
-                    await setDoc(ref, { 
-                        username: email.split('@')[0], email: email, createdAt: serverTimestamp(), 
-                        uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() 
-                    });
+                    await setDoc(ref, { username: email.split('@')[0], email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() });
                 } else {
                     await updateDoc(ref, { lastSeen: serverTimestamp() });
                 }
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                // Buat profil user baru
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
-                    username: username.trim(), email: email, createdAt: serverTimestamp(), 
-                    uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(),
-                    savedPosts: [] // Inisialisasi array savedPosts
-                });
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [] });
             }
             onLoginSuccess();
         } catch (err) {
@@ -611,78 +426,23 @@ const AuthScreen = ({ onLoginSuccess }) => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900 p-6 font-sans transition-colors duration-300">
-            <div className="w-full max-w-sm bg-white dark:bg-gray-800 rounded-[2rem] shadow-2xl border border-white dark:border-gray-700 p-8 relative overflow-hidden">
+        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] p-6 font-sans">
+            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
-                
                 <div className="text-center mb-8 mt-2">
-                    <h2 className="text-3xl font-black text-gray-800 dark:text-white tracking-tight mb-1">
-                        {isLogin ? 'Selamat Datang' : 'Buat Akun'}
-                    </h2>
+                    <h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2>
                     <p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p>
                 </div>
-
-                {error && (
-                    <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100">
-                        <AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}
-                    </div>
-                )}
-
+                {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
                 <form onSubmit={handleAuth} className="space-y-4">
-                    {!isLogin && (
-                        <div className="group relative">
-                            <User size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/>
-                            <input 
-                                value={username} 
-                                onChange={(e) => setUsername(e.target.value)} 
-                                placeholder="Username Unik" 
-                                className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 dark:text-white outline-none transition-all"
-                            />
-                        </div>
-                    )}
-                    <div className="group relative">
-                        <Mail size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/>
-                        <input 
-                            type="email" 
-                            value={email} 
-                            onChange={(e) => setEmail(e.target.value)} 
-                            placeholder="Alamat Email" 
-                            className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 dark:text-white outline-none transition-all"
-                        />
-                    </div>
-                    <div className="group relative">
-                        <Lock size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/>
-                        <input 
-                            type="password" 
-                            value={password} 
-                            onChange={(e) => setPassword(e.target.value)} 
-                            placeholder="Kata Sandi" 
-                            className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 dark:text-white outline-none transition-all"
-                        />
-                    </div>
-                    
-                    <button disabled={isLoading} className="w-full bg-gray-900 dark:bg-sky-600 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 dark:hover:bg-sky-700 shadow-lg shadow-gray-200 dark:shadow-none transition transform active:scale-95 disabled:opacity-70">
-                        {isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}
-                    </button>
+                    {!isLogin && <div className="group relative"><User size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username Unik" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>}
+                    <div className="group relative"><Mail size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Alamat Email" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <div className="group relative"><Lock size={18} className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-sky-500 transition"/><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Kata Sandi" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <button disabled={isLoading} className="w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 shadow-lg shadow-gray-200 transition transform active:scale-95 disabled:opacity-70">{isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}</button>
                 </form>
-
-                <div className="mt-6 text-center pt-6 border-t border-gray-100 dark:border-gray-700">
-                    <p className="text-xs text-gray-500 mb-4">
-                        {isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} 
-                        <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">
-                            {isLogin ? 'Daftar' : 'Masuk'}
-                        </button>
-                    </p>
-                    {isLogin && (
-                        <a 
-                            href={PASSWORD_RESET_LINK} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 dark:bg-gray-700 text-sky-600 dark:text-sky-400 rounded-xl text-xs font-bold hover:bg-sky-100 dark:hover:bg-gray-600 transition"
-                        >
-                            <HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?
-                        </a>
-                    )}
+                <div className="mt-6 text-center pt-6 border-t border-gray-100">
+                    <p className="text-xs text-gray-500 mb-4">{isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">{isLogin ? 'Daftar' : 'Masuk'}</button></p>
+                    {isLogin && <a href={PASSWORD_RESET_LINK} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 text-sky-600 rounded-xl text-xs font-bold hover:bg-sky-100 transition"><HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?</a>}
                 </div>
             </div>
         </div>
@@ -700,9 +460,8 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.4 (Stable)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V18.0 (Stable)</div>
                     </div>
-                    
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
                     <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna yang aman, modern, dan interaktif untuk semua kalangan. 🌍✨</p>
 
@@ -749,13 +508,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
-    // Fitur Bookmark (Baru V17)
+    // Fitur Bookmark
     const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
-    
-    // Fitur Baca Selengkapnya
     const [isExpanded, setIsExpanded] = useState(false);
-
-    // INOVASI BARU: State untuk Animasi Like (Double Tap)
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
 
     const isOwner = post.userId === currentUserId;
@@ -788,34 +543,20 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
-    // FUNGSI BARU: Double Tap Like Logic (Seperti Instagram)
     const handleDoubleTap = () => {
-        // Trigger animasi hati
         setShowHeartOverlay(true);
         setTimeout(() => setShowHeartOverlay(false), 800);
-
-        // Jika belum dilike, jalankan fungsi like
-        if (!liked) {
-            handleLike();
-        }
+        if (!liked) { handleLike(); }
     };
 
-    // FUNGSI BARU: Simpan/Hapus Bookmark
     const handleSave = async () => {
         const newSaved = !isSaved;
         setIsSaved(newSaved);
         const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
-        
         try {
-            if (newSaved) {
-                await updateDoc(userRef, { savedPosts: arrayUnion(post.id) });
-            } else {
-                await updateDoc(userRef, { savedPosts: arrayRemove(post.id) });
-            }
-        } catch (error) {
-            console.error("Gagal menyimpan postingan", error);
-            setIsSaved(!newSaved); // Revert jika gagal
-        }
+            if (newSaved) { await updateDoc(userRef, { savedPosts: arrayUnion(post.id) }); } 
+            else { await updateDoc(userRef, { savedPosts: arrayRemove(post.id) }); }
+        } catch (error) { setIsSaved(!newSaved); }
     };
 
     const handleComment = async (e) => {
@@ -864,12 +605,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
     const isImage = (post.mediaUrl && (/\.(jpg|png|webp)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
-
-    // INOVASI BARU: BADGE REPUTASI USER DI POSTINGAN
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg">
+        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 relative overflow-hidden group transition hover:shadow-lg">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
             {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 text-orange-600 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
             {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
@@ -882,13 +621,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         </div>
                     </div>
                     <div>
-                        <h4 className="font-bold text-gray-800 dark:text-white text-sm leading-tight flex items-center gap-1">
-                            {post.user?.username}
-                            {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}
-                        </h4>
+                        <h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4>
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>
-                            {/* Badge Reputasi */}
                             {isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}
                         </div>
                     </div>
@@ -896,7 +631,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 
                 <div className="flex gap-2">
                     {!isOwner && post.userId !== currentUserId && (
-                        <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${isFollowing ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFollowing ? 'Teman' : 'Ikuti'}</button>
+                        <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFollowing ? 'Teman' : 'Ikuti'}</button>
                     )}
                     {(isOwner || isMeDeveloper) && (
                         <>
@@ -910,61 +645,48 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             </div>
 
             {isEditing ? (
-                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-2xl border border-gray-200 dark:border-gray-600 space-y-3">
-                    <input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-600 border rounded-lg font-bold text-sm dark:text-white"/>
-                    <textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-600 border rounded-lg text-sm resize-none dark:text-white" rows="4"/>
-                    <div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 dark:text-gray-400 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div>
+                <div className="mb-4 p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3">
+                    <input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white border rounded-lg font-bold text-sm"/>
+                    <textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white border rounded-lg text-sm resize-none" rows="4"/>
+                    <div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div>
                 </div>
             ) : (
                 <>
-                    {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{post.title}</h3>}
-                    <div className="text-sm text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
+                    {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
+                    <div className="text-sm text-gray-600 mb-4 leading-relaxed">
                         {renderMarkdown(displayText)}
-                        {isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 dark:text-sky-400 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}
+                        {isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}
                     </div>
                     {(isImage || isVideo || embed) && (
-                        // FEATURE: DOUBLE TAP TO LIKE (INOVASI KEREN)
-                        <div 
-                            className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 dark:border-gray-700 relative select-none"
-                            onDoubleClick={handleDoubleTap}
-                        >
-                            {/* Animasi Hati Overlay */}
-                            {showHeartOverlay && (
-                                <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700">
-                                    <Heart size={100} className="text-white drop-shadow-2xl fill-white" />
-                                </div>
-                            )}
-
+                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
+                            {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
                             {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
-                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 dark:bg-gray-700 text-sky-600 dark:text-sky-400 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
+                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
                         </div>
                     )}
                 </>
             )}
 
-            <div className="flex items-center gap-6 pt-2 border-t border-gray-50 dark:border-gray-700">
-                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
+            <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
+                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
                 <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
-                {/* Tombol Bookmark Baru */}
-                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}>
-                    <Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} />
-                </button>
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
             </div>
 
             {showComments && (
-                <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
+                <div className="mt-5 pt-4 border-t border-gray-100 animate-in fade-in">
                     <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">
                         {comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => (
-                            <div key={c.id} className="bg-gray-50 dark:bg-gray-700 p-3 rounded-xl text-xs flex justify-between items-start group">
-                                <div><span className="font-bold text-gray-800 dark:text-white mr-1">{c.username}</span><span className="text-gray-600 dark:text-gray-300">{c.text}</span></div>
+                            <div key={c.id} className="bg-gray-50 p-3 rounded-xl text-xs flex justify-between items-start group">
+                                <div><span className="font-bold text-gray-800 mr-1">{c.username}</span><span className="text-gray-600">{c.text}</span></div>
                                 {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
                             </div>
                         ))}
                     </div>
-                    <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
+                    <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
                 </div>
             )}
         </div>
@@ -978,14 +700,12 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const [isFirstLoad, setIsFirstLoad] = useState(true);
     const [loadingFeed, setLoadingFeed] = useState(true);
     
-    // PAGINATION STATE
     const [displayCount, setDisplayCount] = useState(5);
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
 
     useEffect(() => {
         if (allPosts.length === 0) { setLoadingFeed(false); return; }
-
         let basePosts = allPosts.filter(p => !p.isShort);
         let pinnedPost = null;
         if (newPostId) {
@@ -1008,46 +728,34 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         setLoadingFeed(false);
     }, [allPosts, sortType, newPostId]); 
 
-    // --- INFINITE SCROLL LOGIC ---
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
             const first = entries[0];
             if (first.isIntersecting && !loadingMore && stableFeed.length > displayCount) {
                 setLoadingMore(true);
-                // Simulasi loading halus
-                setTimeout(() => {
-                    setDisplayCount(prev => prev + 5);
-                    setLoadingMore(false);
-                }, 800);
+                setTimeout(() => { setDisplayCount(prev => prev + 5); setLoadingMore(false); }, 800);
             }
         }, { threshold: 0.5 });
-
         const currentBottom = bottomRef.current;
         if (currentBottom) observer.observe(currentBottom);
-
-        return () => {
-            if (currentBottom) observer.unobserve(currentBottom);
-        };
+        return () => { if (currentBottom) observer.unobserve(currentBottom); };
     }, [stableFeed, displayCount, loadingMore]);
 
     const manualRefresh = () => { setLoadingFeed(true); setStableFeed([]); setIsFirstLoad(true); setSortType('random'); setDisplayCount(5); clearNewPost(); setTimeout(() => setLoadingFeed(false), 800); };
-
     const visiblePosts = stableFeed.slice(0, displayCount);
 
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
-            {/* Filter Bar */}
-            <div className="flex items-center justify-between mb-6 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 dark:bg-gray-900/90 backdrop-blur-md py-2 -mx-4 px-4">
+            <div className="flex items-center justify-between mb-6 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 backdrop-blur-md py-2 -mx-4 px-4">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 dark:text-gray-300 text-gray-500'}`}>Terbaru</button>
-                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 dark:text-gray-300 text-gray-500'}`}>Populer</button>
-                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white dark:bg-gray-800 dark:text-gray-300 text-gray-500'}`}>😂 Meme</button>
+                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Terbaru</button>
+                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white text-gray-500'}`}>Populer</button>
+                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white text-gray-500'}`}>😂 Meme</button>
                 </div>
-                <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-300 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
+                <button onClick={manualRefresh} className="p-2 bg-white text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
-
             {loadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 ? (
-                <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
+                <div className="text-center py-10 bg-white rounded-3xl shadow-sm border border-dashed border-gray-200"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
             ) : (
                 <>
                     {visiblePosts.map(p => (
@@ -1056,8 +764,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                             <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper}/>
                         </div>
                     ))}
-                    
-                    {/* Scroll Trigger (Tanpa Tombol Kembali ke Atas) */}
                     <div ref={bottomRef} className="h-10 w-full flex items-center justify-center">
                         {loadingMore && <Loader2 className="animate-spin text-sky-500"/>}
                         {!loadingMore && stableFeed.length <= displayCount && stableFeed.length > 0 && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
@@ -1071,20 +777,11 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 // --- 8. SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
-    
-    useEffect(() => {
-        const shorts = allPosts.filter(p => p.isShort && p.mediaUrl);
-        setFeed(shuffleArray(shorts));
-    }, [allPosts]);
-
-    // Infinite Scroll Logic
+    useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
     const handleScroll = (e) => {
         const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
-        if (scrollHeight - scrollTop <= clientHeight + 200) {
-            setFeed(prev => [...prev, ...prev]); 
-        }
+        if (scrollHeight - scrollTop <= clientHeight + 200) { setFeed(prev => [...prev, ...prev]); }
     };
-
     return (
         <div className="fixed inset-0 bg-black z-50 flex justify-center">
              <div className="w-full max-w-md h-[100dvh] overflow-y-scroll snap-y snap-mandatory snap-always no-scrollbar bg-black" onScroll={handleScroll}>
@@ -1143,21 +840,16 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
 
     const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
-
     const submit = async (e) => {
         e.preventDefault(); setLoading(true); setProg(0);
         try {
             let finalUrl = form.url, type = 'text';
             if(form.file) { finalUrl = await uploadToFaaAPI(form.file, setProg); type = form.file.type.startsWith('image')?'image':'video'; }
             else if(form.url) { type='link'; }
-            
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
-
             const ref = await addDoc(collection(db, getPublicCollection('posts')), {
                 userId, title: form.title, content: form.content, mediaUrl: finalUrl, mediaType: type, 
-                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, 
-                category: category, 
-                user: {username, uid: userId}
+                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, category: category, user: {username, uid: userId}
             });
             setProg(100); setTimeout(()=>onSuccess(ref.id, form.isShort), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
@@ -1165,20 +857,20 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 
     return (
         <div className="max-w-xl mx-auto p-4 pb-24">
-            <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
+            <div className="bg-white rounded-[2rem] p-6 shadow-xl border border-sky-50 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div>
-                <h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
+                <h2 className="text-xl font-black text-gray-800 mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
                     {loading && <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mb-2"><div className="bg-sky-500 h-full transition-all duration-300" style={{width:`${prog}%`}}/></div>}
-                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
-                    <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 text-sky-600 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
+                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
+                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
+                    <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 text-sky-600 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
                     {isLarge && <div className="bg-orange-50 text-orange-600 text-xs p-3 rounded-xl flex items-center font-medium"><AlertTriangle size={14} className="mr-2"/> File besar detected. Upload mungkin lama.</div>}
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500 dark:text-gray-300'}`}><ImageIcon size={18} className="mr-2"/><span className="text-xs font-bold">{form.file?'Ganti File':'Foto/Video'}</span><input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video')}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/></label>
-                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500 dark:text-gray-300'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Mode Shorts</span></div>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}><ImageIcon size={18} className="mr-2"/><span className="text-xs font-bold">{form.file?'Ganti File':'Foto/Video'}</span><input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video')}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/></label>
+                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Mode Shorts</span></div>
                     </div>
-                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-xs outline-none"/></div>
+                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
                     <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
                 </form>
             </div>
@@ -1190,55 +882,43 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isSelf, handleFollow, profile }) => {
     const [edit, setEdit] = useState(false); const [name, setName] = useState(username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false);
     const [showDev, setShowDev] = useState(false);
-    const [activeTab, setActiveTab] = useState('posts'); // 'posts' atau 'saved' (Fitur Baru V17)
+    const [activeTab, setActiveTab] = useState('posts'); 
 
-    // Filter Postingan
     const userPosts = allPosts.filter(p=>p.userId===currentUserId).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
-    // Ambil data saved posts (V17)
     const savedPostsData = allPosts.filter(p => profile.savedPosts?.includes(p.id));
-
     const isDev = email === DEVELOPER_EMAIL;
     const save = async () => { setLoad(true); try { const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
 
-    // INOVASI BARU: SISTEM REPUTASI
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm border border-sky-50 dark:border-gray-700 mb-8 mx-4 text-center relative overflow-hidden">
+            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
-                    <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white shadow-lg bg-gray-100 dark:bg-gray-700">{photoURL?<ImageWithRetry src={photoURL} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{username?.[0]}</div>}</div>
-                    {isSelf && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white dark:bg-gray-700 rounded-full shadow text-sky-600"><Edit size={14}/></button>}
+                    <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white shadow-lg bg-gray-100">{photoURL?<ImageWithRetry src={photoURL} className="w-full h-full object-cover"/>:<div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{username?.[0]}</div>}</div>
+                    {isSelf && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
-                {edit ? <div className="space-y-3 bg-gray-50 dark:bg-gray-700 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button></div> : <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>}
+                {edit ? <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button></div> : <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>}
                 <p className="text-gray-400 text-xs mb-4">{email}</p>
                 
-                {/* TAMPILAN BADGE KEAHLIAN */}
-                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs mb-6 shadow-sm ${badge.color}`}>
-                    <badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})
-                </div>
-
+                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs mb-6 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
                 {!isSelf && <button onClick={()=>handleFollow(currentUserId, profile.following?.includes(currentUserId))} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition ${profile.following?.includes(currentUserId)?'bg-gray-100 text-gray-600':'bg-sky-500 text-white shadow-sky-200'}`}>{profile.following?.includes(currentUserId)?'Berteman':'Ikuti'}</button>}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-
-                <div className="flex justify-center gap-8 mt-6 border-t pt-6 dark:border-gray-700"><div><span className="font-bold text-xl block dark:text-white">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block dark:text-white">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
+                <div className="flex justify-center gap-8 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
             </div>
             
             {isSelf && (
                 <div className="flex gap-2 px-4 mb-6">
-                    <button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button>
-                    <button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Disimpan</button>
+                    <button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Postingan Saya</button>
+                    <button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Disimpan</button>
                 </div>
             )}
 
             <div className="px-4 space-y-6">
-                {activeTab === 'posts' ? (
-                    userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
-                ) : (
-                    savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
-                )}
+                {activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
+                ) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}
             </div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
@@ -1261,50 +941,27 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
+
+// --- UPDATE: HALAMAN POSTINGAN TUNGGAL ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-  const [bottomPad, setBottomPad] = React.useState(0);
-
-  React.useEffect(() => {
-    const nav = document.getElementById("bottomNavbar");
-    if (nav) setBottomPad(nav.offsetHeight + 20);
-  }, []);
-
-  const post = allPosts.find(p => p.id === postId);
-
-  const handleBack = () => {
-    const url = new URL(window.location);
-    url.searchParams.delete('post');
-    window.history.pushState({}, '', url);
-    goBack();
-  };
-
-  if (!post) {
+    const post = allPosts.find(p => p.id === postId);
+    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
+    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
+    
     return (
-      <div className="p-10 text-center text-gray-400 mt-20">
-        Postingan hilang.
-        <br />
-        <button onClick={handleBack} className="text-sky-600 font-bold mt-4">
-          Kembali
-        </button>
-      </div>
+        <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
+            <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit">
+                <ArrowLeft size={18} className="mr-2"/> Kembali
+            </button>
+            <PostItem post={post} {...props}/>
+            
+            {/* FITUR BARU: PENANDA AKHIR HALAMAN POSTINGAN */}
+            <div className="mt-8 text-center p-6 bg-gray-50 rounded-2xl border border-gray-200 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2">
+                <Coffee size={24} className="opacity-50"/>
+                Gaada lagi postingan di bawah
+            </div>
+        </div>
     );
-  }
-
-  return (
-    <div
-      className="max-w-lg mx-auto p-4 pt-6"
-      style={{ paddingBottom: bottomPad }}
-    >
-      <button
-        onClick={handleBack}
-        className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"
-      >
-        <ArrowLeft size={18} className="mr-2" /> Kembali
-      </button>
-
-      <PostItem post={post} {...props} />
-    </div>
-  );
 };
 
 // --- 11. APP UTAMA (LOGIKA FIXED) ---
@@ -1320,40 +977,14 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
-    // --- LOGIKA SCROLL OTOMATIS ---
-    // Setiap kali 'page' berubah, scroll window ke paling atas (0,0)
+    useEffect(() => { window.scrollTo(0, 0); }, [page]);
+
+    // FIX THEME: Hapus state darkMode dan biarkan default (light)
+    // Membersihkan class 'dark' jika pernah tersimpan sebelumnya
     useEffect(() => {
-        window.scrollTo(0, 0);
-    }, [page]);
-
-    // --- LOGIKA BARU: MANUAL ONLY (FIX BUG MODE GELAP) ---
-    // 1. Cek apakah ada simpanan di localStorage (hanya 'dark' atau 'light').
-    // 2. Jika KOSONG/NULL, maka DEFAULT = FALSE (Mode Cerah).
-    // 3. JANGAN cek system preference (window.matchMedia) agar tidak bentrok.
-    const [darkMode, setDarkMode] = useState(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('theme');
-            return saved === 'dark'; // Hanya true jika history-nya 'dark'
-        }
-        return false; // Default Selalu Cerah
-    });
-
-    const toggleTheme = () => {
-        setDarkMode(prev => !prev);
-    };
-
-    // Effect ini memastikan class 'dark' ditambahkan ke HTML tag root
-    // Ini penting agar Tailwind mendeteksi perubahan mode
-    useEffect(() => {
-        const root = document.documentElement;
-        if (darkMode) {
-            root.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
-            root.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        }
-    }, [darkMode]);
+        document.documentElement.classList.remove('dark');
+        localStorage.removeItem('theme');
+    }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => setShowSplash(false), 3000);
@@ -1409,28 +1040,23 @@ const App = () => {
     };
 
     if (showSplash) return <SplashScreen />;
-    if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
+    if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
     if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
-    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900"><Loader2 className="animate-spin text-sky-500"/></div>;
+    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
-    // WRAPPER UTAMA: Class 'dark' dipasang di sini juga untuk keamanan ganda
+    // TAMPILAN UTAMA TANPA DARK MODE
     return (
-        <div className={darkMode ? "dark" : ""}>
-            <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
+        <div>
+            <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
                 {page!=='shorts' && (
-                    <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-700 shadow-sm transition-colors duration-300">
+                    <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 shadow-sm transition-colors duration-300">
                         <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                         <div className="flex gap-3">
-                            {/* TOMBOL DARK MODE */}
-                            <button onClick={toggleTheme} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
-                                {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
-                            </button>
-                            
                             <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
-                            <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-gray-300 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button>
-                            <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
+                            <button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button>
+                            <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
                         </div>
                     </header>
                 )}
@@ -1442,14 +1068,14 @@ const App = () => {
                     {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='profile' && <ProfileScreen currentUserId={user.uid} username={profile.username} email={profile.email} allPosts={posts} photoURL={profile.photoURL} isSelf={true} handleFollow={handleFollow} profile={profile}/>}
                     {page==='other-profile' && <ProfileScreen currentUserId={targetUid} username={users.find(u=>u.uid===targetUid)?.username} email={''} allPosts={posts} photoURL={users.find(u=>u.uid===targetUid)?.photoURL} isSelf={false} handleFollow={handleFollow} profile={profile}/>}
-                    {page==='view_post' && <div className="max-w-lg mx-auto pt-6 px-4"><button onClick={handleGoBack} className="mb-4 flex items-center font-bold text-gray-500 hover:text-sky-600"><ArrowLeft size={18} className="mr-2"/> Kembali</button>{posts.find(p=>p.id===targetPid) ? <PostItem post={posts.find(p=>p.id===targetPid)} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/> : <div className="text-center p-10 text-gray-400">Postingan tidak ditemukan.</div>}</div>}
+                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                 </main>
-                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
             </div>
         </div>
     );
 };
 
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-gray-700' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
+const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50' : 'text-gray-400 hover:text-gray-600'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
