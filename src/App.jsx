@@ -38,7 +38,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// Import Icons (Lucide React) - Lengkap termasuk Bookmark, Sun, Moon
+// Import Icons (Lucide React) - Lengkap termasuk Bookmark, Sun, Moon, ArrowUp
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -47,7 +47,7 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark // <-- Ikon Simpan
+    Award, Crown, Gem, Medal, Bookmark, ArrowUp // <-- Icon ArrowUp untuk fitur baru
 } from 'lucide-react';
 
 // Atur Log Level Firebase (Supaya tidak berisik di console saat development)
@@ -266,6 +266,59 @@ const ImageWithRetry = ({ src, alt, className }) => {
                 onError={() => { setLoading(false); setError(true); }}
             />
         </div>
+    );
+};
+
+// KOMPONEN BARU: SMART SCROLL TO TOP
+// Muncul saat scroll, menunjukkan progress lingkaran, klik untuk ke atas
+const SmartScrollTop = () => {
+    const [scrollTop, setScrollTop] = useState(0);
+    const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        const onScroll = () => {
+            const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
+            const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+            const scrolled = (winScroll / height) * 100;
+            setScrollTop(scrolled);
+            setIsVisible(winScroll > 300);
+        };
+
+        window.addEventListener("scroll", onScroll);
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
+
+    const goTop = () => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    if (!isVisible) return null;
+
+    return (
+        <button 
+            onClick={goTop}
+            className="fixed bottom-24 right-4 z-50 flex items-center justify-center w-12 h-12 bg-white dark:bg-gray-800 rounded-full shadow-2xl shadow-sky-500/20 border border-sky-100 dark:border-gray-700 transition hover:scale-110 group"
+        >
+            {/* SVG Circular Progress */}
+            <svg className="absolute w-full h-full -rotate-90" viewBox="0 0 36 36">
+                <path
+                    className="text-gray-100 dark:text-gray-700"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                />
+                <path
+                    className="text-sky-500 transition-all duration-100 ease-out"
+                    strokeDasharray={`${scrollTop}, 100`}
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                />
+            </svg>
+            <ArrowUp size={20} className="text-sky-600 dark:text-sky-400 z-10 group-hover:-translate-y-1 transition" />
+        </button>
     );
 };
 
@@ -1303,12 +1356,14 @@ const App = () => {
     // Ini penting agar Tailwind mendeteksi perubahan mode
     useEffect(() => {
         const root = document.documentElement;
-        if (darkMode) {
-            root.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        } else {
+        // PAKSA HAPUS CLASS DARK DI AWAL JIKA STATE FALSE
+        // Ini untuk meng-override settingan sistem yang mungkin otomatis menambahkan class dark
+        if (!darkMode) {
             root.classList.remove('dark');
             localStorage.setItem('theme', 'light');
+        } else {
+            root.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
         }
     }, [darkMode]);
 
@@ -1401,6 +1456,9 @@ const App = () => {
                     {page==='other-profile' && <ProfileScreen currentUserId={targetUid} username={users.find(u=>u.uid===targetUid)?.username} email={''} allPosts={posts} photoURL={users.find(u=>u.uid===targetUid)?.photoURL} isSelf={false} handleFollow={handleFollow} profile={profile}/>}
                     {page==='view_post' && <div className="max-w-lg mx-auto pt-6 px-4"><button onClick={handleGoBack} className="mb-4 flex items-center font-bold text-gray-500 hover:text-sky-600"><ArrowLeft size={18} className="mr-2"/> Kembali</button>{posts.find(p=>p.id===targetPid) ? <PostItem post={posts.find(p=>p.id===targetPid)} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/> : <div className="text-center p-10 text-gray-400">Postingan tidak ditemukan.</div>}</div>}
                 </main>
+                {/* KOMPONEN BARU DISISIPKAN DI SINI */}
+                {page!=='shorts' && <SmartScrollTop />}
+                
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
             </div>
         </div>
