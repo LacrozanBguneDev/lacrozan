@@ -700,7 +700,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.1 (Fixed)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.2 (Stable)</div>
                     </div>
                     
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
@@ -1257,21 +1257,28 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
-    // PERBAIKAN FITUR DARK MODE V17.1
+    // PERBAIKAN FITUR DARK MODE V17.2 (FORCE FIX)
+    // Default ke FALSE (Light) jika data tidak ditemukan untuk menghindari "stuck" gelap
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') === 'dark';
+            const saved = localStorage.getItem('theme');
+            return saved === 'dark'; // Hanya true jika benar-benar 'dark'
         }
-        return false;
+        return false; 
     });
 
-    // Effect untuk memaksa perubahan class pada document element (HTML/Body)
+    const toggleTheme = () => {
+        setDarkMode(prev => !prev);
+    };
+
+    // Effect yang lebih agresif untuk memaksa perubahan
     useEffect(() => {
+        const root = document.documentElement;
         if (darkMode) {
-            document.documentElement.classList.add('dark');
+            root.classList.add('dark');
             localStorage.setItem('theme', 'dark');
         } else {
-            document.documentElement.classList.remove('dark');
+            root.classList.remove('dark');
             localStorage.setItem('theme', 'light');
         }
     }, [darkMode]);
@@ -1336,14 +1343,15 @@ const App = () => {
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
+    // STRATEGI GANDA: Class 'dark' dipasang di Wrapper Div juga untuk memastikan perubahan warna terjadi
     return (
-        <div className={`${darkMode ? 'dark' : ''}`}>
+        <div className={darkMode ? "dark" : ""}>
             <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
                 {page!=='shorts' && (
                     <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-700 shadow-sm">
                         <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                         <div className="flex gap-3">
-                            <button onClick={()=>setDarkMode(!darkMode)} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
+                            <button onClick={toggleTheme} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
                                 {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
                             </button>
                             <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
