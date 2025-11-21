@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // ==========================================
 
 // Import Firebase Core & Services
+// Pastikan library firebase sudah terinstall di project (npm install firebase)
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -37,7 +38,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// Import Icons (Lucide React)
+// Import Icons (Lucide React) - Lengkap termasuk Bookmark, Sun, Moon
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -46,10 +47,10 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark
+    Award, Crown, Gem, Medal, Bookmark // <-- Ikon Simpan
 } from 'lucide-react';
 
-// Atur Log Level Firebase
+// Atur Log Level Firebase (Supaya tidak berisik di console saat development)
 setLogLevel('warn');
 
 // --- KONSTANTA GLOBAL ---
@@ -61,6 +62,7 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KONFIGURASI FIREBASE ---
+// Menggunakan konfigurasi environment jika tersedia, atau fallback ke config default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -84,6 +86,7 @@ const db = getFirestore(app);
 // ==========================================
 
 // 1. Algoritma Acak (Fisher-Yates Shuffle)
+// Digunakan untuk fitur "Random Feed" dan "Shorts" agar konten selalu segar
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -97,6 +100,7 @@ const shuffleArray = (array) => {
 
 // 2. Sistem Notifikasi
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
+    // Mencegah notifikasi spam ke diri sendiri
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     
     try {
@@ -105,7 +109,7 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
             fromUserId: fromUser.uid,
             fromUsername: fromUser.username,
             fromPhoto: fromUser.photoURL || '',
-            type: type, 
+            type: type, // 'like', 'comment', 'follow', 'system', 'bookmark'
             message: message,
             postId: postId,
             isRead: false,
@@ -116,15 +120,17 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 3. Upload API (Faa API)
+// 3. Upload API (Faa API) - Dengan Progress Bar Simulasi
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
     
+    // Reset progress
     onProgress(0);
     formData.append('file', file, file.name);
 
     try {
+        // Simulasi progress awal (0-50%) agar UX terasa responsif bagi pengguna
         for (let i = 0; i <= 50; i += 5) {
             onProgress(i);
             await new Promise(resolve => setTimeout(resolve, 50)); 
@@ -153,7 +159,8 @@ const uploadToFaaAPI = async (file, onProgress) => {
     }
 };
 
-// 4. Formatter Waktu
+// 4. Formatter Waktu (Relative Time)
+// Mengubah timestamp menjadi "2 jam lalu", "Baru saja", dll.
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     
@@ -175,10 +182,11 @@ const formatTimeAgo = (timestamp) => {
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 5. Detektor Media Embed
+// 5. Detektor Media Embed (YouTube / TikTok / IG)
 const getMediaEmbed = (url) => {
     if (!url) return null;
     
+    // Regex YouTube (Standard & Shorts)
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
     if (youtubeMatch) {
         return { 
@@ -188,13 +196,18 @@ const getMediaEmbed = (url) => {
         };
     }
     
+    // Link TikTok / Instagram (Deteksi sederhana)
     if (url.includes('tiktok.com') || url.includes('instagram.com')) {
-        return { type: 'link', embedUrl: url, displayUrl: url };
+        return { 
+            type: 'link', 
+            embedUrl: url, 
+            displayUrl: url 
+        };
     }
     return null;
 };
 
-// 6. Kalkulator Reputasi & Badge
+// 6. Kalkulator Reputasi & Badge (INOVASI V16 & V17)
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -204,9 +217,10 @@ const getReputationBadge = (reputation, isDev) => {
 };
 
 // ==========================================
-// BAGIAN 3: KOMPONEN-KOMPONEN UI
+// BAGIAN 3: KOMPONEN-KOMPONEN UI (KECIL)
 // ==========================================
 
+// Komponen Gambar dengan Indikator Loading & Retry
 const ImageWithRetry = ({ src, alt, className }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -219,6 +233,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
         setRetryCount(prev => prev + 1);
     };
 
+    // Force reload dengan query param timestamp untuk menghindari cache browser yang rusak
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}` : src;
 
     if (error) {
@@ -254,6 +269,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
     );
 };
 
+// Komponen Splash Screen (Loading Awal)
 const SplashScreen = () => {
     const quotes = [
         "Menghubungkan ke dunia...", 
@@ -278,6 +294,7 @@ const SplashScreen = () => {
     );
 };
 
+// Komponen Skeleton Loading (Untuk Feed)
 const SkeletonPost = () => (
     <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
         <div className="flex items-center gap-3 mb-4">
@@ -300,14 +317,22 @@ const SkeletonPost = () => (
     </div>
 );
 
+// --- FORMAT TEKS LANJUTAN ---
+// Fungsi ini mengubah teks biasa menjadi HTML yang aman dengan format Bold, Italic, dan Link
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text;
+
+    // Sanitasi untuk keamanan XSS
     html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
+
+    // Format Link Custom: [Judul](Url)
     html = html.replace(
         /\[([^\]]+)\]\(([^)]+)\)/g, 
         '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>'
     );
+
+    // Auto Detect Link HTTPS
     html = html.replace(
         /(https?:\/\/[^\s<]+)/g, 
         (match) => {
@@ -315,11 +340,14 @@ const renderMarkdown = (text) => {
             return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`;
         }
     );
+
+    // Format Style (Bold, Italic, Code, Hashtag)
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
     html = html.replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-gray-700 px-1 rounded text-sm text-sky-700 dark:text-sky-300 font-mono border border-sky-100 dark:border-gray-600">$1</code>');
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>'); 
     html = html.replace(/\n/g, '<br>');
+
     return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
@@ -336,6 +364,7 @@ const DeveloperDashboard = ({ onClose }) => {
 
     useEffect(() => {
         const fetchData = async () => {
+            // 1. Ambil data users untuk statistik & online status
             const usersSnap = await new Promise(resolve => {
                 const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => {
                     resolve(snap);
@@ -343,6 +372,7 @@ const DeveloperDashboard = ({ onClose }) => {
                 });
             });
 
+            // 2. Ambil data posts untuk statistik grafik
             const postsSnap = await new Promise(resolve => {
                 const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => {
                     resolve(snap);
@@ -353,15 +383,18 @@ const DeveloperDashboard = ({ onClose }) => {
             const totalUsers = usersSnap.size;
             const totalPosts = postsSnap.size;
             
+            // Hitung Post Hari Ini
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const rawPosts = postsSnap.docs.map(d => d.data());
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
 
+            // Hitung User Online (Aktif dalam 10 menit terakhir)
             const tenMinAgo = Date.now() - 10 * 60 * 1000;
             const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()}))
                 .filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
 
+            // Data Grafik 7 Hari
             const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
             const last7Days = [];
             for (let i = 6; i >= 0; i--) {
@@ -393,10 +426,12 @@ const DeveloperDashboard = ({ onClose }) => {
         
         setSendingBC(true);
         try {
+            // Ambil semua user ID
             const usersSnap = await new Promise(resolve => {
                 const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); });
             });
             
+            // Kirim notifikasi batch
             const promises = usersSnap.docs.map(docSnap => {
                 return addDoc(collection(db, getPublicCollection('notifications')), {
                     toUserId: docSnap.id,
@@ -434,6 +469,7 @@ const DeveloperDashboard = ({ onClose }) => {
 
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
                     <div className="space-y-6">
+                        {/* Statistik Utama */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-sky-100 dark:border-gray-700 text-center">
                                 <Users className="mx-auto text-sky-500 mb-2"/>
@@ -452,6 +488,7 @@ const DeveloperDashboard = ({ onClose }) => {
                             </div>
                         </div>
 
+                        {/* Broadcast Tool */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
                             <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
                                 <Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman
@@ -472,6 +509,7 @@ const DeveloperDashboard = ({ onClose }) => {
                             </button>
                         </div>
 
+                        {/* Grafik Aktivitas */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
                             <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                                 <BarChart3 size={18}/> Aktivitas Minggu Ini
@@ -490,6 +528,7 @@ const DeveloperDashboard = ({ onClose }) => {
                             </div>
                         </div>
 
+                        {/* User Online */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
                             <h3 className="font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
                                 <Globe size={18}/> Pengguna Online ({onlineUsers.length})
@@ -539,9 +578,11 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                // Update lastSeen saat login
                 const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
                 const snap = await getDoc(ref);
                 if(!snap.exists()) {
+                    // Buat profil jika belum ada (fallback)
                     await setDoc(ref, { 
                         username: email.split('@')[0], email: email, createdAt: serverTimestamp(), 
                         uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() 
@@ -552,10 +593,11 @@ const AuthScreen = ({ onLoginSuccess }) => {
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // Buat profil user baru
                 await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
                     username: username.trim(), email: email, createdAt: serverTimestamp(), 
                     uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(),
-                    savedPosts: []
+                    savedPosts: [] // Inisialisasi array savedPosts
                 });
             }
             onLoginSuccess();
@@ -658,7 +700,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.2 (Stable)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.3 (Stable)</div>
                     </div>
                     
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
@@ -707,7 +749,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
-    // Fitur Bookmark
+    // Fitur Bookmark (Baru V17)
     const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
     
     // Fitur Baca Selengkapnya
@@ -746,7 +788,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
-    // FUNGSI BARU: Double Tap Like Logic
+    // FUNGSI BARU: Double Tap Like Logic (Seperti Instagram)
     const handleDoubleTap = () => {
         // Trigger animasi hati
         setShowHeartOverlay(true);
@@ -758,6 +800,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         }
     };
 
+    // FUNGSI BARU: Simpan/Hapus Bookmark
     const handleSave = async () => {
         const newSaved = !isSaved;
         setIsSaved(newSaved);
@@ -771,7 +814,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             }
         } catch (error) {
             console.error("Gagal menyimpan postingan", error);
-            setIsSaved(!newSaved); 
+            setIsSaved(!newSaved); // Revert jika gagal
         }
     };
 
@@ -822,6 +865,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
     const isImage = (post.mediaUrl && (/\.(jpg|png|webp)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
 
+    // INOVASI BARU: BADGE REPUTASI USER DI POSTINGAN
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
@@ -879,7 +923,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         {isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 dark:text-sky-400 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}
                     </div>
                     {(isImage || isVideo || embed) && (
-                        // FEATURE: DOUBLE TAP TO LIKE
+                        // FEATURE: DOUBLE TAP TO LIKE (INOVASI KEREN)
                         <div 
                             className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 dark:border-gray-700 relative select-none"
                             onDoubleClick={handleDoubleTap}
@@ -904,6 +948,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
                 <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
+                {/* Tombol Bookmark Baru */}
                 <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}>
                     <Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} />
                 </button>
@@ -926,7 +971,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// --- 7. HOME SCREEN ---
+// --- 7. HOME SCREEN (AUTO SCROLL INFINITE) ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
@@ -969,6 +1014,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
             const first = entries[0];
             if (first.isIntersecting && !loadingMore && stableFeed.length > displayCount) {
                 setLoadingMore(true);
+                // Simulasi loading halus
                 setTimeout(() => {
                     setDisplayCount(prev => prev + 5);
                     setLoadingMore(false);
@@ -1022,7 +1068,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
-// --- 8. SHORTS SCREEN ---
+// --- 8. SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
     
@@ -1031,6 +1077,7 @@ const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
         setFeed(shuffleArray(shorts));
     }, [allPosts]);
 
+    // Infinite Scroll Logic
     const handleScroll = (e) => {
         const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
         if (scrollHeight - scrollTop <= clientHeight + 200) {
@@ -1143,14 +1190,17 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isSelf, handleFollow, profile }) => {
     const [edit, setEdit] = useState(false); const [name, setName] = useState(username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false);
     const [showDev, setShowDev] = useState(false);
-    const [activeTab, setActiveTab] = useState('posts'); 
+    const [activeTab, setActiveTab] = useState('posts'); // 'posts' atau 'saved' (Fitur Baru V17)
 
+    // Filter Postingan
     const userPosts = allPosts.filter(p=>p.userId===currentUserId).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
+    // Ambil data saved posts (V17)
     const savedPostsData = allPosts.filter(p => profile.savedPosts?.includes(p.id));
 
     const isDev = email === DEVELOPER_EMAIL;
     const save = async () => { setLoad(true); try { const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
 
+    // INOVASI BARU: SISTEM REPUTASI
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
 
@@ -1165,6 +1215,7 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 {edit ? <div className="space-y-3 bg-gray-50 dark:bg-gray-700 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button></div> : <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>}
                 <p className="text-gray-400 text-xs mb-4">{email}</p>
                 
+                {/* TAMPILAN BADGE KEAHLIAN */}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs mb-6 shadow-sm ${badge.color}`}>
                     <badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})
                 </div>
@@ -1175,6 +1226,7 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 <div className="flex justify-center gap-8 mt-6 border-t pt-6 dark:border-gray-700"><div><span className="font-bold text-xl block dark:text-white">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block dark:text-white">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
             </div>
             
+            {/* TAB NAVIGASI PROFIL (Baru V17) */}
             {isSelf && (
                 <div className="flex gap-2 px-4 mb-6">
                     <button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button>
@@ -1218,7 +1270,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     return <div className="max-w-lg mx-auto p-4 pb-20 pt-6"><button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button><PostItem post={post} {...props}/></div>;
 };
 
-// --- 11. APP UTAMA ---
+// --- 11. APP UTAMA (LOGIKA FIXED) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1231,26 +1283,31 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
-    // PERBAIKAN DARK MODE (V17.3 FIX)
-    // Default ke FALSE (Light Mode) untuk memastikan selalu cerah saat awal dibuka
+    // --- LOGIKA BARU: MANUAL ONLY (FIX BUG MODE GELAP) ---
+    // 1. Cek apakah ada simpanan di localStorage (hanya 'dark' atau 'light').
+    // 2. Jika KOSONG/NULL, maka DEFAULT = FALSE (Mode Cerah).
+    // 3. JANGAN cek system preference (window.matchMedia) agar tidak bentrok.
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('theme');
-            // Hanya mengembalikan true jika benar-benar diset 'dark'
-            return saved === 'dark'; 
+            return saved === 'dark'; // Hanya true jika history-nya 'dark'
         }
-        return false; 
+        return false; // Default Selalu Cerah
     });
 
     const toggleTheme = () => {
         setDarkMode(prev => !prev);
     };
 
-    // Effect ini menyimpan preferensi ke localStorage
+    // Effect ini memastikan class 'dark' ditambahkan ke HTML tag root
+    // Ini penting agar Tailwind mendeteksi perubahan mode
     useEffect(() => {
+        const root = document.documentElement;
         if (darkMode) {
+            root.classList.add('dark');
             localStorage.setItem('theme', 'dark');
         } else {
+            root.classList.remove('dark');
             localStorage.setItem('theme', 'light');
         }
     }, [darkMode]);
@@ -1315,8 +1372,8 @@ const App = () => {
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
+    // WRAPPER UTAMA: Class 'dark' dipasang di sini juga untuk keamanan ganda
     return (
-        // WRAPPER UTAMA: Class 'dark' dipasang di sini untuk mengontrol seluruh tema aplikasi
         <div className={darkMode ? "dark" : ""}>
             <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
                 {page!=='shorts' && (
