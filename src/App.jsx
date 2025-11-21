@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // ==========================================
 
 // Import Firebase Core & Services
+// Pastikan library firebase sudah terinstall di project (npm install firebase)
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -37,7 +38,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// Import Icons (Lucide React) - Lengkap
+// Import Icons (Lucide React) - Ditambahkan 'Bookmark' untuk fitur baru
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -46,10 +47,10 @@ import {
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal
+    Award, Crown, Gem, Medal, Bookmark // <-- Ikon baru untuk fitur simpan
 } from 'lucide-react';
 
-// Atur Log Level Firebase (Supaya tidak berisik di console)
+// Atur Log Level Firebase (Supaya tidak berisik di console saat development)
 setLogLevel('warn');
 
 // --- KONSTANTA GLOBAL ---
@@ -84,7 +85,7 @@ const db = getFirestore(app);
 // ==========================================
 
 // 1. Algoritma Acak (Fisher-Yates Shuffle)
-// Digunakan untuk fitur "Random Feed" dan "Shorts" agar tidak membosankan
+// Digunakan untuk fitur "Random Feed" dan "Shorts" agar konten selalu segar
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -98,7 +99,7 @@ const shuffleArray = (array) => {
 
 // 2. Sistem Notifikasi
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
-    // Mencegah notifikasi ke diri sendiri
+    // Mencegah notifikasi spam ke diri sendiri
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     
     try {
@@ -107,7 +108,7 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
             fromUserId: fromUser.uid,
             fromUsername: fromUser.username,
             fromPhoto: fromUser.photoURL || '',
-            type: type, // 'like', 'comment', 'follow', 'system'
+            type: type, // 'like', 'comment', 'follow', 'system', 'bookmark'
             message: message,
             postId: postId,
             isRead: false,
@@ -128,7 +129,7 @@ const uploadToFaaAPI = async (file, onProgress) => {
     formData.append('file', file, file.name);
 
     try {
-        // Simulasi progress awal (0-50%) agar UX terasa responsif
+        // Simulasi progress awal (0-50%) agar UX terasa responsif bagi pengguna
         for (let i = 0; i <= 50; i += 5) {
             onProgress(i);
             await new Promise(resolve => setTimeout(resolve, 50)); 
@@ -158,6 +159,7 @@ const uploadToFaaAPI = async (file, onProgress) => {
 };
 
 // 4. Formatter Waktu (Relative Time)
+// Mengubah timestamp menjadi "2 jam lalu", "Baru saja", dll.
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     
@@ -193,7 +195,7 @@ const getMediaEmbed = (url) => {
         };
     }
     
-    // Link TikTok / Instagram
+    // Link TikTok / Instagram (Deteksi sederhana)
     if (url.includes('tiktok.com') || url.includes('instagram.com')) {
         return { 
             type: 'link', 
@@ -204,13 +206,13 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-// 6. Kalkulator Reputasi & Badge (INOVASI BARU V16)
+// 6. Kalkulator Reputasi & Badge (INOVASI V16 & V17)
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
     if (reputation >= 100) return { label: "INFLUENCER", icon: Gem, color: "bg-purple-500 text-white" };
     if (reputation >= 50) return { label: "RISING STAR", icon: Flame, color: "bg-orange-500 text-white" };
-    return { label: "NEWBIE", icon: Award, color: "bg-gray-200 text-gray-600" };
+    return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
 // ==========================================
@@ -230,7 +232,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
         setRetryCount(prev => prev + 1);
     };
 
-    // Force reload dengan query param timestamp
+    // Force reload dengan query param timestamp untuk menghindari cache browser yang rusak
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}` : src;
 
     if (error) {
@@ -315,11 +317,12 @@ const SkeletonPost = () => (
 );
 
 // --- FORMAT TEKS LANJUTAN ---
+// Fungsi ini mengubah teks biasa menjadi HTML yang aman dengan format Bold, Italic, dan Link
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text;
 
-    // Sanitasi
+    // Sanitasi untuk keamanan XSS
     html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
 
     // Format Link Custom: [Judul](Url)
@@ -574,9 +577,11 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                // Update lastSeen saat login
                 const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
                 const snap = await getDoc(ref);
                 if(!snap.exists()) {
+                    // Buat profil jika belum ada (fallback)
                     await setDoc(ref, { 
                         username: email.split('@')[0], email: email, createdAt: serverTimestamp(), 
                         uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() 
@@ -587,9 +592,11 @@ const AuthScreen = ({ onLoginSuccess }) => {
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // Buat profil user baru
                 await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
                     username: username.trim(), email: email, createdAt: serverTimestamp(), 
-                    uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() 
+                    uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(),
+                    savedPosts: [] // Inisialisasi array savedPosts
                 });
             }
             onLoginSuccess();
@@ -603,7 +610,7 @@ const AuthScreen = ({ onLoginSuccess }) => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900 p-6 font-sans">
+        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900 p-6 font-sans transition-colors duration-300">
             <div className="w-full max-w-sm bg-white dark:bg-gray-800 rounded-[2rem] shadow-2xl border border-white dark:border-gray-700 p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
                 
@@ -692,7 +699,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V16.0</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V17.0</div>
                     </div>
                     
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
@@ -741,6 +748,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
+    // Fitur Bookmark (Baru V17)
+    const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
+    
     // Fitur Baca Selengkapnya
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -756,7 +766,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     useEffect(() => {
         setLiked(post.likes?.includes(currentUserId));
         setLikeCount(post.likes?.length || 0);
-    }, [post.likes, currentUserId]);
+        setIsSaved(profile.savedPosts?.includes(post.id));
+    }, [post, currentUserId, profile.savedPosts]);
 
     const handleLike = async () => {
         const newLiked = !liked;
@@ -771,6 +782,24 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 await updateDoc(ref, { likes: arrayRemove(currentUserId) });
             }
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
+    };
+
+    // FUNGSI BARU: Simpan/Hapus Bookmark
+    const handleSave = async () => {
+        const newSaved = !isSaved;
+        setIsSaved(newSaved);
+        const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
+        
+        try {
+            if (newSaved) {
+                await updateDoc(userRef, { savedPosts: arrayUnion(post.id) });
+            } else {
+                await updateDoc(userRef, { savedPosts: arrayRemove(post.id) });
+            }
+        } catch (error) {
+            console.error("Gagal menyimpan postingan", error);
+            setIsSaved(!newSaved); // Revert jika gagal
+        }
     };
 
     const handleComment = async (e) => {
@@ -821,7 +850,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isImage = (post.mediaUrl && (/\.(jpg|png|webp)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
 
     // INOVASI BARU: BADGE REPUTASI USER DI POSTINGAN
-    // Hitung skor user berdasarkan data yang ada (mockup sederhana karena data likes user lain tidak diload di sini)
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
@@ -892,7 +920,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             <div className="flex items-center gap-6 pt-2 border-t border-gray-50 dark:border-gray-700">
                 <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
-                <button onClick={sharePost} className="ml-auto text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
+                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
+                {/* Tombol Bookmark Baru */}
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}>
+                    <Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} />
+                </button>
             </div>
 
             {showComments && (
@@ -1131,7 +1163,13 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isSelf, handleFollow, profile }) => {
     const [edit, setEdit] = useState(false); const [name, setName] = useState(username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false);
     const [showDev, setShowDev] = useState(false);
+    const [activeTab, setActiveTab] = useState('posts'); // 'posts' atau 'saved' (Fitur Baru V17)
+
+    // Filter Postingan
     const userPosts = allPosts.filter(p=>p.userId===currentUserId).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
+    // Ambil data saved posts (V17)
+    const savedPostsData = allPosts.filter(p => profile.savedPosts?.includes(p.id));
+
     const isDev = email === DEVELOPER_EMAIL;
     const save = async () => { setLoad(true); try { const url = file ? await uploadToFaaAPI(file, ()=>{}) : photoURL; await updateDoc(doc(db, getPublicCollection('userProfiles'), currentUserId), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
 
@@ -1150,7 +1188,7 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
                 {edit ? <div className="space-y-3 bg-gray-50 dark:bg-gray-700 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'...':'Simpan'}</button></div> : <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>}
                 <p className="text-gray-400 text-xs mb-4">{email}</p>
                 
-                {/* INOVASI: TAMPILAN BADGE KEAHLIAN */}
+                {/* TAMPILAN BADGE KEAHLIAN */}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs mb-6 shadow-sm ${badge.color}`}>
                     <badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})
                 </div>
@@ -1160,7 +1198,22 @@ const ProfileScreen = ({ currentUserId, username, email, allPosts, photoURL, isS
 
                 <div className="flex justify-center gap-8 mt-6 border-t pt-6 dark:border-gray-700"><div><span className="font-bold text-xl block dark:text-white">{profile.followers?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{profile.following?.length||0}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block dark:text-white">{userPosts.length}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Post</span></div></div>
             </div>
-            <div className="px-4 space-y-6">{userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}</div>
+            
+            {/* TAB NAVIGASI PROFIL (Baru V17) */}
+            {isSelf && (
+                <div className="flex gap-2 px-4 mb-6">
+                    <button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button>
+                    <button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Disimpan</button>
+                </div>
+            )}
+
+            <div className="px-4 space-y-6">
+                {activeTab === 'posts' ? (
+                    userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
+                ) : (
+                    savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={profile.uid} profile={profile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
+                )}
+            </div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
     );
@@ -1202,7 +1255,26 @@ const App = () => {
     const [notifCount, setNotifCount] = useState(0); 
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
-    const [darkMode, setDarkMode] = useState(false);
+
+    // PERBAIKAN FITUR DARK MODE V17: Menggunakan localStorage
+    const [darkMode, setDarkMode] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('theme') === 'dark';
+        }
+        return false;
+    });
+
+    // Efek samping untuk Dark Mode
+    useEffect(() => {
+        const root = window.document.documentElement;
+        if (darkMode) {
+            root.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            root.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
+    }, [darkMode]);
 
     useEffect(() => {
         const timer = setTimeout(() => setShowSplash(false), 3000);
@@ -1220,7 +1292,7 @@ const App = () => {
         if(!user) return;
         if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
         
-        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => s.exists() ? setProfile({...s.data(), uid:user.uid, email:user.email}) : setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {username:user.email.split('@')[0], email:user.email, uid:user.uid, following:[], followers:[], photoURL:'', lastSeen: serverTimestamp()}));
+        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => s.exists() ? setProfile({...s.data(), uid:user.uid, email:user.email}) : setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {username:user.email.split('@')[0], email:user.email, uid:user.uid, following:[], followers:[], photoURL:'', lastSeen: serverTimestamp(), savedPosts: []}));
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
             const uids = [...new Set(raw.map(r=>r.userId))];
@@ -1265,12 +1337,14 @@ const App = () => {
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
 
     return (
-        <div className={`${darkMode ? 'dark' : ''} min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
+        <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
             {page!=='shorts' && (
                 <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-700 shadow-sm">
                     <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                     <div className="flex gap-3">
-                        <button onClick={()=>setDarkMode(!darkMode)} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition">{darkMode ? <Sun size={20}/> : <Moon size={20}/>}</button>
+                        <button onClick={()=>setDarkMode(!darkMode)} className="p-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-yellow-400 rounded-full shadow-sm transition hover:scale-110">
+                            {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
+                        </button>
                         <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
                         <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-gray-300 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button>
                         <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
