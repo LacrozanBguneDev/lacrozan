@@ -4,8 +4,6 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
 // ==========================================
 
-// Import Firebase Core & Services
-// Pastikan library firebase sudah terinstall di project (npm install firebase)
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -38,11 +36,9 @@ import {
     writeBatch
 } from 'firebase/firestore';
 
-// IMPORT KHUSUS NOTIFIKASI (Messaging)
-// Gunakan try-catch saat inisialisasi agar tidak error di browser lama
+// IMPORT KHUSUS NOTIFIKASI
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
-// Import Icons (Lucide React) - Lengkap
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -52,11 +48,11 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio // <-- Radio & Smartphone untuk Icon PWA
+    Hash, Tag, Wifi, Smartphone, Radio, ImageOff
 } from 'lucide-react';
 
-// Atur Log Level Firebase (Supaya tidak berisik di console saat development)
-setLogLevel('warn');
+// Set log level ke silent biar console bersih
+setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
 const DEVELOPER_EMAIL = 'irhamdika00@gmail.com'; 
@@ -66,12 +62,10 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-// --- KUNCI VAPID (WAJIB DIISI DARI FIREBASE CONSOLE) ---
-// Ganti string di bawah dengan Key pair yang kamu generate di langkah 1 (Firebase Console -> Project Settings -> Cloud Messaging)
-const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
+// --- KUNCI VAPID (Opsional untuk Backend, tapi kita pakai listener lokal sekarang) ---
+const VAPID_KEY = "BOyF_p9xV... (Isi VAPID kamu jika ada)"; 
 
 // --- KONFIGURASI FIREBASE ---
-// Menggunakan konfigurasi environment jika tersedia, atau fallback ke config default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -82,7 +76,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
   measurementId: "G-G0VWNHHVB8"
 };
 
-// Inisialisasi App
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
@@ -90,46 +83,34 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Inisialisasi Messaging (Dengan Safely Check)
+// Inisialisasi Messaging (Safe Check)
 let messaging = null;
 try {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    console.log("Messaging not supported (mungkin bukan HTTPS atau browser lama)");
+    console.log("Messaging skipped");
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// 1. Fungsi Request Izin & Simpan Token (JANTUNGNYA NOTIFIKASI)
-const requestNotificationPermission = async (userId) => {
-    if (!messaging || !userId) return;
-    
+// 1. Request Izin Notifikasi (Browser)
+const requestNotificationPermission = async () => {
+    if (!("Notification" in window)) return;
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            // Dapatkan Token Unik HP ini
-            const token = await getToken(messaging, { vapidKey: VAPID_KEY });
-            if (token) {
-                // Simpan token ke database user agar server bisa mengirim pesan nanti
-                const userRef = doc(db, getPublicCollection('userProfiles'), userId);
-                // Kita pakai arrayUnion agar 1 user bisa punya banyak HP (Token)
-                await updateDoc(userRef, { 
-                    fcmTokens: arrayUnion(token),
-                    lastTokenUpdate: serverTimestamp()
-                });
-                console.log("Token Push Notifikasi tersimpan:", token);
-            }
+            console.log("Izin notifikasi diberikan.");
         }
     } catch (error) {
         console.error("Gagal request notifikasi:", error);
     }
 };
 
-// 2. Algoritma Acak (Fisher-Yates Shuffle)
+// 2. Algoritma Acak
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -143,17 +124,14 @@ const shuffleArray = (array) => {
 
 // 3. Sistem Notifikasi (Database)
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
-    // Mencegah notifikasi spam ke diri sendiri
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
-    
     try {
-        // Simpan ke Notifikasi di App (Lonceng)
         await addDoc(collection(db, getPublicCollection('notifications')), {
             toUserId: toUserId,
             fromUserId: fromUser.uid,
             fromUsername: fromUser.username,
             fromPhoto: fromUser.photoURL || '',
-            type: type, // 'like', 'comment', 'follow', 'system', 'bookmark'
+            type: type, 
             message: message,
             postId: postId,
             isRead: false,
@@ -164,18 +142,16 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 4. Upload API (Faa API)
+// 4. Upload API (Faa API) - FIX: Better Error Handling
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
-    
-    // Reset progress
     onProgress(0);
     formData.append('file', file, file.name);
 
     try {
-        // Simulasi progress awal
-        for (let i = 0; i <= 50; i += 5) {
+        // Simulasi cepat
+        for (let i = 0; i <= 60; i += 10) {
             onProgress(i);
             await new Promise(resolve => setTimeout(resolve, 50)); 
         }
@@ -184,70 +160,57 @@ const uploadToFaaAPI = async (file, onProgress) => {
         onProgress(80);
 
         if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
+            throw new Error(`Server Error: ${response.status}`);
         }
         
         const data = await response.json();
         onProgress(100);
         
-        if (data && data.status) {
-            return data.url;
+        if (data && data.url) {
+            // FIX: Pastikan URL yang dikembalikan menggunakan HTTPS
+            let secureUrl = data.url;
+            if (secureUrl.startsWith('http://')) {
+                secureUrl = secureUrl.replace('http://', 'https://');
+            }
+            return secureUrl;
+        } else if (data && data.result && data.result.url) {
+             // Handle format respon lain dari API Faa
+             return data.result.url;
         } else {
-            throw new Error(data.message || 'Gagal mengunggah file. Respon tidak valid.');
+            throw new Error('Format respon API tidak dikenali.');
         }
     } catch (error) {
         onProgress(0); 
-        console.error('Upload error:', error);
-        throw new Error('Gagal mengunggah. Koneksi bermasalah atau file terlalu besar.');
+        console.error('Upload error details:', error);
+        throw new Error('Gagal upload. Coba ganti foto atau cek koneksi.');
     }
 };
 
-// 5. Formatter Waktu (Relative Time)
+// 5. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
-    
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
     const seconds = Math.floor((now - date) / 1000);
-
-    const fullDate = date.toLocaleDateString('id-ID', { 
-        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-    });
-
+    const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     if (seconds > 86400) return { relative: fullDate, full: fullDate };
     if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
-    
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return { relative: `${minutes} menit lalu`, full: fullDate };
-    
     const hours = Math.floor(minutes / 60);
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 6. Detektor Media Embed (YouTube / TikTok / IG)
+// 6. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
-    
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
-    if (youtubeMatch) {
-        return { 
-            type: 'youtube', 
-            embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, 
-            id: youtubeMatch[1] 
-        };
-    }
-    
-    if (url.includes('tiktok.com') || url.includes('instagram.com')) {
-        return { 
-            type: 'link', 
-            embedUrl: url, 
-            displayUrl: url 
-        };
-    }
+    if (youtubeMatch) { return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, id: youtubeMatch[1] }; }
+    if (url.includes('tiktok.com') || url.includes('instagram.com')) { return { type: 'link', embedUrl: url, displayUrl: url }; }
     return null;
 };
 
-// 7. Kalkulator Reputasi & Badge
+// 7. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -256,38 +219,34 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
-// 8. Ekstraktor Hashtag (Untuk Trending)
+// 8. Ekstraktor Hashtag
 const extractHashtags = (text) => {
     if (!text) return [];
     const matches = text.match(/#[\w]+/g);
     return matches ? matches : [];
 };
 
-// 9. Cek Online Status (Berdasarkan Last Seen)
+// 9. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
     const diff = Date.now() - last.getTime();
-    return diff < 10 * 60 * 1000; // Online jika aktif dalam 10 menit terakhir
+    return diff < 10 * 60 * 1000; 
 };
 
 // ==========================================
 // BAGIAN 3: KOMPONEN UI KECIL
 // ==========================================
 
-// --- KOMPONEN BARU: INSTALL PWA PROMPT ---
-// Ini akan memunculkan banner di bawah jika web belum diinstall
+// --- PWA INSTALL PROMPT ---
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
 
     useEffect(() => {
         const handler = (e) => {
-            // Mencegah Chrome menampilkan banner default
             e.preventDefault();
-            // Simpan event agar bisa dipanggil nanti
             setDeferredPrompt(e);
-            // Tampilkan banner custom kita
             setShowBanner(true);
         };
         window.addEventListener('beforeinstallprompt', handler);
@@ -296,7 +255,6 @@ const PWAInstallPrompt = () => {
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
-        // Munculkan prompt asli browser
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
@@ -311,10 +269,7 @@ const PWAInstallPrompt = () => {
         <div className="fixed bottom-24 left-4 right-4 bg-gray-900 text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500">
             <div className="flex items-center gap-3">
                 <div className="bg-sky-500 p-2 rounded-xl"><Smartphone size={24}/></div>
-                <div>
-                    <h4 className="font-bold text-sm">Install {APP_NAME}</h4>
-                    <p className="text-xs text-gray-400">Akses lebih cepat & Notifikasi</p>
-                </div>
+                <div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-400">Akses cepat & Notifikasi</p></div>
             </div>
             <div className="flex items-center gap-2">
                 <button onClick={() => setShowBanner(false)} className="p-2 text-gray-400 hover:text-white"><X size={18}/></button>
@@ -324,11 +279,26 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// Komponen Gambar dengan Indikator Loading & Retry
+// --- IMAGE WITH RETRY (VERSI FIX LOADING STUCK) ---
+// Menggunakan referrerPolicy="no-referrer" untuk bypass CORS sederhana pada gambar
 const ImageWithRetry = ({ src, alt, className }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
+    
+    // Tambahkan Timeout biar gak loading selamanya
+    useEffect(() => {
+        if (loading) {
+            const timer = setTimeout(() => {
+                if (loading) {
+                    console.log("Image timeout:", src);
+                    setLoading(false);
+                    setError(true);
+                }
+            }, 10000); // 10 detik timeout
+            return () => clearTimeout(timer);
+        }
+    }, [loading, src, retryCount]);
 
     const handleRetry = (e) => {
         e.stopPropagation();
@@ -337,52 +307,38 @@ const ImageWithRetry = ({ src, alt, className }) => {
         setRetryCount(prev => prev + 1);
     };
 
-    // Force reload dengan query param timestamp
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}` : src;
 
     if (error) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-500 ${className}`} style={{minHeight: '200px'}}>
-                <ImageIcon size={32} className="mb-2 opacity-50"/>
-                <p className="text-xs mb-2">Gagal memuat gambar</p>
-                <button 
-                    onClick={handleRetry} 
-                    className="flex items-center gap-1 bg-white border border-gray-300 px-3 py-1 rounded-full text-xs font-bold shadow-sm hover:bg-gray-50 transition text-gray-800"
-                >
-                    <RotateCw size={12}/> Coba Lagi
-                </button>
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className}`} style={{minHeight: '200px'}}>
+                <ImageOff size={24} className="mb-2 opacity-50"/>
+                <p className="text-[10px] mb-2">Gagal memuat</p>
+                <button onClick={handleRetry} className="bg-white border px-2 py-1 rounded text-[10px] font-bold shadow-sm text-gray-600">Refresh</button>
             </div>
         );
     }
 
     return (
         <div className={`relative ${className}`}>
-            {loading && (
-                <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center">
-                    <Loader2 className="animate-spin text-gray-400" size={24}/>
-                </div>
-            )}
+            {loading && <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-gray-400" size={20}/></div>}
             <img 
                 src={displaySrc} 
                 alt={alt} 
                 className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
                 onLoad={() => setLoading(false)}
                 onError={() => { setLoading(false); setError(true); }}
+                loading="lazy"
+                referrerPolicy="no-referrer" // FIX PENTING: Bypass referer check
+                crossOrigin="anonymous"
             />
         </div>
     );
 };
 
-// Komponen Splash Screen
 const SplashScreen = () => {
-    const quotes = [
-        "Menghubungkan ke dunia...", 
-        "Membangun komunitas positif...", 
-        "Berbagi cerita, berbagi inspirasi...", 
-        "Siapkan konten terbaikmu..."
-    ];
+    const quotes = ["Menghubungkan ke dunia...", "Membangun komunitas positif...", "Berbagi cerita, berbagi inspirasi...", "Siapkan konten terbaikmu..."];
     const [quote] = useState(quotes[Math.floor(Math.random() * quotes.length)]);
-
     return (
         <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
             <div className="relative mb-8 animate-bounce-slow">
@@ -390,67 +346,25 @@ const SplashScreen = () => {
                 <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div>
             </div>
             <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest">{APP_NAME}</h1>
-            <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden mb-4">
-                <div className="h-full bg-sky-500 animate-progress-indeterminate"></div>
-            </div>
-            <p className="text-gray-400 text-xs font-medium animate-pulse">{quote}</p>
+            <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
+            <p className="text-gray-400 text-xs font-medium animate-pulse">Membangun koneksi...</p>
         </div>
     );
 };
 
-// Komponen Skeleton Loading
 const SkeletonPost = () => (
     <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
-        <div className="flex items-center gap-3 mb-4">
-            <div className="w-11 h-11 rounded-full bg-gray-200"></div>
-            <div className="flex-1">
-                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div>
-                <div className="h-3 bg-gray-100 rounded w-1/4"></div>
-            </div>
-        </div>
-        <div className="h-6 bg-gray-200 rounded w-3/4 mb-3"></div>
-        <div className="space-y-2 mb-4">
-            <div className="h-3 bg-gray-100 rounded w-full"></div>
-            <div className="h-3 bg-gray-100 rounded w-2/3"></div>
-        </div>
-        <div className="h-48 bg-gray-200 rounded-2xl mb-4"></div>
-        <div className="flex gap-4">
-            <div className="h-8 w-16 bg-gray-100 rounded-full"></div>
-            <div className="h-8 w-16 bg-gray-100 rounded-full"></div>
-        </div>
+        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200"></div><div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div></div>
+        <div className="h-6 bg-gray-200 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 rounded-2xl mb-4"></div><div className="flex gap-4"><div className="h-8 w-16 bg-gray-100 rounded-full"></div><div className="h-8 w-16 bg-gray-100 rounded-full"></div></div>
     </div>
 );
 
-// --- FORMAT TEKS LANJUTAN ---
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
-    let html = text;
-
-    // Sanitasi
-    html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
-
-    // Format Link Custom
-    html = html.replace(
-        /\[([^\]]+)\]\(([^)]+)\)/g, 
-        '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>'
-    );
-
-    // Auto Detect HTTPS
-    html = html.replace(
-        /(https?:\/\/[^\s<]+)/g, 
-        (match) => {
-            if (match.includes('href="')) return match;
-            return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`;
-        }
-    );
-
-    // Format Style
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/`(.*?)`/g, '<code class="bg-sky-50 px-1 rounded text-sm text-sky-700 font-mono border border-sky-100">$1</code>');
-    html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>'); 
-    html = html.replace(/\n/g, '<br>');
-
+    let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>');
+    html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { if (match.includes('href="')) return match; return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; });
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 px-1 rounded text-sm text-sky-700 font-mono border border-sky-100">$1</code>').replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>').replace(/\n/g, '<br>');
     return <div className="text-gray-800 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
@@ -467,211 +381,79 @@ const DeveloperDashboard = ({ onClose }) => {
 
     useEffect(() => {
         const fetchData = async () => {
-            const usersSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => {
-                    resolve(snap);
-                    unsub();
-                });
-            });
-
-            const postsSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => {
-                    resolve(snap);
-                    unsub();
-                });
-            });
-
-            const totalUsers = usersSnap.size;
-            const totalPosts = postsSnap.size;
-            
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => { resolve(snap); unsub(); }); });
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const rawPosts = postsSnap.docs.map(d => d.data());
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
-
             const tenMinAgo = Date.now() - 10 * 60 * 1000;
-            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()}))
-                .filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
-
+            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
             const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
             const last7Days = [];
             for (let i = 6; i >= 0; i--) {
-                const d = new Date(); 
-                d.setDate(d.getDate() - i);
+                const d = new Date(); d.setDate(d.getDate() - i);
                 const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
                 const dayEnd = dayStart + 86400000;
-                const count = rawPosts.filter(p => {
-                    const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0;
-                    return t >= dayStart && t < dayEnd;
-                }).length;
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
                 last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
             }
-
-            setStats({ users: totalUsers, posts: totalPosts, postsToday });
+            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
             setOnlineUsers(active);
             setChartData(last7Days);
             setLoading(false);
         };
-
         fetchData();
     }, []);
 
     const handleBroadcast = async () => {
         if(!broadcastMsg.trim()) return;
         if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
-        
         setSendingBC(true);
         try {
-            const usersSnap = await new Promise(resolve => {
-                const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); });
-            });
-            
-            const promises = usersSnap.docs.map(docSnap => {
-                return addDoc(collection(db, getPublicCollection('notifications')), {
-                    toUserId: docSnap.id,
-                    fromUserId: 'admin',
-                    fromUsername: 'Developer System',
-                    fromPhoto: APP_LOGO,
-                    type: 'system',
-                    message: `📢 PENGUMUMAN: ${broadcastMsg}`,
-                    isRead: false,
-                    timestamp: serverTimestamp()
-                });
-            });
-            
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
+            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), {
+                toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
+            }));
             await Promise.all(promises);
-            alert("Pengumuman berhasil dikirim!");
-            setBroadcastMsg('');
-        } catch(e) {
-            alert("Gagal kirim broadcast: " + e.message);
-        } finally {
-            setSendingBC(false);
-        }
+            alert("Pengumuman berhasil dikirim!"); setBroadcastMsg('');
+        } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
     };
 
     return (
         <div className="fixed inset-0 bg-gray-100 z-[60] overflow-y-auto p-4 pb-20">
             <div className="max-w-2xl mx-auto">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2">
-                        <ShieldCheck className="text-sky-600"/> Developer Panel
-                    </h2>
-                    <button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200">
-                        <X/>
-                    </button>
-                </div>
-
+                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button></div>
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
                     <div className="space-y-6">
                         <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center">
-                                <Users className="mx-auto text-sky-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800">{stats.users}</h3>
-                                <p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p>
-                            </div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center">
-                                <ImageIcon className="mx-auto text-purple-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800">{stats.posts}</h3>
-                                <p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p>
-                            </div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center">
-                                <Activity className="mx-auto text-emerald-500 mb-2"/>
-                                <h3 className="text-2xl font-bold text-gray-800">{stats.postsToday}</h3>
-                                <p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p>
-                            </div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold">{stats.users}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
                         </div>
-
                         <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                <Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman
-                            </h3>
-                            <textarea 
-                                value={broadcastMsg} 
-                                onChange={e=>setBroadcastMsg(e.target.value)} 
-                                className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none"
-                                rows="3" 
-                                placeholder="Tulis pesan untuk semua user..."
-                            />
-                            <button 
-                                onClick={handleBroadcast} 
-                                disabled={sendingBC} 
-                                className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition"
-                            >
-                                {sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}
-                            </button>
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                            <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
-
                         {/* --- PWA TOOL UNTUK TEST (NOtifikasi Manual) --- */}
                         <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                <Radio size={18} className="text-blue-500"/> Push Notification Check
-                            </h3>
-                            <button 
-                                onClick={async () => {
-                                    if (!("Notification" in window)) { 
-                                        alert("Browser ini tidak support notifikasi."); 
-                                        return; 
-                                    }
-                                    
-                                    const permission = await Notification.requestPermission();
-                                    
-                                    if (permission === "granted") { 
-                                        new Notification("Tes Lokal", { 
-                                            body: "Ini tes notifikasi lokal dari tombol.", 
-                                            icon: APP_LOGO 
-                                        });
-                                    } else { 
-                                        alert("Izin notifikasi ditolak oleh user."); 
-                                    }
-                                }} 
-                                className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition"
-                            >
-                                Tes Izin & Notif Lokal
-                            </button>
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
+                            <button onClick={async () => {
+                                if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; }
+                                const permission = await Notification.requestPermission();
+                                if (permission === "granted") { 
+                                    new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO });
+                                } else { alert("Izin notifikasi ditolak oleh user."); }
+                            }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
                         </div>
-
                         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <BarChart3 size={18}/> Aktivitas Minggu Ini
-                            </h3>
-                            <div className="flex items-end justify-between h-32 gap-2">
-                                {chartData.map((d, i) => (
-                                    <div key={i} className="flex flex-col items-center w-full group">
-                                        <div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div>
-                                        <div 
-                                            className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" 
-                                            style={{height: `${d.height}%`}}
-                                        ></div>
-                                        <div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div>
-                                    </div>
-                                ))}
-                            </div>
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
+                            <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
                         </div>
-
                         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <Globe size={18}/> Pengguna Online ({onlineUsers.length})
-                            </h3>
-                            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">
-                                {onlineUsers.length === 0 ? (
-                                    <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p>
-                                ) : (
-                                    onlineUsers.map(u => (
-                                        <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div>
-                                                <div>
-                                                    <p className="text-sm font-bold text-gray-800">{u.username}</p>
-                                                    <p className="text-[10px] text-gray-500">{u.email}</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full">
-                                                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
+                            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">{onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => ( <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div><div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div><div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div></div> ))}</div>
                         </div>
                     </div>
                 )}
@@ -697,25 +479,17 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                // Update lastSeen
                 const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
                 const snap = await getDoc(ref);
                 if(!snap.exists()) {
-                    await setDoc(ref, { 
-                        username: email.split('@')[0], email: email, createdAt: serverTimestamp(), 
-                        uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() 
-                    });
+                    await setDoc(ref, { username: email.split('@')[0], email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() });
                 } else {
                     await updateDoc(ref, { lastSeen: serverTimestamp() });
                 }
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
-                    username: username.trim(), email: email, createdAt: serverTimestamp(), 
-                    uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(),
-                    savedPosts: [], mood: '' 
-                });
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [], mood: '' });
             }
             onLoginSuccess();
         } catch (err) {
@@ -731,71 +505,16 @@ const AuthScreen = ({ onLoginSuccess }) => {
         <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] p-6 font-sans">
             <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
-                
-                <div className="text-center mb-8 mt-2">
-                    <h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">
-                        {isLogin ? 'Selamat Datang' : 'Buat Akun'}
-                    </h2>
-                    <p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p>
-                </div>
-
-                {error && (
-                    <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100">
-                        <AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}
-                    </div>
-                )}
-
+                <div className="text-center mb-8 mt-2"><h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2><p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p></div>
+                {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
                 <form onSubmit={handleAuth} className="space-y-4">
-                    {!isLogin && (
-                        <div className="group relative">
-                            <User size={18} className="absolute left-4 top-3.5 text-gray-400"/>
-                            <input 
-                                value={username} 
-                                onChange={(e) => setUsername(e.target.value)} 
-                                placeholder="Username Unik" 
-                                className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"
-                            />
-                        </div>
-                    )}
-                    <div className="group relative">
-                        <Mail size={18} className="absolute left-4 top-3.5 text-gray-400"/>
-                        <input 
-                            type="email" 
-                            value={email} 
-                            onChange={(e) => setEmail(e.target.value)} 
-                            placeholder="Alamat Email" 
-                            className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"
-                        />
-                    </div>
-                    <div className="group relative">
-                        <Lock size={18} className="absolute left-4 top-3.5 text-gray-400"/>
-                        <input 
-                            type="password" 
-                            value={password} 
-                            onChange={(e) => setPassword(e.target.value)} 
-                            placeholder="Kata Sandi" 
-                            className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"
-                        />
-                    </div>
-                    
-                    <button disabled={isLoading} className="w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 shadow-lg shadow-gray-200 transition transform active:scale-95 disabled:opacity-70">
-                        {isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}
-                    </button>
+                    {!isLogin && <div className="group relative"><User size={18} className="absolute left-4 top-3.5 text-gray-400"/><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username Unik" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>}
+                    <div className="group relative"><Mail size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Alamat Email" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <div className="group relative"><Lock size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Kata Sandi" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <button disabled={isLoading} className="w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 shadow-lg shadow-gray-200 transition transform active:scale-95 disabled:opacity-70">{isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}</button>
                 </form>
-
-                <div className="mt-6 text-center pt-6 border-t border-gray-100">
-                    <p className="text-xs text-gray-500 mb-4">
-                        {isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} 
-                        <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">
-                            {isLogin ? 'Daftar' : 'Masuk'}
-                        </button>
-                    </p>
-                    {isLogin && (
-                        <a href={PASSWORD_RESET_LINK} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 text-sky-600 rounded-xl text-xs font-bold hover:bg-sky-100 transition">
-                            <HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?
-                        </a>
-                    )}
-                </div>
+                <div className="mt-6 text-center pt-6 border-t border-gray-100"><p className="text-xs text-gray-500 mb-4">{isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">{isLogin ? 'Daftar' : 'Masuk'}</button></p>
+                {isLogin && <a href={PASSWORD_RESET_LINK} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 text-sky-600 rounded-xl text-xs font-bold hover:bg-sky-100 transition"><HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?</a>}</div>
             </div>
         </div>
     );
@@ -804,43 +523,20 @@ const AuthScreen = ({ onLoginSuccess }) => {
 const LandingPage = ({ onGetStarted }) => {
     return (
         <div className="min-h-screen bg-[#F0F4F8] flex flex-col items-center justify-center px-6 py-12 font-sans relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-72 h-72 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-            <div className="absolute top-0 right-0 w-72 h-72 bg-sky-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-            <div className="absolute -bottom-8 left-20 w-72 h-72 bg-pink-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
-
             <div className="relative z-10 text-center w-full max-w-md">
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
-                    <div className="relative inline-block mb-6">
-                        <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V22.2 (Stable)</div>
-                    </div>
-                    
+                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V23.0 (Stable)</div></div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
-                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna. Kini dengan dukungan Notifikasi & PWA! 📲</p>
-
+                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna yang aman, modern, dan interaktif untuk semua kalangan. 🌍✨</p>
                     <div className="grid grid-cols-2 gap-3 mb-8">
                         <div className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-indigo-100 transition"><Gamepad2 size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Gamers</span></div>
                         <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-emerald-100 transition"><BookOpen size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Edukasi</span></div>
                         <div className="bg-rose-50 text-rose-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-rose-100 transition"><Users size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Sosial</span></div>
                         <div className="bg-amber-50 text-amber-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-amber-100 transition"><Globe size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Global</span></div>
                     </div>
-
-                    <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">
-                        Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/>
-                    </button>
+                    <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/></button>
                 </div>
-
-                <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default">
-                    <div className="relative">
-                        <img src={DEV_PHOTO} className="w-14 h-14 rounded-full border-2 border-white shadow-md object-cover" alt="Developer"/>
-                        <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"><Check size={10} className="text-white absolute top-0.5 left-0.5"/></div>
-                    </div>
-                    <div className="text-left">
-                        <p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Developed By</p>
-                        <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1">M. Irham Andika Putra <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/></h3>
-                        <p className="text-xs text-gray-500">Siswa SMP Negeri 3 Mentok • 14 Tahun</p>
-                    </div>
-                </div>
+                <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default"><div className="relative"><img src={DEV_PHOTO} className="w-14 h-14 rounded-full border-2 border-white shadow-md object-cover" alt="Developer"/><div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"><Check size={10} className="text-white absolute top-0.5 left-0.5"/></div></div><div className="text-left"><p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Developed By</p><h3 className="font-bold text-gray-800 text-sm flex items-center gap-1">M. Irham Andika Putra <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/></h3><p className="text-xs text-gray-500">Siswa SMP Negeri 3 Mentok • 14 Tahun</p></div></div>
             </div>
         </div>
     );
@@ -901,64 +597,31 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
-    const handleDoubleTap = () => {
-        setShowHeartOverlay(true);
-        setTimeout(() => setShowHeartOverlay(false), 800);
-        if (!liked) { handleLike(); }
-    };
+    const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
 
     const handleSave = async () => {
         const newSaved = !isSaved;
         setIsSaved(newSaved);
         const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
-        try {
-            if (newSaved) { await updateDoc(userRef, { savedPosts: arrayUnion(post.id) }); } 
-            else { await updateDoc(userRef, { savedPosts: arrayRemove(post.id) }); }
-        } catch (error) { setIsSaved(!newSaved); }
+        try { if (newSaved) { await updateDoc(userRef, { savedPosts: arrayUnion(post.id) }); } else { await updateDoc(userRef, { savedPosts: arrayRemove(post.id) }); } } catch (error) { setIsSaved(!newSaved); }
     };
 
     const handleComment = async (e) => {
-        e.preventDefault();
-        if (!newComment.trim()) return;
+        e.preventDefault(); if (!newComment.trim()) return;
         try {
-            await addDoc(collection(db, getPublicCollection('comments')), {
-                postId: post.id, userId: currentUserId, text: newComment, username: profile.username, timestamp: serverTimestamp() 
-            });
+            await addDoc(collection(db, getPublicCollection('comments')), { postId: post.id, userId: currentUserId, text: newComment, username: profile.username, timestamp: serverTimestamp() });
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
             if (post.userId !== currentUserId) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id);
             setNewComment('');
         } catch (error) { console.error(error); }
     };
 
-    const handleDelete = async () => {
-        if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) {
-            await deleteDoc(doc(db, getPublicCollection('posts'), post.id));
-        }
-    };
+    const handleDelete = async () => { if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) { await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); } };
+    const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
+    const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
+    const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin!'); } catch (e) { alert('Gagal menyalin link'); } };
 
-    const handleDeleteComment = async (commentId) => {
-        if(confirm("Hapus komentar?")) {
-            await deleteDoc(doc(db, getPublicCollection('comments'), commentId));
-            await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) });
-        }
-    };
-
-    const handleUpdatePost = async () => {
-        await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent });
-        setIsEditing(false);
-    };
-
-    const sharePost = async () => {
-        try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin!'); } catch (e) { alert('Gagal menyalin link'); }
-    };
-
-    useEffect(() => {
-        if (!showComments) return;
-        const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id));
-        return onSnapshot(q, s => {
-            setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0)));
-        });
-    }, [showComments, post.id]);
+    useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
 
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
@@ -973,59 +636,21 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
-                        <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
-                            {post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}
-                        </div>
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>
-                            {isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}
-                        </div>
-                    </div>
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}</div></div>
+                    <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
-                
                 <div className="flex gap-2">
-                    {!isOwner && post.userId !== currentUserId && (
-                        <button 
-                            onClick={() => handleFollow(post.userId, isFollowing)} 
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
-                                isFriend 
-                                    ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' // Berteman (Hijau)
-                                    : isFollowing 
-                                        ? 'bg-gray-100 text-gray-500' // Cuma Follow (Abu)
-                                        : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md' // Belum Follow (Biru)
-                            }`}
-                        >
-                            {isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
-                        </button>
-                    )}
-                    {(isOwner || isMeDeveloper) && (
-                        <>
-                            {isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}
-                            <button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>
-                                {isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}
-                            </button>
-                        </>
-                    )}
+                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                    {(isOwner || isMeDeveloper) && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
                 </div>
             </div>
 
             {isEditing ? (
-                <div className="mb-4 p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3">
-                    <input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white border rounded-lg font-bold text-sm"/>
-                    <textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white border rounded-lg text-sm resize-none" rows="4"/>
-                    <div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div>
-                </div>
+                <div className="mb-4 p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white border rounded-lg font-bold text-sm"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white border rounded-lg text-sm resize-none" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
             ) : (
                 <>
                     {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
-                    <div className="text-sm text-gray-600 mb-4 leading-relaxed">
-                        {renderMarkdown(displayText)}
-                        {isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}
-                    </div>
+                    <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     {(isImage || isVideo || embed) && (
                         <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
@@ -1047,14 +672,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             {showComments && (
                 <div className="mt-5 pt-4 border-t border-gray-100 animate-in fade-in">
-                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">
-                        {comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => (
-                            <div key={c.id} className="bg-gray-50 p-3 rounded-xl text-xs flex justify-between items-start group">
-                                <div><span className="font-bold text-gray-800 mr-1">{c.username}</span><span className="text-gray-600">{c.text}</span></div>
-                                {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
-                            </div>
-                        ))}
-                    </div>
+                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( <div key={c.id} className="bg-gray-50 p-3 rounded-xl text-xs flex justify-between items-start group"><div><span className="font-bold text-gray-800 mr-1">{c.username}</span><span className="text-gray-600">{c.text}</span></div>{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div> ))}</div>
                     <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
                 </div>
             )}
@@ -1062,34 +680,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// --- TRENDING HASHTAGS (FITUR V19) ---
+// --- TRENDING TAGS ---
 const TrendingTags = ({ posts }) => {
-    const tags = useMemo(() => {
-        const tagCounts = {};
-        posts.forEach(p => {
-            const extracted = extractHashtags(p.content);
-            extracted.forEach(tag => {
-                tagCounts[tag] = (tagCounts[tag] || 0) + 1;
-            });
-        });
-        return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-    }, [posts]);
-
+    const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
     if (tags.length === 0) return null;
-
     return (
-        <div className="mb-4 overflow-x-auto no-scrollbar py-2">
-            <div className="flex gap-3">
-                <div className="flex items-center gap-1 text-xs font-bold text-sky-600 whitespace-nowrap mr-2">
-                    <TrendingUp size={16}/> Trending:
-                </div>
-                {tags.map(([tag, count]) => (
-                    <div key={tag} className="px-3 py-1 bg-white border border-sky-100 rounded-full text-[10px] font-bold text-gray-600 shadow-sm whitespace-nowrap flex items-center gap-1">
-                        <Hash size={10} className="text-sky-500"/> {tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span>
-                    </div>
-                ))}
-            </div>
-        </div>
+        <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} className="px-3 py-1 bg-white border border-sky-100 rounded-full text-[10px] font-bold text-gray-600 shadow-sm whitespace-nowrap flex items-center gap-1">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div>
     );
 };
 
@@ -1099,7 +695,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const [stableFeed, setStableFeed] = useState([]);
     const [isFirstLoad, setIsFirstLoad] = useState(true);
     const [loadingFeed, setLoadingFeed] = useState(true);
-    
     const [displayCount, setDisplayCount] = useState(5);
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
@@ -1283,7 +878,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 };
 
 // --- 10. PROFILE (LEVELING SYSTEM + MOOD + FIX STATS) ---
-// PERBAIKAN V20: Menerima 'viewerProfile' (Yang melihat) dan 'profileData' (Yang dilihat)
+// PERBAIKAN: Sekarang menerima 'viewerProfile' (Yang melihat) dan 'profileData' (Yang dilihat)
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
@@ -1300,7 +895,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     // DATA YANG DITAMPILKAN (REAL DARI PROFILE DATA)
     const userPosts = allPosts.filter(p=>p.userId===profileData.uid).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
     
-    // PERBAIKAN STATISTIK (V20 Fix)
+    // PERBAIKAN STATISTIK
     const followersCount = (profileData.followers || []).length;
     const followingCount = (profileData.following || []).length;
     
@@ -1469,7 +1064,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- 11. APP UTAMA (LOGIKA FIXED) ---
+// --- 11. APP UTAMA (LOGIKA FIXED + NOTIF LISTENER) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1487,8 +1082,8 @@ const App = () => {
         if ('serviceWorker' in navigator) {
             // Gunakan file SW baru untuk notifikasi
             navigator.serviceWorker.register('firebase-messaging-sw.js')
-            .then(reg => console.log('SW registered', reg))
-            .catch(err => console.log('SW failed', err));
+            .then(reg => console.log('SW registered'))
+            .catch(err => console.log('SW failed'));
         }
     }, []);
 
@@ -1496,13 +1091,53 @@ const App = () => {
     useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
 
+    // --- NOTIFICATION LISTENER (MAGIC FIX UNTUK NOTIF REALTIME) ---
+    useEffect(() => {
+        if (!user) return;
+
+        // Dengarkan database notifikasi secara real-time
+        const q = query(
+            collection(db, getPublicCollection('notifications')), 
+            where('toUserId', '==', user.uid),
+            where('isRead', '==', false),
+            orderBy('timestamp', 'desc'),
+            limit(1) // Cek yang terbaru saja
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            // Hitung ulang total notif unread
+            setNotifCount(snapshot.size);
+
+            snapshot.docChanges().forEach((change) => {
+                // Jika ada notifikasi BARU ditambahkan
+                if (change.type === "added") {
+                    const data = change.doc.data();
+                    // Pastikan notifikasi baru (bukan load data lama) - cek timestamp 10 detik terakhir
+                    const now = Date.now();
+                    const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
+                    
+                    if (now - notifTime < 10000) { // Jika notif baru saja dibuat (< 10 detik)
+                        // Trigger Notifikasi Browser (Local Push)
+                        if (Notification.permission === "granted") {
+                            new Notification(APP_NAME, {
+                                body: `${data.fromUsername} ${data.message}`,
+                                icon: APP_LOGO,
+                                tag: 'bgune-notif' // Mencegah duplikat
+                            });
+                        }
+                    }
+                }
+            });
+        });
+
+        return () => unsubscribe();
+    }, [user]);
+
     useEffect(() => onAuthStateChanged(auth, u => { 
         if(u) { 
             setUser(u); 
             updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-            
-            // PANGGIL FUNGSI REQUEST NOTIFIKASI SAAT LOGIN
-            requestNotificationPermission(u.uid);
+            requestNotificationPermission(); // Minta izin saat login
         } 
         else { setUser(null); setProfile(null); } 
     }), []);
@@ -1554,8 +1189,6 @@ const App = () => {
     if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
-    
-    // FIX: Pastikan targetUser ada saat membuka profil orang lain
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
