@@ -63,7 +63,8 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KUNCI VAPID (Opsional untuk Backend, tapi kita pakai listener lokal sekarang) ---
-const VAPID_KEY = "BOyF_p9xV... (Isi VAPID kamu jika ada)"; 
+const VAPID_KEY = "‎BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE
+‎"; 
 
 // --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
