@@ -50,7 +50,7 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio 
+    Hash, Tag, Wifi, Smartphone, Radio, Download
 } from 'lucide-react';
 
 // Atur Log Level Firebase
@@ -113,7 +113,6 @@ const requestNotificationPermission = async (userId) => {
                     fcmTokens: arrayUnion(token),
                     lastTokenUpdate: serverTimestamp()
                 });
-                console.log("Token Push Notifikasi tersimpan:", token);
             }
         }
     } catch (error) {
@@ -153,46 +152,59 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 4. Upload API (FIXED: HANYA MENGGUNAKAN UGUU.SE)
+// 4. Upload API (UGUU + CORS PROXY FIX)
+// INI BAGIAN YANG DIPERBAIKI AGAR TIDAK 'FAILED TO FETCH'
 const uploadMedia = async (file, onProgress) => {
-    // URL API Uguu (meminta output JSON)
-    const UGUU_API_URL = 'https://uguu.se/upload?output=json';
+    // Kita gunakan Proxy untuk menghindari error CORS dari browser
+    // corsproxy.io mendukung POST request
+    const PROXY_URL = 'https://corsproxy.io/?';
+    const TARGET_URL = 'https://uguu.se/upload?output=json';
     
-    onProgress(10); // Mulai progress
+    // Encode URL target agar bisa dibaca oleh proxy
+    const finalUrl = PROXY_URL + encodeURIComponent(TARGET_URL);
+
+    onProgress(10); 
 
     try {
         const formData = new FormData();
-        // Uguu mewajibkan key form bernama 'files[]'
+        // Sesuai dokumentasi Uguu: key harus 'files[]'
         formData.append('files[]', file);
 
         onProgress(30);
         
-        const response = await fetch(UGUU_API_URL, {
+        const response = await fetch(finalUrl, {
             method: 'POST',
-            body: formData
+            body: formData,
+            // JANGAN set Content-Type header secara manual saat pakai FormData,
+            // biarkan browser yang mengaturnya (boundary dll).
         });
 
         onProgress(60);
 
         if (!response.ok) {
-            throw new Error(`Upload Gagal: Server merespon dengan status ${response.status}`);
+            throw new Error(`Upload Gagal. Status: ${response.status} ${response.statusText}`);
         }
 
         const data = await response.json();
         
-        // Format response Uguu: { "success": true, "files": [ { "name": "...", "url": "..." } ] }
+        // Struktur JSON Uguu: { "success": true, "files": [ { "name": "...", "url": "..." } ] }
         if (data.success && data.files && data.files.length > 0) {
             onProgress(100);
-            return data.files[0].url;
+            // Pastikan URL menggunakan HTTPS
+            let fileUrl = data.files[0].url;
+            if (fileUrl.startsWith('http://')) {
+                fileUrl = fileUrl.replace('http://', 'https://');
+            }
+            return fileUrl;
         } else {
-            console.error("Respon API aneh:", data);
-            throw new Error('Gagal mendapatkan URL dari server Uguu.');
+            console.error("Respon API Aneh:", data);
+            throw new Error('Upload berhasil tapi format respon API salah.');
         }
 
     } catch (error) {
         onProgress(0);
-        console.error("Upload Error:", error);
-        throw new Error(`Gagal Upload: ${error.message}`);
+        console.error("Upload Error Detail:", error);
+        throw new Error(`Gagal Upload (Cek Koneksi/File Size). Error: ${error.message}`);
     }
 };
 
@@ -251,63 +263,77 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI
 // ==========================================
 
-// --- KOMPONEN PWA (FIXED & ROBUST) ---
+// --- KOMPONEN PWA (FIXED INSTALL PROMPT) ---
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
+    const [isInstalled, setIsInstalled] = useState(false);
 
     useEffect(() => {
+        // Handler untuk event beforeinstallprompt
         const handleBeforeInstallPrompt = (e) => {
-            // Prevent Chrome 67 and earlier from automatically showing the prompt
+            // Mencegah Chrome menampilkan prompt default
             e.preventDefault();
-            console.log("✅ PWA Install Event Fired!"); // Debug log
-            // Stash the event so it can be triggered later.
+            // Simpan event agar bisa dipanggil nanti
             setDeferredPrompt(e);
-            // Show the prompt
+            // Tampilkan UI custom kita
             setShowBanner(true);
+            console.log("PWA Install Event Tertangkap!");
+        };
+
+        // Handler jika app berhasil diinstall
+        const handleAppInstalled = () => {
+            console.log("PWA Berhasil Diinstall");
+            setShowBanner(false);
+            setIsInstalled(true);
         };
 
         window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.addEventListener('appinstalled', handleAppInstalled);
 
-        // Cek jika sudah terinstall
+        // Cek apakah sudah running dalam mode standalone (sudah install)
         if (window.matchMedia('(display-mode: standalone)').matches) {
-            console.log("App is running in standalone mode (Already Installed)");
+            setIsInstalled(true);
             setShowBanner(false);
         }
 
         return () => {
             window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            window.removeEventListener('appinstalled', handleAppInstalled);
         };
     }, []);
 
-    const handleInstall = async () => {
+    const handleInstallClick = async () => {
         if (!deferredPrompt) return;
-        // Show the install prompt
+
+        // Tampilkan prompt native
         deferredPrompt.prompt();
-        // Wait for the user to respond to the prompt
+
+        // Tunggu respon user
         const { outcome } = await deferredPrompt.userChoice;
-        console.log(`User response to the install prompt: ${outcome}`);
+        console.log(`User response: ${outcome}`);
+
         if (outcome === 'accepted') {
             setDeferredPrompt(null);
             setShowBanner(false);
         }
     };
 
-    if (!showBanner) return null;
+    if (isInstalled || !showBanner) return null;
 
     return (
-        <div className="fixed bottom-24 left-4 right-4 bg-gray-900 text-white p-4 rounded-2xl shadow-2xl z-[999] flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700">
+        <div className="fixed bottom-24 left-4 right-4 bg-gray-900 text-white p-4 rounded-2xl shadow-2xl z-[1000] flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700">
             <div className="flex items-center gap-3">
                 <div className="bg-sky-500 p-2 rounded-xl"><Smartphone size={24}/></div>
                 <div>
-                    <h4 className="font-bold text-sm">Install App</h4>
-                    <p className="text-xs text-gray-400">Tambahkan ke Layar Utama</p>
+                    <h4 className="font-bold text-sm">Install {APP_NAME}</h4>
+                    <p className="text-xs text-gray-400">Aplikasi lebih cepat & hemat kuota</p>
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                <button onClick={() => setShowBanner(false)} className="p-2 text-gray-400 hover:text-white"><X size={18}/></button>
-                <button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 active:scale-95 transition">
-                    Install
+                <button onClick={() => setShowBanner(false)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-gray-800"><X size={18}/></button>
+                <button onClick={handleInstallClick} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 active:scale-95 transition flex items-center gap-2">
+                    <Download size={14}/> Install
                 </button>
             </div>
         </div>
@@ -320,8 +346,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
     
-    // Jika src kosong/null, langsung error
-    if (!src) return <div className={`bg-gray-200 ${className}`}></div>;
+    if (!src) return <div className={`bg-gray-200 ${className} flex items-center justify-center`}><User size={20} className="text-gray-400"/></div>;
 
     const handleRetry = (e) => {
         e.stopPropagation();
@@ -334,17 +359,16 @@ const ImageWithRetry = ({ src, alt, className }) => {
 
     if (error) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-500 ${className}`} style={{minHeight: '200px'}}>
-                <ImageIcon size={32} className="mb-2 opacity-50"/>
-                <p className="text-xs mb-2">Gagal memuat</p>
-                <button onClick={handleRetry} className="flex items-center gap-1 bg-white border px-3 py-1 rounded-full text-xs font-bold shadow-sm"><RotateCw size={12}/> Retry</button>
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-500 ${className}`} style={{minHeight: '100%'}}>
+                <ImageIcon size={24} className="mb-1 opacity-50"/>
+                <button onClick={handleRetry} className="flex items-center gap-1 bg-white border px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm"><RotateCw size={10}/> Retry</button>
             </div>
         );
     }
 
     return (
         <div className={`relative ${className}`}>
-            {loading && <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-gray-400" size={24}/></div>}
+            {loading && <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center"><Loader2 className="animate-spin text-gray-400" size={20}/></div>}
             <img src={displaySrc} alt={alt} className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError(true); }}/>
         </div>
     );
@@ -528,9 +552,9 @@ const LandingPage = ({ onGetStarted }) => {
             <div className="absolute -bottom-8 left-20 w-72 h-72 bg-pink-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
             <div className="relative z-10 text-center w-full max-w-md">
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
-                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V22.2 (Stable)</div></div>
+                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V22.3 (Stable)</div></div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
-                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna. Kini dengan dukungan Notifikasi & PWA! 📲</p>
+                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna. Kini dengan API Upload Stabil & PWA Fix! 📲</p>
                     <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/></button>
                 </div>
                 <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default">
@@ -628,7 +652,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
-    const isImage = (post.mediaUrl && (/\.(jpg|png|webp)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
+    const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg|gif)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
@@ -799,7 +823,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     );
 };
 
-// --- CREATE POST (UPDATED TO USE UGUU) ---
+// --- CREATE POST (CORS FIXED) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
@@ -810,7 +834,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
         try {
             let finalUrl = form.url, type = 'text';
             if(form.file) { 
-                // MENGGUNAKAN FUNGSI BARU UGUU
+                // MENGGUNAKAN FUNGSI BARU UGUU + PROXY
                 finalUrl = await uploadMedia(form.file, setProg); 
                 type = form.file.type.startsWith('image')?'image':'video'; 
             } else if(form.url) { type='link'; }
@@ -847,7 +871,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN (UPDATED TO USE UGUU) ---
+// --- PROFILE SCREEN (CORS FIXED) ---
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
@@ -870,7 +894,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     const save = async () => { 
         setLoad(true); 
         try { 
-            // MENGGUNAKAN FUNGSI BARU UGUU
+            // MENGGUNAKAN FUNGSI BARU UGUU + PROXY
             const url = file ? await uploadMedia(file, ()=>{}) : profileData.photoURL; 
             await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
             setEdit(false); 
