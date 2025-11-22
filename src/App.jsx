@@ -38,6 +38,7 @@ import {
 } from 'firebase/firestore';
 
 // Import Icons (Lucide React)
+// SAYA MENAMBAHKAN ICON 'Smartphone' DISINI UNTUK PWA
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -47,7 +48,7 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi
+    Hash, Tag, Wifi, Smartphone // <-- ICON BARU
 } from 'lucide-react';
 
 // Atur Log Level Firebase
@@ -190,7 +191,7 @@ const extractHashtags = (text) => {
     return matches ? matches : [];
 };
 
-// 8. Cek Online Status (Helper Baru)
+// 8. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
@@ -201,6 +202,51 @@ const isUserOnline = (lastSeen) => {
 // ==========================================
 // BAGIAN 3: KOMPONEN UI KECIL
 // ==========================================
+
+// --- KOMPONEN BARU: INSTALL PWA PROMPT ---
+// Ini akan memunculkan banner di bawah jika web belum diinstall
+const PWAInstallPrompt = () => {
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const [showBanner, setShowBanner] = useState(false);
+
+    useEffect(() => {
+        const handler = (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+            setShowBanner(true);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+    }, []);
+
+    const handleInstall = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setDeferredPrompt(null);
+            setShowBanner(false);
+        }
+    };
+
+    if (!showBanner) return null;
+
+    return (
+        <div className="fixed bottom-24 left-4 right-4 bg-gray-900 text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500">
+            <div className="flex items-center gap-3">
+                <div className="bg-sky-500 p-2 rounded-xl"><Smartphone size={24}/></div>
+                <div>
+                    <h4 className="font-bold text-sm">Install {APP_NAME}</h4>
+                    <p className="text-xs text-gray-400">Akses lebih cepat & Notifikasi</p>
+                </div>
+            </div>
+            <div className="flex items-center gap-2">
+                <button onClick={() => setShowBanner(false)} className="p-2 text-gray-400 hover:text-white"><X size={18}/></button>
+                <button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600">Install</button>
+            </div>
+        </div>
+    );
+};
 
 const ImageWithRetry = ({ src, alt, className }) => {
     const [error, setError] = useState(false);
@@ -475,7 +521,7 @@ const LandingPage = ({ onGetStarted }) => {
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
                     <div className="relative inline-block mb-6">
                         <img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" />
-                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V20.0 (Stable)</div>
+                        <div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V20.1 (PWA)</div>
                     </div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
                     <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial serbaguna yang aman, modern, dan interaktif untuk semua kalangan. 🌍✨</p>
@@ -1146,6 +1192,15 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
+    // --- PWA SERVICE WORKER REGISTRATION ---
+    useEffect(() => {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('SW registered', reg))
+            .catch(err => console.log('SW failed', err));
+        }
+    }, []);
+
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
     useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
@@ -1233,6 +1288,9 @@ const App = () => {
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                 </main>
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                
+                {/* KOMPONEN INSTALL PWA DISISIPKAN DISINI */}
+                <PWAInstallPrompt />
             </div>
         </div>
     );
