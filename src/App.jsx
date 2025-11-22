@@ -164,50 +164,41 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 4. Upload API (BARU: Catbox)
-// Ini adalah fungsi yang diperbarui, diadaptasi dari kode Anda untuk lingkungan browser.
-const uploadToCatbox = async (file, onProgress) => {
-    const apiUrl = 'https://catbox.moe/user/api.php';
+// 4. Upload API (Faa API)
+const uploadToFaaAPI = async (file, onProgress) => {
+    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
-
-    onProgress(0); // Reset progress
+    
+    // Reset progress
+    onProgress(0);
+    formData.append('file', file, file.name);
 
     try {
-        // Simulasi progress
-        onProgress(10);
-        
-        formData.append('reqtype', 'fileupload');
-        formData.append('fileToUpload', file, file.name); // 'file' adalah objek File dari browser
+        // Simulasi progress awal
+        for (let i = 0; i <= 50; i += 5) {
+            onProgress(i);
+            await new Promise(resolve => setTimeout(resolve, 50)); 
+        }
 
-        onProgress(30);
-
-        // Menggunakan fetch bawaan browser
-        const res = await fetch(apiUrl, {
-            method: 'POST',
-            body: formData
-        });
-        
+        const response = await fetch(apiUrl, { method: 'POST', body: formData });
         onProgress(80);
 
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status} - ${res.statusText}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
         }
         
-        const url = (await res.text()).trim();
-        
-        // Cek apakah URL valid
-        if (!url.startsWith('http')) {
-            throw new Error('Upload gagal: Respon server tidak valid atau file ditolak.');
-        }
-
+        const data = await response.json();
         onProgress(100);
-        return url;
-
-    } catch (err) {
-        onProgress(0); // Gagal, reset progress
-        console.error(`Upload gagal: ${err.message}`);
-        // Menampilkan error ke user
-        throw new Error(`Upload gagal: ${err.message}. Pastikan file tidak lebih dari 200MB.`);
+        
+        if (data && data.status) {
+            return data.url;
+        } else {
+            throw new Error(data.message || 'Gagal mengunggah file. Respon tidak valid.');
+        }
+    } catch (error) {
+        onProgress(0); 
+        console.error('Upload error:', error);
+        throw new Error('Gagal mengunggah. Koneksi bermasalah atau file terlalu besar.');
     }
 };
 
@@ -527,8 +518,7 @@ const DeveloperDashboard = ({ onClose }) => {
 
     const handleBroadcast = async () => {
         if(!broadcastMsg.trim()) return;
-        // Menggunakan modal custom (meskipun confirm masih ada di sini, idealnya diganti)
-        if(!window.confirm("Kirim pengumuman ke SEMUA user?")) return;
+        if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
         
         setSendingBC(true);
         try {
@@ -550,7 +540,6 @@ const DeveloperDashboard = ({ onClose }) => {
             });
             
             await Promise.all(promises);
-            // Idealnya ganti alert() dengan modal custom
             alert("Pengumuman berhasil dikirim!");
             setBroadcastMsg('');
         } catch(e) {
@@ -942,13 +931,13 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
 
     const handleDelete = async () => {
-        if (window.confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) {
+        if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) {
             await deleteDoc(doc(db, getPublicCollection('posts'), post.id));
         }
     };
 
     const handleDeleteComment = async (commentId) => {
-        if(window.confirm("Hapus komentar?")) {
+        if(confirm("Hapus komentar?")) {
             await deleteDoc(doc(db, getPublicCollection('comments'), commentId));
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) });
         }
@@ -1257,22 +1246,9 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
     const submit = async (e) => {
         e.preventDefault(); setLoading(true); setProg(0);
-        
-        // Menampilkan pesan error jika tidak ada alert/confirm
-        const showError = (message) => {
-            // Di aplikasi nyata, ini akan memicu modal error
-            console.error("Error:", message);
-            alert(message); // Fallback jika tidak ada sistem modal
-        };
-
         try {
             let finalUrl = form.url, type = 'text';
-            if(form.file) { 
-                // === INI BAGIAN YANG DIGANTI ===
-                finalUrl = await uploadToCatbox(form.file, setProg); 
-                // ==============================
-                type = form.file.type.startsWith('image')?'image':'video'; 
-            }
+            if(form.file) { finalUrl = await uploadToFaaAPI(form.file, setProg); type = form.file.type.startsWith('image')?'image':'video'; }
             else if(form.url) { type='link'; }
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             const ref = await addDoc(collection(db, getPublicCollection('posts')), {
@@ -1280,11 +1256,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, category: category, user: {username, uid: userId}
             });
             setProg(100); setTimeout(()=>onSuccess(ref.id, form.isShort), 500);
-        } catch(e){ 
-            showError(e.message); 
-        } finally { 
-            setLoading(false); 
-        }
+        } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
 
     return (
@@ -1297,23 +1269,9 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                     <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
                     <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
                     <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 text-sky-600 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
-                    
-                    {/* Pesan peringatan yang sedikit disesuaikan */}
-                    {isLarge && <div className="bg-orange-50 text-orange-600 text-xs p-3 rounded-xl flex items-center font-medium"><AlertTriangle size={14} className="mr-2"/> File besar terdeteksi. Upload mungkin butuh waktu lama.</div>}
-                    
+                    {isLarge && <div className="bg-orange-50 text-orange-600 text-xs p-3 rounded-xl flex items-center font-medium"><AlertTriangle size={14} className="mr-2"/> File besar detected. Upload mungkin lama.</div>}
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}><ImageIcon size={18} className="mr-2"/><span className="text-xs font-bold">{form.file?'Ganti File':'Foto/Video'}</span>
-                            <input type="file" className="hidden" accept="image/*,video/*" 
-                                onChange={e=>{
-                                    const f=e.target.files[0]; 
-                                    if(f) {
-                                        setForm({...form, file:f, url: '', isShort: f.type.startsWith('video')}); 
-                                        // Catbox gratis maks 200MB, kita beri peringatan di 20MB
-                                        setIsLarge(f.size > 20 * 1024 * 1024); 
-                                    }
-                                }} 
-                                disabled={loading}/>
-                        </label>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}><ImageIcon size={18} className="mr-2"/><span className="text-xs font-bold">{form.file?'Ganti File':'Foto/Video'}</span><input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video')}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/></label>
                         <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Mode Shorts</span></div>
                     </div>
                     <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
@@ -1354,16 +1312,10 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     const save = async () => { 
         setLoad(true); 
         try { 
-            // === INI BAGIAN YANG DIGANTI ===
-            const url = file ? await uploadToCatbox(file, ()=>{}) : profileData.photoURL; 
-            // ==============================
+            const url = file ? await uploadToFaaAPI(file, ()=>{}) : profileData.photoURL; 
             await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
             setEdit(false); 
-        } catch(e){
-            alert(e.message)
-        } finally{
-            setLoad(false)
-        }; 
+        } catch(e){alert(e.message)} finally{setLoad(false)}; 
     };
 
     const saveMood = async () => {
