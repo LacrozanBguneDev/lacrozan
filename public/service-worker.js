@@ -8,8 +8,8 @@ self.addEventListener('push', function(event) {
     const data = event.data.json();
     const options = {
       body: data.body,
-      icon: data.icon || 'https://c.termai.cc/i46/b87.png',
-      badge: 'https://c.termai.cc/i46/b87.png',
+      icon: data.icon || 'https://n.uguu.se/qXDmMTZB.jpg',
+      badge: 'https://n.uguu.se/qXDmMTZB.jpg',
       data: {
         url: data.click_action || '/' // URL tujuan saat diklik
       }
