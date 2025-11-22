@@ -164,41 +164,68 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     }
 };
 
-// 4. Upload API (Faa API)
+// 4. Upload API (DUAL SYSTEM: FAA + UGUU FALLBACK)
+// Diperbarui: Jika Faa gagal, otomatis pakai Uguu
 const uploadToFaaAPI = async (file, onProgress) => {
-    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
-    const formData = new FormData();
+    const apiFaaUrl = 'https://api-faa.my.id/faa/tourl'; 
     
-    // Reset progress
-    onProgress(0);
-    formData.append('file', file, file.name);
+    // Reset progress awal
+    onProgress(5);
 
+    // --- PERCOBAAN 1: FAA API (DEFAULT) ---
     try {
-        // Simulasi progress awal
-        for (let i = 0; i <= 50; i += 5) {
-            onProgress(i);
-            await new Promise(resolve => setTimeout(resolve, 50)); 
-        }
+        const formData = new FormData();
+        formData.append('file', file, file.name);
 
-        const response = await fetch(apiUrl, { method: 'POST', body: formData });
-        onProgress(80);
+        // Simulasi progress
+        onProgress(20);
+        const response = await fetch(apiFaaUrl, { method: 'POST', body: formData });
+        onProgress(40);
 
         if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
+            throw new Error(`FAA Error: ${response.status}`);
         }
         
         const data = await response.json();
-        onProgress(100);
-        
-        if (data && data.status) {
+        if (data && data.status && data.url) {
+            onProgress(100);
             return data.url;
         } else {
-            throw new Error(data.message || 'Gagal mengunggah file. Respon tidak valid.');
+            throw new Error(data.message || 'Faa API Invalid Response');
         }
-    } catch (error) {
-        onProgress(0); 
-        console.error('Upload error:', error);
-        throw new Error('Gagal mengunggah. Koneksi bermasalah atau file terlalu besar.');
+
+    } catch (faaError) {
+        console.warn("Server Utama (Faa) Gagal, mencoba Server Cadangan (Uguu)...", faaError);
+        onProgress(50); // Update progress menandakan switch server
+
+        // --- PERCOBAAN 2: UGUU API (FALLBACK) ---
+        try {
+            const uguuUrl = 'https://uguu.se/upload?output=json';
+            const formData = new FormData();
+            // Uguu menggunakan key 'files[]'
+            formData.append('files[]', file); 
+
+            const response = await fetch(uguuUrl, { method: 'POST', body: formData });
+            onProgress(80);
+
+            if (!response.ok) {
+                throw new Error(`Uguu Error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            // Uguu response format: { success: true, files: [{ name, url, ... }] }
+            
+            if (data.success && data.files && data.files.length > 0) {
+                onProgress(100);
+                return data.files[0].url;
+            } else {
+                throw new Error('Uguu API Invalid Response');
+            }
+        } catch (uguuError) {
+            onProgress(0);
+            console.error('Semua server upload gagal:', uguuError);
+            throw new Error('Gagal mengunggah file. Server sibuk, silakan coba lagi nanti.');
+        }
     }
 };
 
@@ -275,30 +302,41 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL
 // ==========================================
 
-// --- KOMPONEN BARU: INSTALL PWA PROMPT ---
-// Ini akan memunculkan banner di bawah jika web belum diinstall
+// --- KOMPONEN PWA (FIXED) ---
+// Diperbaiki agar event listener lebih robust
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
 
     useEffect(() => {
-        const handler = (e) => {
-            // Mencegah Chrome menampilkan banner default
+        const handleBeforeInstallPrompt = (e) => {
+            // Mencegah Chrome menampilkan banner default yang mungkin terblokir
             e.preventDefault();
-            // Simpan event agar bisa dipanggil nanti
+            console.log("PWA Install Triggered"); // Debugging
             setDeferredPrompt(e);
-            // Tampilkan banner custom kita
             setShowBanner(true);
         };
-        window.addEventListener('beforeinstallprompt', handler);
-        return () => window.removeEventListener('beforeinstallprompt', handler);
+
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+        // Cek apakah sudah terinstall (standalone mode)
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            setShowBanner(false);
+        }
+
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        };
     }, []);
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
-        // Munculkan prompt asli browser
+        
         deferredPrompt.prompt();
+        
         const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response to the install prompt: ${outcome}`);
+        
         if (outcome === 'accepted') {
             setDeferredPrompt(null);
             setShowBanner(false);
@@ -313,7 +351,7 @@ const PWAInstallPrompt = () => {
                 <div className="bg-sky-500 p-2 rounded-xl"><Smartphone size={24}/></div>
                 <div>
                     <h4 className="font-bold text-sm">Install {APP_NAME}</h4>
-                    <p className="text-xs text-gray-400">Akses lebih cepat & Notifikasi</p>
+                    <p className="text-xs text-gray-400">Akses lebih cepat & Hemat Data</p>
                 </div>
             </div>
             <div className="flex items-center gap-2">
