@@ -21,8 +21,8 @@ messaging.onBackgroundMessage((payload) => {
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
-    icon: 'https://c.termai.cc/i46/b87.png', // Ganti icon app kamu
-    badge: 'https://c.termai.cc/i46/b87.png'
+    icon: 'https://n.uguu.se/qXDmMTZB.jpg', // Ganti icon app kamu
+    badge: 'https://n.uguu.se/qXDmMTZB.jpg'
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
