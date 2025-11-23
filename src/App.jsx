@@ -63,6 +63,10 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
+// --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
+// Set ini menyimpan URL gambar yang SUDAH berhasil dimuat.
+const globalImageCache = new Set();
+
 // --- KUNCI VAPID BARU ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
@@ -77,17 +81,13 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
   measurementId: "G-G0VWNHHVB8"
 };
 
-// Mengambil App ID untuk Firestore Path
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-// Fungsi Helper untuk path koleksi publik
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// Inisialisasi Firebase App
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Inisialisasi Messaging
 let messaging = null;
 try {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
@@ -101,7 +101,6 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// 1. Request Izin Notifikasi
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
     try {
@@ -116,7 +115,6 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// 2. Kompresi Gambar (Ditingkatkan)
 const compressImage = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -126,7 +124,7 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 1080; // HD Quality
+                const MAX_WIDTH = 1080; 
                 let width = img.width;
                 let height = img.height;
 
@@ -159,7 +157,6 @@ const compressImage = (file) => {
     });
 };
 
-// 3. Algoritma Acak (Shuffle)
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -171,7 +168,6 @@ const shuffleArray = (array) => {
     return newArray;
 };
 
-// 4. Sistem Notifikasi Internal
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     try {
@@ -182,7 +178,6 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// 5. Upload API (Faa API) - Stabilisasi dengan Retry & Timeout
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
@@ -192,13 +187,11 @@ const uploadToFaaAPI = async (file, onProgress) => {
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
     try {
-        // Fake progress visual
         for (let i = 10; i <= 50; i += 10) { 
             if(onProgress) onProgress(i); 
             await delay(100); 
         }
 
-        // Fetch dengan timeout 60 detik (lebih lama untuk koneksi lambat)
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -232,7 +225,6 @@ const uploadToFaaAPI = async (file, onProgress) => {
     }
 };
 
-// 6. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -247,7 +239,6 @@ const formatTimeAgo = (timestamp) => {
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 7. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
@@ -257,7 +248,6 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-// 8. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -266,14 +256,12 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
-// 9. Ekstraktor Hashtag
 const extractHashtags = (text) => {
     if (!text) return [];
     const matches = text.match(/#[\w]+/g);
     return matches ? matches : [];
 };
 
-// 10. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
@@ -285,7 +273,6 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
-// --- PWA INSTALL PROMPT ---
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
@@ -329,39 +316,46 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- IMAGE WITH INFINITE RETRY (LOGIKA BARU: PANTANG MENYERAH) ---
-// Ini fitur sesuai request kamu: Jika gagal, coba lagi URL yg SAMA sampai bisa.
+// --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
+// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
+// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
 const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
-    const [status, setStatus] = useState('loading'); // loading, loaded, error
-    const [retryKey, setRetryKey] = useState(0); // Key untuk memaksa re-render elemen img
+    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
+    const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
+    const [status, setStatus] = useState(initialState);
+    const [retryKey, setRetryKey] = useState(0);
     const [attempts, setAttempts] = useState(0);
 
-    // Reset jika URL berubah (misal ganti profil)
     useEffect(() => {
-        setStatus('loading');
-        setRetryKey(0);
-        setAttempts(0);
+        if (globalImageCache.has(src)) {
+            setStatus('loaded');
+        } else {
+            setStatus('loading');
+            setRetryKey(0);
+            setAttempts(0);
+        }
     }, [src]);
 
-    // Logika "Puter Terus Sampai Bisa"
     useEffect(() => {
         let timeout;
         if (status === 'error') {
-            // Tunggu 3 detik, lalu coba lagi
+            // Retry otomatis setiap 4 detik jika gagal
             timeout = setTimeout(() => {
-                // Set status loading lagi untuk menampilkan spinner/indikator
-                // Increment retryKey agar React membuang elemen img lama dan buat yg baru
-                // Browser akan mencoba request ulang ke URL yang sama
-                setRetryKey(prev => prev + 1);
-                setStatus('loading'); 
-                setAttempts(prev => prev + 1);
-                console.log(`Mencoba memuat ulang gambar... Percobaan ke-${attempts + 1}`);
-            }, 3000);
+                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
+                if (globalImageCache.has(src)) {
+                    setStatus('loaded');
+                } else {
+                    setRetryKey(prev => prev + 1);
+                    setStatus('loading');
+                    setAttempts(prev => prev + 1);
+                }
+            }, 4000);
         }
         return () => clearTimeout(timeout);
-    }, [status, attempts]);
+    }, [status, src]);
 
     const handleSuccess = () => {
+        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
         setStatus('loaded');
     };
 
@@ -369,7 +363,6 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
         setStatus('error');
     };
 
-    // Jika tidak ada source, langsung fallback
     if (!src) {
         return (
             <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`}>
@@ -384,17 +377,13 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
 
     return (
         <div className={`relative ${className} overflow-hidden bg-gray-50`}>
-            {/* Tampilkan Loading Spinner SELAMA belum loaded (termasuk saat retrying) */}
             {status !== 'loaded' && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 backdrop-blur-sm transition-all duration-300">
                     <Loader2 className="animate-spin text-sky-500 mb-2" size={20}/>
-                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Menghubungkan...</span>}
+                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Mencoba lagi ({attempts})...</span>}
                 </div>
             )}
             
-            {/* Elemen Gambar Utama */}
-            {/* key={retryKey} adalah RAHASIA-nya. Saat key berubah, React menghancurkan img lama dan pasang baru. */}
-            {/* Ini memaksa browser fetch ulang tanpa ubah URL. */}
             <img 
                 key={retryKey} 
                 src={src} 
@@ -410,7 +399,6 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     );
 };
 
-// --- AUDIO PLAYER (DENGAN RETRY) ---
 const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -475,7 +463,6 @@ const AudioPlayer = ({ src }) => {
     );
 };
 
-// --- SPLASH SCREEN ---
 const SplashScreen = () => (
     <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
         <div className="relative mb-8 animate-bounce-slow">
@@ -488,7 +475,6 @@ const SplashScreen = () => (
     </div>
 );
 
-// --- SKELETON LOADING ---
 const SkeletonPost = () => (
     <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
         <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200"></div><div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div></div>
@@ -496,7 +482,6 @@ const SkeletonPost = () => (
     </div>
 );
 
-// --- MARKDOWN RENDERER ---
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
@@ -616,13 +601,10 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
-                // FIX: Jangan buat dokumen profile di sini untuk login. Biarkan hanya update lastSeen di main App.
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 
-                // FIX: BUAT PROFILE HANYA SEKALI DI SINI SAAT REGISTER
-                // Ini mencegah overwrite saat login biasa
                 await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
                     username: username.trim(), 
                     email: email, 
