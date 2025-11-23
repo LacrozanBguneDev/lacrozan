@@ -1080,89 +1080,157 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
-// --- SEARCH SCREEN (INILAH YANG HILANG SEBELUMNYA) ---
+// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
     const [queryText, setQueryText] = useState('');
+    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
     const [tab, setTab] = useState('users');
 
+    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
+    // Ini mencegah render berlebihan saat mengetik cepat
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            setSearchTerm(queryText);
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [queryText]);
+
     const filteredUsers = useMemo(() => {
-        if(!queryText) return [];
-        return allUsers.filter(u => 
-            u.username.toLowerCase().includes(queryText.toLowerCase()) && u.uid !== profile.uid
-        );
-    }, [allUsers, queryText, profile.uid]);
+        if (!searchTerm || !allUsers) return [];
+        const term = searchTerm.toLowerCase();
+        
+        return allUsers.filter(u => {
+            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
+            if (!u || !u.username) return false;
+            return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
+        });
+    }, [allUsers, searchTerm, profile?.uid]);
 
     const filteredPosts = useMemo(() => {
-        if(!queryText) return [];
-        return allPosts.filter(p => 
-            p.content.toLowerCase().includes(queryText.toLowerCase()) || 
-            (p.title && p.title.toLowerCase().includes(queryText.toLowerCase()))
-        );
-    }, [allPosts, queryText]);
+        if (!searchTerm || !allPosts) return [];
+        const term = searchTerm.toLowerCase();
+
+        return allPosts.filter(p => {
+            // SAFE CHECK: Pastikan p dan kontennya ada
+            const contentMatch = p.content && p.content.toLowerCase().includes(term);
+            const titleMatch = p.title && p.title.toLowerCase().includes(term);
+            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
+            
+            return contentMatch || titleMatch || tagMatch;
+        });
+    }, [allPosts, searchTerm]);
 
     return (
         <div className="max-w-lg mx-auto p-4 pb-24">
-            <h1 className="text-xl font-black text-gray-800 mb-4">Pencarian</h1>
-            <div className="relative mb-6">
-                <Search className="absolute left-4 top-3.5 text-gray-400" size={18}/>
+            <h1 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-2">
+                <Search className="text-sky-500" size={28}/> Pencarian
+            </h1>
+            
+            <div className="relative mb-8 group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Search className="text-gray-400 group-focus-within:text-sky-500 transition duration-300" size={20}/>
+                </div>
                 <input 
                     value={queryText} 
                     onChange={e => setQueryText(e.target.value)} 
-                    placeholder="Cari pengguna atau topik..." 
-                    className="w-full pl-12 pr-4 py-3 bg-white rounded-2xl shadow-sm border border-gray-100 outline-none focus:ring-2 focus:ring-sky-200 transition"
+                    placeholder={tab === 'users' ? "Cari teman..." : "Cari postingan..."}
+                    className="w-full pl-12 pr-12 py-4 bg-white rounded-2xl shadow-sm border-2 border-transparent focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none transition-all duration-300 font-medium text-gray-700"
                     autoFocus
                 />
+                {queryText && (
+                    <button onClick={() => setQueryText('')} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 transition">
+                        <X size={18} className="bg-gray-200 rounded-full p-0.5"/>
+                    </button>
+                )}
             </div>
 
-            <div className="flex gap-2 mb-6">
-                <button onClick={() => setTab('users')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${tab === 'users' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100'}`}>Pengguna</button>
-                <button onClick={() => setTab('posts')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${tab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100'}`}>Postingan</button>
+            <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 shadow-inner">
+                <button onClick={() => setTab('users')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'users' ? 'bg-white text-sky-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <Users size={16}/> Pengguna
+                </button>
+                <button onClick={() => setTab('posts')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'posts' ? 'bg-white text-purple-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <ImageOff size={16}/> Postingan
+                </button>
             </div>
 
-            {queryText ? (
-                <div>
+            {searchTerm ? (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     {tab === 'users' ? (
-                        <div className="space-y-3">
-                            {filteredUsers.length === 0 ? <p className="text-center text-gray-400 text-sm mt-10">Pengguna tidak ditemukan.</p> : 
-                            filteredUsers.map(u => {
-                                const isFollowing = (profile.following || []).includes(u.uid);
-                                return (
-                                    <div key={u.uid} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between">
-                                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(u.uid)}>
-                                            <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden">
-                                                {u.photoURL ? <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-sky-500">{u.username[0]}</div>}
+                        <div className="space-y-4">
+                            {filteredUsers.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><UserPlus size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Pengguna tidak ditemukan.</p>
+                                </div>
+                            ) : (
+                                filteredUsers.map(u => {
+                                    const isFollowing = (profile.following || []).includes(u.uid);
+                                    return (
+                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:shadow-md transition duration-300">
+                                            <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}>
+                                                <div className="relative">
+                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
+                                                        <div className="w-full h-full rounded-full bg-white overflow-hidden">
+                                                             {u.photoURL ? <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-sky-500 text-lg">{u.username?.[0]?.toUpperCase()}</div>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-gray-800">{u.username}</h4>
+                                                    <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">{u.followers?.length || 0} Pengikut</p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <h4 className="font-bold text-gray-800 text-sm">{u.username}</h4>
-                                                <p className="text-[10px] text-gray-400">{u.followers?.length || 0} Pengikut</p>
-                                            </div>
+                                            <button 
+                                                onClick={() => handleFollow(u.uid, isFollowing)} 
+                                                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all duration-300 transform active:scale-95 ${isFollowing ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-200 hover:shadow-xl'}`}
+                                            >
+                                                {isFollowing ? 'Mengikuti' : 'Ikuti'}
+                                            </button>
                                         </div>
-                                        <button onClick={() => handleFollow(u.uid, isFollowing)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold ${isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-sky-500 text-white'}`}>{isFollowing ? 'Mengikuti' : 'Ikuti'}</button>
-                                    </div>
-                                )
-                            })}
+                                    )
+                                })
+                            )}
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            {filteredPosts.length === 0 ? <p className="text-center text-gray-400 text-sm mt-10">Postingan tidak ditemukan.</p> : 
-                            filteredPosts.map(p => (
-                                <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100" onClick={() => goToProfile(p.userId)}>
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
-                                            {p.user?.photoURL ? <img src={p.user.photoURL} className="w-full h-full object-cover"/> : null}
-                                        </div>
-                                        <span className="font-bold text-xs text-gray-700">{p.user?.username}</span>
-                                    </div>
-                                    <p className="text-xs text-gray-600 line-clamp-2">{p.content}</p>
+                        <div className="columns-1 gap-4 space-y-4">
+                            {filteredPosts.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><Search size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Tidak ada postingan yang cocok.</p>
                                 </div>
-                            ))}
+                            ) : (
+                                filteredPosts.map(p => (
+                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
+                                                {p.user?.photoURL ? <img src={p.user.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-[10px] text-gray-500">{p.user?.username?.[0]}</div>}
+                                            </div>
+                                            <span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span>
+                                            <span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span>
+                                        </div>
+                                        <h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{p.title || p.content}</h4>
+                                        {p.mediaUrl && p.mediaType === 'image' && (
+                                            <div className="mt-2 rounded-xl overflow-hidden h-32 relative">
+                                                <ImageWithRetry src={p.mediaUrl} className="w-full h-full object-cover"/>
+                                            </div>
+                                        )}
+                                        <div className="mt-3 flex items-center gap-4 text-gray-400 text-xs font-bold">
+                                            <span className="flex items-center gap-1"><Heart size={12}/> {p.likes?.length || 0}</span>
+                                            <span className="flex items-center gap-1"><MessageSquare size={12}/> {p.commentsCount || 0}</span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     )}
                 </div>
             ) : (
-                <div className="text-center py-20 text-gray-300">
-                    <Search size={48} className="mx-auto mb-4 opacity-20"/>
-                    <p>Ketik sesuatu untuk mencari...</p>
+                <div className="text-center py-10 opacity-60">
+                    <div className="w-24 h-24 bg-gradient-to-tr from-sky-50 to-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                        <Search size={40} className="text-sky-200"/>
+                    </div>
+                    <p className="text-gray-400 font-medium">Ketik nama teman atau topik menarik...</p>
                 </div>
             )}
         </div>
