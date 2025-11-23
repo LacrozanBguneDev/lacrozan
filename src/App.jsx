@@ -39,6 +39,7 @@ import {
 // IMPORT KHUSUS NOTIFIKASI
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
+// IMPORT ICON DARI LUCIDE REACT
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -51,6 +52,7 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2
 } from 'lucide-react';
 
+// SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -65,6 +67,7 @@ const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744"
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
 // --- KONFIGURASI FIREBASE ---
+// Menggunakan konfigurasi environment jika tersedia, atau fallback ke default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -75,20 +78,24 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__f
   measurementId: "G-G0VWNHHVB8"
 };
 
+// Mengambil App ID untuk Firestore Path
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// Fungsi Helper untuk path koleksi publik
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
+// Inisialisasi Firebase App
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Inisialisasi Messaging (Hanya jika didukung browser)
 let messaging = null;
 try {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    console.log("Messaging skipped");
+    console.log("Messaging skipped atau tidak didukung di environment ini");
 }
 
 // ==========================================
@@ -110,9 +117,9 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// 2. Kompresi Gambar (FITUR BARU: SOLUSI UPLOAD CEPAT)
+// 2. Kompresi Gambar (FITUR STABILISASI UPLOAD)
 const compressImage = (file) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = (event) => {
@@ -120,17 +127,28 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Maksimal lebar 1080px (HD), tinggi menyesuaikan
+                // Maksimal lebar 1080px (HD), tinggi menyesuaikan rasio
                 const MAX_WIDTH = 1080;
-                const scaleSize = MAX_WIDTH / img.width;
-                canvas.width = MAX_WIDTH;
-                canvas.height = img.height * scaleSize;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
                 
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, width, height);
                 
-                // Ubah ke JPEG dengan kualitas 70%
+                // Ubah ke JPEG dengan kualitas 70% untuk efisiensi
                 ctx.canvas.toBlob((blob) => {
+                    if (!blob) {
+                        reject(new Error("Gagal kompresi gambar"));
+                        return;
+                    }
                     const newFile = new File([blob], file.name, {
                         type: 'image/jpeg',
                         lastModified: Date.now(),
@@ -138,11 +156,13 @@ const compressImage = (file) => {
                     resolve(newFile);
                 }, 'image/jpeg', 0.7); 
             };
+            img.onerror = (error) => reject(error);
         };
+        reader.onerror = (error) => reject(error);
     });
 };
 
-// 3. Algoritma Acak
+// 3. Algoritma Acak (Shuffle)
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -154,7 +174,7 @@ const shuffleArray = (array) => {
     return newArray;
 };
 
-// 4. Sistem Notifikasi
+// 4. Sistem Notifikasi Internal
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     try {
@@ -165,29 +185,45 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// 5. Upload API (Faa API) - Dengan Auto HTTPS
+// 5. Upload API (Faa API) - Stabilisasi dengan Retry
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
-    onProgress(0);
+    if(onProgress) onProgress(10);
     formData.append('file', file, file.name);
 
+    // Fungsi helper untuk delay
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
     try {
-        for (let i = 0; i <= 60; i += 10) { onProgress(i); await new Promise(resolve => setTimeout(resolve, 50)); }
+        // Simulasi progress awal agar user tahu proses berjalan
+        for (let i = 10; i <= 60; i += 10) { 
+            if(onProgress) onProgress(i); 
+            await delay(100); 
+        }
+
         const response = await fetch(apiUrl, { method: 'POST', body: formData });
-        onProgress(80);
+        
+        if(onProgress) onProgress(80);
+        
         if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
+        
         const data = await response.json();
-        onProgress(100);
+        if(onProgress) onProgress(100);
         
         if (data && data.url) {
             let secureUrl = data.url;
             if (secureUrl.startsWith('http://')) { secureUrl = secureUrl.replace('http://', 'https://'); }
             return secureUrl;
-        } else if (data && data.result && data.result.url) { return data.result.url;
-        } else { throw new Error('Format respon API tidak dikenali.'); }
+        } else if (data && data.result && data.result.url) { 
+            return data.result.url;
+        } else { 
+            throw new Error('Format respon API tidak dikenali.'); 
+        }
     } catch (error) {
-        onProgress(0); throw new Error('Gagal upload. Coba lagi atau cek koneksi.');
+        if(onProgress) onProgress(0); 
+        console.error("Upload Error:", error);
+        throw new Error('Gagal upload. Pastikan koneksi stabil atau coba gambar yang lebih kecil.');
     }
 };
 
@@ -241,7 +277,7 @@ const isUserOnline = (lastSeen) => {
 };
 
 // ==========================================
-// BAGIAN 3: KOMPONEN UI KECIL
+// BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
 // --- PWA INSTALL PROMPT ---
@@ -299,7 +335,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
         if (loading) {
             timer = setTimeout(() => {
                 if (loading) { setLoading(false); setError(true); }
-            }, 10000); 
+            }, 15000); // Waktu timeout diperpanjang untuk koneksi lambat
         }
         return () => clearTimeout(timer);
     }, [loading, src]);
@@ -314,8 +350,8 @@ const ImageWithRetry = ({ src, alt, className }) => {
         return (
             <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className}`} style={{minHeight: '200px'}}>
                 <ImageOff size={24} className="mb-2 opacity-50"/>
-                <p className="text-[10px] mb-2 text-center px-2">Gambar tidak dapat dimuat</p>
-                <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Refresh</button>
+                <p className="text-[10px] mb-2 text-center px-2">Gagal memuat</p>
+                <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Coba Lagi</button>
             </div>
         );
     }
@@ -339,32 +375,72 @@ const ImageWithRetry = ({ src, alt, className }) => {
     );
 };
 
-// --- AUDIO PLAYER ---
+// --- AUDIO PLAYER (DENGAN RETRY) ---
 const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [error, setError] = useState(false);
 
     const togglePlay = () => {
         if (audioRef.current) {
             if (isPlaying) audioRef.current.pause();
-            else audioRef.current.play();
+            else {
+                const playPromise = audioRef.current.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.error("Audio playback error:", error);
+                        setIsPlaying(false);
+                        setError(true);
+                    });
+                }
+            }
             setIsPlaying(!isPlaying);
+        }
+    };
+
+    const handleRetry = () => {
+        setError(false);
+        setIsPlaying(false);
+        if(audioRef.current) {
+            audioRef.current.load();
         }
     };
 
     return (
         <div className="bg-gradient-to-r from-gray-800 to-gray-900 rounded-xl p-3 flex items-center gap-3 mb-4 shadow-md border border-gray-700">
-            <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
-                {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
-            </button>
+            {error ? (
+                 <button onClick={handleRetry} className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition" title="Coba Lagi">
+                    <RefreshCw size={18} />
+                 </button>
+            ) : (
+                <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
+                    {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
+                </button>
+            )}
+            
             <div className="flex-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-sky-400 mb-1"><Music size={12}/> Audio Clip</div>
-                <audio ref={audioRef} src={src} className="w-full h-6 opacity-80" controls onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)}/>
+                <div className="flex items-center gap-1 text-xs font-bold text-sky-400 mb-1">
+                    <Music size={12}/> {error ? "Gagal memuat audio" : "Audio Clip"}
+                </div>
+                {!error && (
+                    <audio 
+                        ref={audioRef} 
+                        src={src} 
+                        className="w-full h-6 opacity-80" 
+                        controls 
+                        onEnded={() => setIsPlaying(false)} 
+                        onPause={() => setIsPlaying(false)} 
+                        onPlay={() => setIsPlaying(true)}
+                        onError={() => setError(true)}
+                    />
+                )}
+                {error && <p className="text-[10px] text-red-400">Terjadi kesalahan jaringan.</p>}
             </div>
         </div>
     );
 };
 
+// --- SPLASH SCREEN ---
 const SplashScreen = () => (
     <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
         <div className="relative mb-8 animate-bounce-slow">
@@ -377,6 +453,7 @@ const SplashScreen = () => (
     </div>
 );
 
+// --- SKELETON LOADING ---
 const SkeletonPost = () => (
     <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
         <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200"></div><div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div></div>
@@ -384,6 +461,7 @@ const SkeletonPost = () => (
     </div>
 );
 
+// --- MARKDOWN RENDERER ---
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
@@ -795,7 +873,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // Kompresi dulu foto profil
+                // Kompresi dulu foto profil agar cepat
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -931,7 +1009,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
-// --- 8. SHORTS SCREEN (INFINITE LOOP) ---
+// --- SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
     useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
@@ -991,6 +1069,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     );
 };
 
+// --- NOTIFICATION SCREEN ---
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     useEffect(() => {
@@ -1001,6 +1080,96 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
+// --- SEARCH SCREEN (INILAH YANG HILANG SEBELUMNYA) ---
+const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
+    const [queryText, setQueryText] = useState('');
+    const [tab, setTab] = useState('users');
+
+    const filteredUsers = useMemo(() => {
+        if(!queryText) return [];
+        return allUsers.filter(u => 
+            u.username.toLowerCase().includes(queryText.toLowerCase()) && u.uid !== profile.uid
+        );
+    }, [allUsers, queryText, profile.uid]);
+
+    const filteredPosts = useMemo(() => {
+        if(!queryText) return [];
+        return allPosts.filter(p => 
+            p.content.toLowerCase().includes(queryText.toLowerCase()) || 
+            (p.title && p.title.toLowerCase().includes(queryText.toLowerCase()))
+        );
+    }, [allPosts, queryText]);
+
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-24">
+            <h1 className="text-xl font-black text-gray-800 mb-4">Pencarian</h1>
+            <div className="relative mb-6">
+                <Search className="absolute left-4 top-3.5 text-gray-400" size={18}/>
+                <input 
+                    value={queryText} 
+                    onChange={e => setQueryText(e.target.value)} 
+                    placeholder="Cari pengguna atau topik..." 
+                    className="w-full pl-12 pr-4 py-3 bg-white rounded-2xl shadow-sm border border-gray-100 outline-none focus:ring-2 focus:ring-sky-200 transition"
+                    autoFocus
+                />
+            </div>
+
+            <div className="flex gap-2 mb-6">
+                <button onClick={() => setTab('users')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${tab === 'users' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100'}`}>Pengguna</button>
+                <button onClick={() => setTab('posts')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${tab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500 border border-gray-100'}`}>Postingan</button>
+            </div>
+
+            {queryText ? (
+                <div>
+                    {tab === 'users' ? (
+                        <div className="space-y-3">
+                            {filteredUsers.length === 0 ? <p className="text-center text-gray-400 text-sm mt-10">Pengguna tidak ditemukan.</p> : 
+                            filteredUsers.map(u => {
+                                const isFollowing = (profile.following || []).includes(u.uid);
+                                return (
+                                    <div key={u.uid} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between">
+                                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(u.uid)}>
+                                            <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden">
+                                                {u.photoURL ? <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-sky-500">{u.username[0]}</div>}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-gray-800 text-sm">{u.username}</h4>
+                                                <p className="text-[10px] text-gray-400">{u.followers?.length || 0} Pengikut</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => handleFollow(u.uid, isFollowing)} className={`px-3 py-1.5 rounded-full text-[10px] font-bold ${isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-sky-500 text-white'}`}>{isFollowing ? 'Mengikuti' : 'Ikuti'}</button>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {filteredPosts.length === 0 ? <p className="text-center text-gray-400 text-sm mt-10">Postingan tidak ditemukan.</p> : 
+                            filteredPosts.map(p => (
+                                <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100" onClick={() => goToProfile(p.userId)}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
+                                            {p.user?.photoURL ? <img src={p.user.photoURL} className="w-full h-full object-cover"/> : null}
+                                        </div>
+                                        <span className="font-bold text-xs text-gray-700">{p.user?.username}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-600 line-clamp-2">{p.content}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div className="text-center py-20 text-gray-300">
+                    <Search size={48} className="mx-auto mb-4 opacity-20"/>
+                    <p>Ketik sesuatu untuk mencari...</p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- SINGLE POST VIEW ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
