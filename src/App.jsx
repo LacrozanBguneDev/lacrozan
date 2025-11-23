@@ -50,7 +50,9 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Settings, Shield, FileText, Cookie, LifeBuoy, Fingerprint
+    // --- PENAMBAHAN ICON UNTUK FITUR BARU ---
+    BookOpen as BookOpenIcon, // Mengganti nama agar tidak konflik dengan nama komponen
+    Sparkles as SparklesIcon 
 } from 'lucide-react';
 
 // SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
@@ -99,58 +101,7 @@ try {
 }
 
 // ==========================================
-// BAGIAN 2: CONTENT LEGALITAS (BARU)
-// ==========================================
-
-const LEGAL_DOCS = {
-    privacy: `
-### Kebijakan Privasi
-**Data yang Kami Ambil:**
-1. **Identitas:** Username, Email, Foto Profil (untuk identifikasi akun).
-2. **Konten:** Postingan (Teks, Gambar, Video, Audio) yang Anda unggah.
-3. **Interaksi:** Like, Komentar, Follow, dan simpanan postingan.
-4. **Teknis:** Token FCM (untuk notifikasi), IP Address (untuk keamanan dasar).
-
-**Penyimpanan:**
-Data disimpan di Google Firebase (Firestore & Storage) yang terenkripsi dan aman.
-
-**Tujuan:**
-Memberikan layanan jejaring sosial, personalisasi feed, dan keamanan akun. Kami tidak menjual data Anda.
-`,
-    tos: `
-### Ketentuan Layanan (ToS)
-**Aturan Main:**
-1. **Usia:** Minimal 13 tahun.
-2. **Akun:** Anda bertanggung jawab atas keamanan password Anda.
-3. **Larangan:** Dilarang memposting konten ilegal, pornografi, perjudian, kekerasan, atau ujaran kebencian.
-4. **Hak Developer:** Kami berhak menghapus konten atau memblokir akun yang melanggar aturan tanpa pemberitahuan.
-5. **Hak Pengguna:** Anda memegang hak cipta atas konten Anda, tetapi memberi kami lisensi untuk menampilkannya di aplikasi ini.
-`,
-    guidelines: `
-### Panduan Komunitas
-**Agar komunitas tetap asik:**
-1. **Respect:** Hargai perbedaan pendapat. Jangan bully atau doxing.
-2. **No Spam:** Jangan nyepam link atau promosi berlebihan.
-3. **Kredit:** Cantumkan sumber jika memposting karya orang lain.
-4. **Lapor:** Gunakan fitur lapor (hubungi admin) jika melihat pelanggaran.
-`,
-    cookie: `
-### Kebijakan Cookie
-Kami menggunakan teknologi penyimpanan lokal (Local Storage) dan Session Cookie untuk:
-1. **Login:** Mengingat sesi login Anda agar tidak perlu login ulang setiap saat.
-2. **Preferensi:** Menyimpan pengaturan tema atau cache gambar agar aplikasi lebih cepat.
-3. **Analytics:** Memantau performa aplikasi untuk perbaikan fitur (anonim).
-`,
-    security: `
-### Keamanan (Security Notice)
-1. **Enkripsi:** Koneksi Anda ke server dilindungi enkripsi SSL (HTTPS).
-2. **Proteksi:** Jangan bagikan password Anda ke siapapun, termasuk yang mengaku Admin.
-3. **Verifikasi:** Admin asli memiliki centang biru/badge Developer.
-`
-};
-
-// ==========================================
-// BAGIAN 3: UTILITY FUNCTIONS & HELPERS
+// BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
 const requestNotificationPermission = async (userId) => {
@@ -322,7 +273,7 @@ const isUserOnline = (lastSeen) => {
 };
 
 // ==========================================
-// BAGIAN 4: KOMPONEN UI KECIL & HELPER
+// BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
 const PWAInstallPrompt = () => {
@@ -369,7 +320,10 @@ const PWAInstallPrompt = () => {
 };
 
 // --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
+// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
+// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
 const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
+    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
     const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
     const [status, setStatus] = useState(initialState);
     const [retryKey, setRetryKey] = useState(0);
@@ -388,7 +342,9 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     useEffect(() => {
         let timeout;
         if (status === 'error') {
+            // Retry otomatis setiap 4 detik jika gagal
             timeout = setTimeout(() => {
+                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
                 if (globalImageCache.has(src)) {
                     setStatus('loaded');
                 } else {
@@ -402,7 +358,7 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     }, [status, src]);
 
     const handleSuccess = () => {
-        globalImageCache.add(src); 
+        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
         setStatus('loaded');
     };
 
@@ -539,68 +495,7 @@ const renderMarkdown = (text) => {
 };
 
 // ==========================================
-// BAGIAN 5: MODAL LEGALITAS & ONBOARDING (BARU & WAJIB ADA)
-// ==========================================
-
-const LegalModal = ({ onClose }) => {
-    const [tab, setTab] = useState('privacy');
-    return (
-        <div className="fixed inset-0 bg-white z-[80] flex flex-col animate-in slide-in-from-bottom duration-300">
-            <div className="p-4 border-b flex items-center justify-between bg-white/90 backdrop-blur">
-                <h2 className="font-black text-xl text-gray-800 flex items-center gap-2"><Shield size={24} className="text-sky-500"/> Pusat Legal & Bantuan</h2>
-                <button onClick={onClose} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={20}/></button>
-            </div>
-            <div className="flex flex-1 overflow-hidden">
-                <div className="w-16 md:w-64 bg-gray-50 border-r flex flex-col items-center md:items-stretch py-4 gap-2">
-                    {[
-                        {id:'privacy', icon:FileText, l:'Privasi'},
-                        {id:'tos', icon:Shield, l:'Layanan'},
-                        {id:'guidelines', icon:Users, l:'Komunitas'},
-                        {id:'cookie', icon:Cookie, l:'Cookie'},
-                        {id:'security', icon:Lock, l:'Keamanan'}
-                    ].map(t => (
-                        <button key={t.id} onClick={()=>setTab(t.id)} className={`p-3 md:px-4 md:py-3 md:mx-2 rounded-xl flex items-center gap-3 transition ${tab===t.id?'bg-white text-sky-600 shadow-sm font-bold':'text-gray-500 hover:bg-gray-200'}`}>
-                            <t.icon size={20}/> <span className="hidden md:block text-sm">{t.l}</span>
-                        </button>
-                    ))}
-                </div>
-                <div className="flex-1 overflow-y-auto p-6 bg-white">
-                    <div className="prose prose-sm max-w-none prose-headings:font-black prose-a:text-sky-600">
-                        {renderMarkdown(LEGAL_DOCS[tab])}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const OnboardingOverlay = ({ onFinish }) => {
-    return (
-        <div className="fixed inset-0 bg-white/95 z-[70] backdrop-blur-xl flex flex-col items-center justify-center p-8 animate-in fade-in duration-500 text-center">
-            <div className="w-32 h-32 bg-sky-100 rounded-full flex items-center justify-center mb-6 animate-bounce-slow">
-                <Sparkles size={64} className="text-sky-500"/>
-            </div>
-            <h1 className="text-3xl font-black text-gray-800 mb-2">Selamat Datang di {APP_NAME}!</h1>
-            <p className="text-gray-500 max-w-sm mb-8">Platform sosial media modern, ringan, dan penuh fitur seru untuk mengekspresikan dirimu.</p>
-            <div className="space-y-4 w-full max-w-xs">
-                <div className="flex items-center gap-3 p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
-                    <div className="p-2 bg-purple-100 rounded-lg text-purple-600"><Film size={20}/></div>
-                    <div className="text-left"><h4 className="font-bold text-sm">Shorts Video</h4><p className="text-[10px] text-gray-400">Scroll video tanpa henti</p></div>
-                </div>
-                <div className="flex items-center gap-3 p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
-                    <div className="p-2 bg-emerald-100 rounded-lg text-emerald-600"><ShieldCheck size={20}/></div>
-                    <div className="text-left"><h4 className="font-bold text-sm">Aman & Nyaman</h4><p className="text-[10px] text-gray-400">Privasi terjaga 100%</p></div>
-                </div>
-            </div>
-            <button onClick={onFinish} className="mt-10 bg-gray-900 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-gray-300 hover:scale-105 transition flex items-center gap-2">
-                Mulai Menjelajah <ChevronRight size={18}/>
-            </button>
-        </div>
-    );
-};
-
-// ==========================================
-// BAGIAN 6: DASHBOARD DEVELOPER (DIPERTAHANKAN)
+// BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
 const DeveloperDashboard = ({ onClose }) => {
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
@@ -693,7 +588,7 @@ const DeveloperDashboard = ({ onClose }) => {
 };
 
 // ==========================================
-// BAGIAN 7: LAYAR OTENTIKASI & LANDING (DIPERTAHANKAN)
+// BAGIAN 5: LAYAR OTENTIKASI & LANDING
 // ==========================================
 
 const AuthScreen = ({ onLoginSuccess }) => {
@@ -709,12 +604,16 @@ const AuthScreen = ({ onLoginSuccess }) => {
         try {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
-                // JANGAN SETDOC DI SINI (Penyebab Reset Profil)
-                // Biarkan listener di App.js yang menangani data
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
+                // Cek username unik (opsional tapi bagus)
+                // const q = query(collection(db, getPublicCollection('userProfiles')), where('username', '==', username.trim()));
+                // const userCheck = await getDocs(q);
+                // if (!userCheck.empty) throw new Error("Username sudah dipakai!");
+
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 
+                // --- PENTING: TAMBAHKAN hasCompletedOnboarding ---
                 await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
                     username: username.trim(), 
                     email: email, 
@@ -725,10 +624,12 @@ const AuthScreen = ({ onLoginSuccess }) => {
                     followers: [], 
                     lastSeen: serverTimestamp(), 
                     savedPosts: [], 
-                    mood: '' 
+                    mood: 'Baru di ' + APP_NAME + '!', // Mood default
+                    hasCompletedOnboarding: false // Flag untuk onboarding
                 });
             }
-            onLoginSuccess();
+            // onLoginSuccess tidak ada di props, tapi biarkan saja
+            // onAuthStateChanged akan menangani sisanya
         } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
     };
 
@@ -774,9 +675,10 @@ const LandingPage = ({ onGetStarted }) => {
 };
 
 // ==========================================
-// BAGIAN 8: KOMPONEN UTAMA APLIKASI
+// BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
+// --- POST ITEM (LENGKAP DENGAN UI BARU) ---
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper }) => {
     const [liked, setLiked] = useState(post.likes?.includes(currentUserId));
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -856,8 +758,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
+    // --- UI IMPROVEMENT ---
+    // Bayangan lebih modern: shadow-xl shadow-sky-100/70
+    // Transisi saat hover: hover:shadow-2xl hover:shadow-sky-200/50
+    // Tombol diubah jadi pills (lihat di bawah)
     return (
-        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 relative overflow-hidden group transition hover:shadow-lg">
+        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-xl shadow-sky-100/70 border border-white relative overflow-hidden group transition-all duration-300 hover:shadow-2xl hover:shadow-sky-200/50">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
             {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 text-orange-600 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
             {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
@@ -884,8 +790,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
                     <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
+                    {/* --- UI IMPROVEMENT ---
+                    // Efek hover: group-hover:scale-[1.03]
+                    */}
                     {(isImage || isVideo || isAudio || embed) && (
-                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
+                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none transition-transform duration-300 group-hover:scale-[1.03]" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
                             {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer" />}
@@ -897,11 +806,34 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 </>
             )}
 
-            <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
-                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
-                <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
-                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
-                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
+            {/* --- UI IMPROVEMENT ---
+            // Tombol diubah menjadi 'pills' (pil) yang lebih modern
+            */}
+            <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+                <button 
+                    onClick={handleLike} 
+                    className={`flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all duration-300 ${liked ? 'bg-rose-50 text-rose-500 border border-rose-100' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+                >
+                    <Heart size={16} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}
+                </button>
+                <button 
+                    onClick={() => setShowComments(!showComments)} 
+                    className="flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all bg-gray-50 text-gray-500 hover:bg-gray-100"
+                >
+                    <MessageSquare size={16}/> {post.commentsCount || 0}
+                </button>
+                <button 
+                    onClick={sharePost} 
+                    className="flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all bg-gray-50 text-gray-500 hover:bg-gray-100"
+                >
+                    <Share2 size={16}/>
+                </button>
+                <button 
+                    onClick={handleSave} 
+                    className={`ml-auto p-2 rounded-full transition-all ${isSaved ? 'bg-sky-50 text-sky-500' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
+                >
+                    <Bookmark size={18} fill={isSaved ? 'currentColor' : 'none'} />
+                </button>
             </div>
 
             {showComments && (
@@ -914,6 +846,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
+// --- CREATE POST (DENGAN KOMPRESI & AUDIO) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
@@ -927,7 +860,9 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 
             // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD
             if (fileToUpload && fileToUpload.type.startsWith('image')) {
+                console.log("Mengompres gambar...");
                 fileToUpload = await compressImage(fileToUpload);
+                console.log("Gambar dikompres. Ukuran baru:", fileToUpload.size);
             }
 
             if(fileToUpload) { 
@@ -982,7 +917,8 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
+// --- PROFILE SCREEN (DENGAN UI BARU & LINK LEGAL) ---
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, setPage }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
@@ -991,7 +927,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     const [activeTab, setActiveTab] = useState('posts'); 
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
-    const [showLegal, setShowLegal] = useState(false);
 
     const isSelf = viewerProfile.uid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
@@ -1008,6 +943,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
         try { 
             let url = profileData.photoURL;
             if (file) {
+                // Kompresi dulu foto profil agar cepat
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -1027,17 +963,11 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            {showLegal && <LegalModal onClose={()=>setShowLegal(false)} />}
-            
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
+            {/* --- UI IMPROVEMENT ---
+            // Bayangan lebih modern: shadow-xl shadow-sky-100/70
+            */}
+            <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-xl shadow-sky-100/70 border border-white mb-8 mx-4 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
-                
-                {isSelf && (
-                    <button onClick={() => setShowLegal(true)} className="absolute top-4 right-4 bg-white/50 backdrop-blur p-2 rounded-full text-gray-500 hover:text-sky-600 transition z-10 border border-white/50" title="Pengaturan & Legal">
-                        <Settings size={20}/>
-                    </button>
-                )}
-
                 <div className="relative inline-block mb-4 mt-8">
                     <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
                         {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
@@ -1051,7 +981,37 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
                 {!isSelf && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-                <div className="flex justify-center gap-6 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
+                
+                {/* --- UI IMPROVEMENT ---
+                // Statistik dibuat lebih menarik
+                */}
+                <div className="grid grid-cols-3 gap-3 mt-6 border-t border-gray-100 pt-6">
+                    <div className="bg-gray-50/70 border border-gray-100/0 rounded-2xl p-3">
+                        <span className="font-bold text-xl block">{followersCount}</span>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span>
+                    </div>
+                    <div className="bg-gray-50/70 border border-gray-100/0 rounded-2xl p-3">
+                        <span className="font-bold text-xl block">{followingCount}</span>
+                        <span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span>
+                    </div>
+                    <div className="bg-emerald-50/70 border border-emerald-100/0 rounded-2xl p-3">
+                        <span className="font-bold text-xl block text-emerald-600">{friendsCount}</span>
+                        <span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span>
+                    </div>
+                </div>
+
+                {/* --- PENAMBAHAN ---
+                // Tombol untuk membuka Halaman Legal
+                */}
+                {isSelf && (
+                    <button 
+                        onClick={() => setPage('legal')} 
+                        className="mt-8 w-full text-xs text-gray-400 hover:text-sky-600 font-medium flex items-center justify-center gap-1.5 transition group"
+                    >
+                        <BookOpenIcon size={14} className="group-hover:text-sky-500"/> 
+                        Baca Ketentuan, Kebijakan Privasi & Bantuan
+                    </button>
+                )}
             </div>
             {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Disimpan</button></div> )}
             <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
@@ -1060,6 +1020,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     );
 };
 
+// --- TRENDING TAGS ---
 const TrendingTags = ({ posts }) => {
     const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
     if (tags.length === 0) return null;
@@ -1068,6 +1029,7 @@ const TrendingTags = ({ posts }) => {
     );
 };
 
+// --- HOME SCREEN ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
@@ -1150,6 +1112,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
+// --- SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
     useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
@@ -1209,6 +1172,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     );
 };
 
+// --- NOTIFICATION SCREEN ---
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     useEffect(() => {
@@ -1219,35 +1183,164 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
+// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
     const [queryText, setQueryText] = useState('');
-    const [searchTerm, setSearchTerm] = useState('');
+    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
     const [tab, setTab] = useState('users');
 
-    useEffect(() => { const delayDebounceFn = setTimeout(() => { setSearchTerm(queryText); }, 300); return () => clearTimeout(delayDebounceFn); }, [queryText]);
+    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
+    // Ini mencegah render berlebihan saat mengetik cepat
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            setSearchTerm(queryText);
+        }, 300);
 
-    const filteredUsers = useMemo(() => { if (!searchTerm || !allUsers) return []; const term = searchTerm.toLowerCase(); return allUsers.filter(u => { if (!u || !u.username) return false; return u.username.toLowerCase().includes(term) && u.uid !== profile.uid; }); }, [allUsers, searchTerm, profile?.uid]);
-    const filteredPosts = useMemo(() => { if (!searchTerm || !allPosts) return []; const term = searchTerm.toLowerCase(); return allPosts.filter(p => { const contentMatch = p.content && p.content.toLowerCase().includes(term); const titleMatch = p.title && p.title.toLowerCase().includes(term); const tagMatch = p.category && p.category.toLowerCase().includes(term); return contentMatch || titleMatch || tagMatch; }); }, [allPosts, searchTerm]);
+        return () => clearTimeout(delayDebounceFn);
+    }, [queryText]);
+
+    const filteredUsers = useMemo(() => {
+        if (!searchTerm || !allUsers) return [];
+        const term = searchTerm.toLowerCase();
+        
+        return allUsers.filter(u => {
+            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
+            if (!u || !u.username) return false;
+            return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
+        });
+    }, [allUsers, searchTerm, profile?.uid]);
+
+    const filteredPosts = useMemo(() => {
+        if (!searchTerm || !allPosts) return [];
+        const term = searchTerm.toLowerCase();
+
+        return allPosts.filter(p => {
+            // SAFE CHECK: Pastikan p dan kontennya ada
+            const contentMatch = p.content && p.content.toLowerCase().includes(term);
+            const titleMatch = p.title && p.title.toLowerCase().includes(term);
+            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
+            
+            return contentMatch || titleMatch || tagMatch;
+        });
+    }, [allPosts, searchTerm]);
 
     return (
         <div className="max-w-lg mx-auto p-4 pb-24">
-            <h1 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-2"><Search className="text-sky-500" size={28}/> Pencarian</h1>
-            <div className="relative mb-8 group"><div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Search className="text-gray-400 group-focus-within:text-sky-500 transition duration-300" size={20}/></div><input value={queryText} onChange={e => setQueryText(e.target.value)} placeholder={tab === 'users' ? "Cari teman..." : "Cari postingan..."} className="w-full pl-12 pr-12 py-4 bg-white rounded-2xl shadow-sm border-2 border-transparent focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none transition-all duration-300 font-medium text-gray-700" autoFocus/>{queryText && (<button onClick={() => setQueryText('')} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 transition"><X size={18} className="bg-gray-200 rounded-full p-0.5"/></button>)}</div>
-            <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 shadow-inner"><button onClick={() => setTab('users')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'users' ? 'bg-white text-sky-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}><Users size={16}/> Pengguna</button><button onClick={() => setTab('posts')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'posts' ? 'bg-white text-purple-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}><ImageOff size={16}/> Postingan</button></div>
+            <h1 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-2">
+                <Search className="text-sky-500" size={28}/> Pencarian
+            </h1>
+            
+            <div className="relative mb-8 group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Search className="text-gray-400 group-focus-within:text-sky-500 transition duration-300" size={20}/>
+                </div>
+                <input 
+                    value={queryText} 
+                    onChange={e => setQueryText(e.target.value)} 
+                    placeholder={tab === 'users' ? "Cari teman..." : "Cari postingan..."}
+                    className="w-full pl-12 pr-12 py-4 bg-white rounded-2xl shadow-sm border-2 border-transparent focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none transition-all duration-300 font-medium text-gray-700"
+                    autoFocus
+                />
+                {queryText && (
+                    <button onClick={() => setQueryText('')} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 transition">
+                        <X size={18} className="bg-gray-200 rounded-full p-0.5"/>
+                    </button>
+                )}
+            </div>
+
+            <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 shadow-inner">
+                <button onClick={() => setTab('users')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'users' ? 'bg-white text-sky-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <Users size={16}/> Pengguna
+                </button>
+                <button onClick={() => setTab('posts')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'posts' ? 'bg-white text-purple-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <ImageOff size={16}/> Postingan
+                </button>
+            </div>
 
             {searchTerm ? (
                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     {tab === 'users' ? (
-                        <div className="space-y-4">{filteredUsers.length === 0 ? (<div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200"><div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><UserPlus size={32} className="text-gray-300"/></div><p className="text-gray-500 font-medium">Pengguna tidak ditemukan.</p></div>) : (filteredUsers.map(u => { const isFollowing = (profile.following || []).includes(u.uid); return (<div key={u.uid} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:shadow-md transition duration-300"><div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}><div className="relative"><div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5"><div className="w-full h-full rounded-full bg-white overflow-hidden"><ImageWithRetry src={u.photoURL} className="w-full h-full object-cover" fallbackText={u.username}/></div></div></div><div><h4 className="font-bold text-gray-800">{u.username}</h4><p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">{u.followers?.length || 0} Pengikut</p></div></div><button onClick={() => handleFollow(u.uid, isFollowing)} className={`px-5 py-2 rounded-xl text-xs font-bold transition-all duration-300 transform active:scale-95 ${isFollowing ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-200 hover:shadow-xl'}`}>{isFollowing ? 'Mengikuti' : 'Ikuti'}</button></div>)}))}</div>
+                        <div className="space-y-4">
+                            {filteredUsers.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><UserPlus size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Pengguna tidak ditemukan.</p>
+                                </div>
+                            ) : (
+                                filteredUsers.map(u => {
+                                    const isFollowing = (profile.following || []).includes(u.uid);
+                                    return (
+                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-lg shadow-sky-50/70 hover:shadow-sky-100/90 border border-white flex items-center justify-between transition duration-300">
+                                            <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}>
+                                                <div className="relative">
+                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
+                                                        <div className="w-full h-full rounded-full bg-white overflow-hidden">
+                                                             <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover" fallbackText={u.username}/>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-gray-800">{u.username}</h4>
+                                                    <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">{u.followers?.length || 0} Pengikut</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleFollow(u.uid, isFollowing)} 
+                                                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all duration-300 transform active:scale-95 ${isFollowing ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-200 hover:shadow-xl'}`}
+                                            >
+                                                {isFollowing ? 'Mengikuti' : 'Ikuti'}
+                                            </button>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
                     ) : (
-                        <div className="columns-1 gap-4 space-y-4">{filteredPosts.length === 0 ? (<div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200"><div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><Search size={32} className="text-gray-300"/></div><p className="text-gray-500 font-medium">Tidak ada postingan yang cocok.</p></div>) : (filteredPosts.map(p => (<div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}><div className="flex items-center gap-2 mb-3"><div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden"><ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/></div><span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span><span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span></div><h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{p.title || p.content}</h4>{p.mediaUrl && p.mediaType === 'image' && (<div className="mt-2 rounded-xl overflow-hidden h-32 relative"><ImageWithRetry src={p.mediaUrl} className="w-full h-full object-cover"/></div>)}<div className="mt-3 flex items-center gap-4 text-gray-400 text-xs font-bold"><span className="flex items-center gap-1"><Heart size={12}/> {p.likes?.length || 0}</span><span className="flex items-center gap-1"><MessageSquare size={12}/> {p.commentsCount || 0}</span></div></div>)))}</div>
+                        <div className="columns-1 gap-4 space-y-4">
+                            {filteredPosts.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><Search size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Tidak ada postingan yang cocok.</p>
+                                </div>
+                            ) : (
+                                filteredPosts.map(p => (
+                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-lg shadow-sky-50/70 border border-white hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
+                                                <ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/>
+                                            </div>
+                                            <span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span>
+                                            <span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span>
+                                        </div>
+                                        <h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{p.title || p.content}</h4>
+                                        {p.mediaUrl && p.mediaType === 'image' && (
+                                            <div className="mt-2 rounded-xl overflow-hidden h-32 relative">
+                                                <ImageWithRetry src={p.mediaUrl} className="w-full h-full object-cover"/>
+                                            </div>
+                                        )}
+                                        <div className="mt-3 flex items-center gap-4 text-gray-400 text-xs font-bold">
+                                            <span className="flex items-center gap-1"><Heart size={12}/> {p.likes?.length || 0}</span>
+                                            <span className="flex items-center gap-1"><MessageSquare size={12}/> {p.commentsCount || 0}</span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     )}
                 </div>
-            ) : (<div className="text-center py-10 opacity-60"><div className="w-24 h-24 bg-gradient-to-tr from-sky-50 to-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse"><Search size={40} className="text-sky-200"/></div><p className="text-gray-400 font-medium">Ketik nama teman atau topik menarik...</p></div>)}
+            ) : (
+                <div className="text-center py-10 opacity-60">
+                    <div className="w-24 h-24 bg-gradient-to-tr from-sky-50 to-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                        <Search size={40} className="text-sky-200"/>
+                    </div>
+                    <p className="text-gray-400 font-medium">Ketik nama teman atau topik menarik...</p>
+                </div>
+            )}
         </div>
     );
 };
 
+// --- SINGLE POST VIEW ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
@@ -1261,8 +1354,135 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
+// ======================================================
+// BAGIAN 10: LAYAR LEGAL & ONBOARDING (FITUR BARU)
+// ======================================================
+
+/**
+ * Komponen Onboarding untuk pengguna baru.
+ * Muncul sebagai modal overlay.
+ */
+const OnboardingComponent = ({ profile, onClose }) => {
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-500">
+            <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full shadow-2xl border-4 border-white/50 relative text-center transform animate-in zoom-in-90 duration-300">
+                <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-gradient-to-br from-sky-400 to-purple-500 rounded-full border-4 border-white shadow-lg flex items-center justify-center">
+                    <SparklesIcon size={48} className="text-white animate-pulse" style={{animationDuration: '3s'}}/>
+                </div>
+                <h2 className="text-2xl font-black text-gray-800 mt-16 mb-3">Selamat Datang, {profile.username}!</h2>
+                <p className="text-gray-600 text-sm mb-6 leading-relaxed">
+                    Senang melihatmu di {APP_NAME}. Ini adalah tempat untuk berbagi, terhubung, dan bersenang-senang.
+                </p>
+                <div className="space-y-3 text-left bg-gray-50 p-4 rounded-xl border border-gray-100 mb-8">
+                    <div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-100 text-sky-600 rounded-full flex-shrink-0 flex items-center justify-center"><User size={16}/></div><p className="text-xs font-medium text-gray-700">Perbarui <strong>foto profil</strong> Anda agar mudah dikenali.</p></div>
+                    <div className="flex items-center gap-3"><div className="w-8 h-8 bg-purple-100 text-purple-600 rounded-full flex-shrink-0 flex items-center justify-center"><Search size={16}/></div><p className="text-xs font-medium text-gray-700">Gunakan tab <strong>Pencarian</strong> untuk menemukan teman baru.</p></div>
+                    <div className="flex items-center gap-3"><div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex-shrink-0 flex items-center justify-center"><PlusCircle size={16}/></div><p className="text-xs font-medium text-gray-700">Klik tombol <strong>plus</strong> untuk membuat postingan pertama Anda!</p></div>
+                </div>
+                <button 
+                    onClick={onClose} 
+                    className="w-full py-3 bg-gray-900 text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-gray-800 transform active:scale-95 transition"
+                >
+                    Mulai Jelajahi
+                </button>
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Komponen Halaman Legal (Privacy, Terms, dll.)
+ * Diakses dari halaman profil.
+ */
+const LegalScreen = ({ setPage }) => {
+    const [tab, setTab] = useState('terms');
+    
+    // Konten dinamis berdasarkan tab yang dipilih
+    const LegalContent = () => {
+        switch(tab) {
+            case 'privacy': return (
+                <div className="space-y-4">
+                    <h3 className="font-bold text-lg">Kebijakan Privasi (Privacy Policy)</h3>
+                    <p>Kami menghargai privasi Anda. Aplikasi ini mengumpulkan data berikut untuk fungsionalitas inti:</p>
+                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
+                        <li><strong>Email & Kata Sandi:</strong> Untuk otentikasi dan keamanan akun Anda.</li>
+                        <li><strong>Username:</strong> Untuk identitas publik Anda di aplikasi.</li>
+                        <li><strong>Foto & Postingan:</strong> Konten (gambar, video, teks) yang Anda unggah secara sukarela.</li>
+                        <li><strong>Data Interaksi:</strong> (Like, komentar, follow) untuk menjalankan fitur sosial.</li>
+                    </ul>
+                    <p><strong>Penyimpanan Data:</strong> Semua data Anda disimpan dengan aman di server Google Firebase (Firestore/Firebase Storage) yang berlokasi di berbagai pusat data global. Kami tidak menyimpan data Anda di server pribadi.</p>
+                    <p><strong>Penggunaan Data:</strong> Data Anda hanya digunakan untuk menyediakan layanan aplikasi {APP_NAME} dan tidak akan pernah dijual atau dibagikan ke pihak ketiga untuk tujuan pemasaran.</p>
+                </div>
+            );
+            case 'terms': return (
+                <div className="space-y-4">
+                    <h3 className="font-bold text-lg">Ketentuan Layanan (Terms of Service)</h3>
+                    <p>Dengan menggunakan {APP_NAME}, Anda (Pengguna) setuju untuk:</p>
+                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
+                        <li>Tidak memposting konten ilegal, pornografi, kekerasan, kebencian, atau spam.</li>
+                        <li>Tidak menyamar sebagai orang lain (impersonasi).</li>
+                        <li>Bertanggung jawab penuh atas semua konten yang Anda unggah dan interaksi yang Anda lakukan.</li>
+                    </ul>
+                    <p><strong>Hak Developer:</strong> Kami (Developer) berhak untuk menghapus konten atau menonaktifkan akun yang kami anggap melanggar ketentuan ini, kapan saja, tanpa pemberitahuan sebelumnya, untuk menjaga keamanan komunitas.</p>
+                </div>
+            );
+            case 'community': return (
+                <div className="space-y-4">
+                    <h3 className="font-bold text-lg">Panduan Komunitas (Community Guidelines)</h3>
+                    <p>Jadilah warga yang baik di {APP_NAME}. Jaga agar platform ini tetap aman dan menyenangkan untuk semua.</p>
+                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
+                        <li><strong>Saling Menghormati:</strong> Dilarang keras melakukan pelecehan, perundungan (bullying), atau mengirim pesan ancaman.</li>
+                        <li><strong>Konten Aman (SFW):</strong> {APP_NAME} adalah platform untuk umum. Dilarang mengunggah konten dewasa (NSFW), kekerasan ekstrem, atau gambar yang mengganggu.</li>
+                        <li><strong>Otentik:</strong> Jangan menyebarkan berita bohong (hoaks), melakukan penipuan (scam), atau spam.</li>
+                    </ul>
+                    <p>Mari kita bangun komunitas yang positif dan kreatif bersama.</p>
+                </div>
+            );
+            case 'cookie': return (
+                <div className="space-y-4">
+                    <h3 className="font-bold text-lg">Kebijakan Cookie (Cookie Policy)</h3>
+                    <p>Aplikasi web ini menggunakan teknologi penyimpanan lokal (seperti Firebase Auth state di Local Storage) untuk menjaga Anda tetap login dan mengingat preferensi Anda. Ini adalah data penting untuk fungsionalitas aplikasi.</p>
+                    <p>Kami tidak menggunakan cookie pelacakan pihak ketiga untuk tujuan periklanan. Kami mungkin menggunakan layanan analitik dasar (seperti Firebase Analytics) untuk memantau kinerja aplikasi secara anonim (misal: jumlah pengguna aktif, halaman populer) untuk meningkatkan layanan.</p>
+                </div>
+            );
+            case 'security': return (
+                <div className="space-y-4">
+                    <h3 className="font-bold text-lg">Jaminan Keamanan (Security Notice)</h3>
+                    <p>Kami sangat serius dalam melindungi data Anda. Keamanan Anda dijamin melalui beberapa lapisan:</p>
+                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
+                        <li><strong>Enkripsi (HTTPS):</strong> Semua koneksi antara Anda dan server kami terenkripsi.</li>
+                        <li><strong>Platform Google:</strong> Kami menggunakan layanan otentikasi dan database aman dari Google Firebase.</li>
+                        <li><strong>Aturan Keamanan (Firestore Rules):</strong> Kami menerapkan aturan ketat di sisi server untuk memastikan bahwa Anda hanya dapat mengakses dan mengubah data Anda sendiri, dan tidak bisa mengakses data pribadi pengguna lain.</li>
+                    </ul>
+                    <p>Meskipun tidak ada sistem yang 100% aman, kami berkomitmen untuk melindungi data Anda menggunakan standar industri terbaik.</p>
+                </div>
+            );
+            default: return null;
+        }
+    };
+
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-40 pt-6 animate-in fade-in">
+            <button onClick={() => setPage('profile')} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali ke Profil</button>
+            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-gray-100">
+                <h2 className="text-2xl font-black text-gray-800 mb-6">Info Legal & Bantuan</h2>
+                <div className="flex overflow-x-auto no-scrollbar gap-2 mb-6 border-b pb-2">
+                    <button onClick={() => setTab('terms')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'terms' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Ketentuan</button>
+                    <button onClick={() => setTab('privacy')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'privacy' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Privasi</button>
+                    <button onClick={() => setTab('community')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'community' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Komunitas</button>
+                    <button onClick={() => setTab('cookie')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'cookie' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Cookie</button>
+                    <button onClick={() => setTab('security')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'security' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Keamanan</button>
+                </div>
+                {/* 'prose' class untuk styling teks otomatis */}
+                <div className="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none">
+                    <LegalContent />
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ==========================================
-// BAGIAN 9: APP UTAMA (FIXED PROFILE BUG)
+// BAGIAN 11: APP UTAMA (CORE LOGIC - FIXED)
 // ==========================================
 const App = () => {
     const [user, setUser] = useState(undefined); 
@@ -1275,22 +1495,46 @@ const App = () => {
     const [notifCount, setNotifCount] = useState(0); 
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
-    const [onboardingDone, setOnboardingDone] = useState(false);
+    
+    // --- PENAMBAHAN UNTUK BUG FIX & ONBOARDING ---
+    const [profileLoadTimeout, setProfileLoadTimeout] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const profileTimerRef = useRef(null);
+    // --- AKHIR PENAMBAHAN ---
 
-    useEffect(() => { 
-        if ('serviceWorker' in navigator) navigator.serviceWorker.register('firebase-messaging-sw.js').catch(()=>{}); 
-        const checkOnboard = localStorage.getItem('onboarding_complete');
-        if(checkOnboard) setOnboardingDone(true);
-    }, []);
-
+    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
+    useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
 
-    // --- FIX PROFIL RESET ---
+    useEffect(() => {
+        if (!user) return;
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setNotifCount(snapshot.size);
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const data = change.doc.data();
+                    const now = Date.now();
+                    const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
+                    if (now - notifTime < 10000) { 
+                        if (Notification.permission === "granted") {
+                            new Notification(APP_NAME, { body: `${data.fromUsername} ${data.message}`, icon: APP_LOGO, tag: 'bgune-notif' });
+                        }
+                    }
+                }
+            });
+        });
+        return () => unsubscribe();
+    }, [user]);
+
+    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, u => {
             if(u) {
                 setUser(u);
+                // Update lastSeen saja, JANGAN buat profile baru di sini
+                updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 requestNotificationPermission(u.uid);
             } else {
                 setUser(null);
@@ -1302,73 +1546,161 @@ const App = () => {
 
     useEffect(() => {
         if(!user) return;
+        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
         
-        // HANYA JALAN JIKA USER LOGIN
-        const profileRef = doc(db, getPublicCollection('userProfiles'), user.uid);
-        const unsubP = onSnapshot(profileRef, s => {
+        // --- PERBAIKAN UNTUK PROFILE LOADING TIMEOUT ---
+        // Hapus timer lama jika ada
+        if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
+        // Set timer baru. Jika 8 detik tidak ada profile, tampilkan tombol pulihkan
+        profileTimerRef.current = setTimeout(() => {
+            setProfileLoadTimeout(true);
+        }, 8000); // 8 detik
+
+        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
             if (s.exists()) {
-                // DATA DITEMUKAN: Masukkan ke state
-                setProfile({...s.data(), uid:user.uid, email:user.email});
-                updateDoc(profileRef, { lastSeen: serverTimestamp() }).catch(()=>{});
+                // Data ditemukan, batalkan timer & sembunyikan tombol
+                clearTimeout(profileTimerRef.current);
+                setProfileLoadTimeout(false);
+                
+                const profileData = s.data();
+                setProfile({...profileData, uid:user.uid, email:user.email});
+
+                // Cek untuk onboarding
+                if (!profileData.hasCompletedOnboarding) {
+                    setShowOnboarding(true);
+                }
+
             } else {
-                // DATA TIDAK DITEMUKAN: Jangan lakukan apa-apa di sini.
-                // Biarkan AuthScreen yang membuat profil saat registrasi.
-                // Atau jika ini error aneh, biarkan loading terus agar tidak mereset.
-                console.log("Menunggu profil dibuat...");
+                console.warn("Profile belum siap atau tidak ditemukan. Timer pemulihan berjalan...");
+                // Jangan set profile, biarkan null
+                // Jangan batalkan timer, biarkan berjalan
             }
         });
+        // --- AKHIR PERBAIKAN ---
 
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
             const uids = [...new Set(raw.map(r=>r.userId))];
+            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
             const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
-            const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
+            const map = {};
+            snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
             setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user})));
         });
 
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
         const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
         
-        return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); };
+        return () => { 
+            // --- Pastikan timer dibersihkan saat unmount ---
+            if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
+            // ---
+            unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); 
+        };
     }, [user]);
 
     const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
-    // --- LOGIKA RENDER UTAMA ---
     if (showSplash) return <SplashScreen />;
+    if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
+    if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
     
-    // Jika belum login -> Tampilkan Landing Page atau Auth Screen
-    if (!user) {
-        if (page === 'auth') return <AuthScreen onLoginSuccess={() => setPage('home')} />;
-        return <LandingPage onGetStarted={() => setPage('auth')} />;
+    // --- PERBAIKAN: TAMPILKAN TOMBOL PULIHKAN JIKA TIMEOUT ---
+    if(!profile) {
+        return (
+            <div className="h-screen w-full flex items-center justify-center bg-[#F0F4F8] flex-col p-4">
+                <Loader2 className="animate-spin text-sky-500 mb-3" size={32}/>
+                <p className="text-sm text-gray-500 font-medium">Memuat profil...</p>
+                
+                {profileLoadTimeout && (
+                    <div className="mt-8 p-5 bg-white rounded-2xl shadow-xl border border-gray-100 text-center w-full max-w-xs animate-in fade-in duration-500">
+                        <AlertTriangle size={32} className="text-yellow-500 mx-auto mb-3"/>
+                        <h3 className="text-base font-bold text-gray-800">Data Gagal Dimuat?</h3>
+                        <p className="text-xs text-gray-500 mb-4 mt-1 leading-relaxed">Ini bisa terjadi jika akun Anda baru atau ada gangguan jaringan. Coba pulihkan data Anda.</p>
+                        <button 
+                            onClick={async () => {
+                                console.log("Mencoba memulihkan/membuat profil untuk:", user.uid);
+                                setProfileLoadTimeout(false); // Sembunyikan tombol, coba lagi
+                                try {
+                                    const defaultProfile = { 
+                                        username: user.email.split('@')[0] + Math.floor(Math.random() * 99), // Tambah angka acak biar unik
+                                        email: user.email, 
+                                        createdAt: serverTimestamp(), 
+                                        uid: user.uid, 
+                                        photoURL: '', 
+                                        following: [], 
+                                        followers: [], 
+                                        lastSeen: serverTimestamp(), 
+                                        savedPosts: [], 
+                                        mood: 'Baru di ' + APP_NAME + '!',
+                                        hasCompletedOnboarding: false // Pastikan ini ada
+                                    };
+                                    // Gunakan setDoc dengan merge: true. 
+                                    // Ini AMAN: tidak akan menimpa data jika sudah ada, tapi akan MEMBUAT jika tidak ada.
+                                    await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), defaultProfile, { merge: true });
+                                    console.log("Profile restore/create signal sent!");
+                                    // Listener onSnapshot akan otomatis mengambil data baru
+                                } catch (e) {
+                                    alert("Gagal memulihkan: " + e.message);
+                                }
+                            }}
+                            className="w-full bg-sky-500 text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-sky-600 transition transform active:scale-95"
+                        >
+                            Pulihkan Data Profil
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
     }
-
-    // Jika sudah login TAPI profil belum dimuat dari DB -> TAHAN DI LOADING
-    // INI SOLUSI MASALAH ANDA: Jangan biarkan masuk Home kalau profil masih null/undefined
-    if (!profile) return <div className="h-screen flex flex-col items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500 mb-2" size={32}/><p className="text-gray-400 text-xs font-bold animate-pulse">Sinkronisasi Profil...</p></div>;
-
-    // Jika profil sudah ada, tapi belum onboarding
-    if (!onboardingDone) return <OnboardingOverlay onFinish={()=>{localStorage.setItem('onboarding_complete','true'); setOnboardingDone(true);}} />;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
         <div>
+            {/* --- PENAMBAHAN ONBOARDING --- */}
+            {showOnboarding && <OnboardingComponent profile={profile} onClose={async () => {
+                try {
+                    // Set flag di Firestore agar tidak muncul lagi
+                    await updateDoc(doc(db, getPublicCollection('userProfiles'), profile.uid), { hasCompletedOnboarding: true });
+                    setShowOnboarding(false);
+                } catch (e) {
+                    console.error("Gagal update onboarding flag:", e);
+                    setShowOnboarding(false); // Tutup saja walau gagal update
+                }
+            }} />}
+            {/* --- AKHIR PENAMBAHAN --- */}
+
             <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
-                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 shadow-sm transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+                {/* --- UI IMPROVEMENT ---
+                // Backdrop blur lebih kuat, shadow lebih terlihat
+                */}
+                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 shadow-lg shadow-sky-100/30 transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+                
                 <main className={page!=='shorts'?'pt-16':''}>
                     {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
                     {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
                     {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
-                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
+                    
+                    {/* --- PENAMBAHAN: Prop setPage diteruskan --- */}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
+                    
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
+                    
+                    {/* --- PENAMBAHAN: Halaman Legal --- */}
+                    {page==='legal' && <LegalScreen setPage={setPage} />}
                 </main>
-                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                
+                {/* --- UI IMPROVEMENT ---
+                // Gradient, border atas, shadow lebih modern
+                */}
+                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-t from-white/95 to-white/90 backdrop-blur-2xl border-t border-white rounded-full px-6 py-3 shadow-2xl shadow-sky-200/60 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                
                 <PWAInstallPrompt />
             </div>
         </div>
