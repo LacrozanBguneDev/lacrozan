@@ -63,11 +63,10 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-// --- KUNCI VAPID BARU (FIX) ---
+// --- KUNCI VAPID BARU ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
 // --- KONFIGURASI FIREBASE ---
-// Menggunakan konfigurasi environment jika tersedia, atau fallback ke default
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -88,14 +87,14 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Inisialisasi Messaging (Hanya jika didukung browser)
+// Inisialisasi Messaging
 let messaging = null;
 try {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    console.log("Messaging skipped atau tidak didukung di environment ini");
+    console.log("Messaging skipped");
 }
 
 // ==========================================
@@ -117,7 +116,7 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// 2. Kompresi Gambar (FITUR STABILISASI UPLOAD)
+// 2. Kompresi Gambar (Ditingkatkan)
 const compressImage = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -127,8 +126,7 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Maksimal lebar 1080px (HD), tinggi menyesuaikan rasio
-                const MAX_WIDTH = 1080;
+                const MAX_WIDTH = 1080; // HD Quality
                 let width = img.width;
                 let height = img.height;
 
@@ -143,7 +141,6 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Ubah ke JPEG dengan kualitas 70% untuk efisiensi
                 ctx.canvas.toBlob((blob) => {
                     if (!blob) {
                         reject(new Error("Gagal kompresi gambar"));
@@ -154,7 +151,7 @@ const compressImage = (file) => {
                         lastModified: Date.now(),
                     });
                     resolve(newFile);
-                }, 'image/jpeg', 0.7); 
+                }, 'image/jpeg', 0.8); 
             };
             img.onerror = (error) => reject(error);
         };
@@ -185,24 +182,32 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// 5. Upload API (Faa API) - Stabilisasi dengan Retry
+// 5. Upload API (Faa API) - Stabilisasi dengan Retry & Timeout
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
     if(onProgress) onProgress(10);
     formData.append('file', file, file.name);
 
-    // Fungsi helper untuk delay
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
     try {
-        // Simulasi progress awal agar user tahu proses berjalan
-        for (let i = 10; i <= 60; i += 10) { 
+        // Fake progress visual
+        for (let i = 10; i <= 50; i += 10) { 
             if(onProgress) onProgress(i); 
             await delay(100); 
         }
 
-        const response = await fetch(apiUrl, { method: 'POST', body: formData });
+        // Fetch dengan timeout 30 detik
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch(apiUrl, { 
+            method: 'POST', 
+            body: formData,
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
         
         if(onProgress) onProgress(80);
         
@@ -223,7 +228,7 @@ const uploadToFaaAPI = async (file, onProgress) => {
     } catch (error) {
         if(onProgress) onProgress(0); 
         console.error("Upload Error:", error);
-        throw new Error('Gagal upload. Pastikan koneksi stabil atau coba gambar yang lebih kecil.');
+        throw new Error('Gagal upload. Koneksi server gambar sedang sibuk.');
     }
 };
 
@@ -324,18 +329,26 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- IMAGE WITH RETRY (SOLUSI STUCK LOADING) ---
-const ImageWithRetry = ({ src, alt, className }) => {
+// --- IMAGE WITH RETRY & FALLBACK (FIX UNTUK GAMBAR RUSAK) ---
+const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
     
     useEffect(() => {
+        // Reset state jika src berubah
+        setError(false);
+        setLoading(true);
+        setRetryCount(0);
+    }, [src]);
+
+    useEffect(() => {
         let timer;
         if (loading) {
+            // Timeout 15 detik, jika belum load anggap error
             timer = setTimeout(() => {
                 if (loading) { setLoading(false); setError(true); }
-            }, 15000); // Waktu timeout diperpanjang untuk koneksi lambat
+            }, 15000); 
         }
         return () => clearTimeout(timer);
     }, [loading, src]);
@@ -346,12 +359,21 @@ const ImageWithRetry = ({ src, alt, className }) => {
 
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
 
-    if (error) {
+    // JIKA ERROR, TAMPILKAN FALLBACK YANG BAGUS, JANGAN HANYA TEKS
+    if (error || !src) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className}`} style={{minHeight: '200px'}}>
-                <ImageOff size={24} className="mb-2 opacity-50"/>
-                <p className="text-[10px] mb-2 text-center px-2">Gagal memuat</p>
-                <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Coba Lagi</button>
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`} style={{minHeight: className.includes('h-') ? undefined : '200px'}}>
+                {fallbackText ? (
+                    <div className="w-full h-full flex items-center justify-center bg-sky-100 text-sky-600 font-black text-2xl uppercase">
+                        {fallbackText[0]}
+                    </div>
+                ) : (
+                    <>
+                        <ImageOff size={24} className="mb-2 opacity-50"/>
+                        <p className="text-[10px] mb-2 text-center px-2">Gagal memuat</p>
+                        <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Coba Lagi</button>
+                    </>
+                )}
             </div>
         );
     }
@@ -359,7 +381,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
     return (
         <div className={`relative ${className} overflow-hidden bg-gray-100`}>
             {loading && (
-                <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="animate-spin text-gray-400" size={24}/></div>
+                <div className="absolute inset-0 flex items-center justify-center z-10 bg-gray-50"><Loader2 className="animate-spin text-gray-400" size={20}/></div>
             )}
             <img 
                 src={displaySrc} 
@@ -580,21 +602,29 @@ const AuthScreen = ({ onLoginSuccess }) => {
         e.preventDefault(); setError(''); setIsLoading(true);
         try {
             if (isLogin) {
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
-                const snap = await getDoc(ref);
-                if(!snap.exists()) {
-                    await setDoc(ref, { username: email.split('@')[0], email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() });
-                } else {
-                    await updateDoc(ref, { lastSeen: serverTimestamp() });
-                }
+                await signInWithEmailAndPassword(auth, email, password);
+                // FIX: Jangan buat dokumen profile di sini untuk login. Biarkan hanya update lastSeen di main App.
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [], mood: '' });
+                
+                // FIX: BUAT PROFILE HANYA SEKALI DI SINI SAAT REGISTER
+                // Ini mencegah overwrite saat login biasa
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
+                    username: username.trim(), 
+                    email: email, 
+                    createdAt: serverTimestamp(), 
+                    uid: userCredential.user.uid, 
+                    photoURL: '', 
+                    following: [], 
+                    followers: [], 
+                    lastSeen: serverTimestamp(), 
+                    savedPosts: [], 
+                    mood: '' 
+                });
             }
             onLoginSuccess();
-        } catch (err) { setError("Login/Daftar gagal. Periksa data atau koneksi."); } finally { setIsLoading(false); }
+        } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
     };
 
     return (
@@ -730,7 +760,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}</div></div>
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
+                        <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
+                            <ImageWithRetry src={post.user?.photoURL} alt="User" className="w-full h-full object-cover" fallbackText={post.user?.username}/>
+                        </div>
+                    </div>
                     <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
                 <div className="flex gap-2">
@@ -750,7 +784,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
-                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
+                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer" />}
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
                             {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                             {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
@@ -898,7 +932,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
                 <div className="relative inline-block mb-4 mt-8">
                     <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
                         {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
-                        {profileData.photoURL ? <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{profileData.username?.[0]}</div>}
+                        <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover" fallbackText={profileData.username}/>
                     </div>
                     <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
                     {isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
@@ -1172,7 +1206,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
                                                 <div className="relative">
                                                     <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
                                                         <div className="w-full h-full rounded-full bg-white overflow-hidden">
-                                                             {u.photoURL ? <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-sky-500 text-lg">{u.username?.[0]?.toUpperCase()}</div>}
+                                                             <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover" fallbackText={u.username}/>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1204,7 +1238,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
                                     <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
                                         <div className="flex items-center gap-2 mb-3">
                                             <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
-                                                {p.user?.photoURL ? <img src={p.user.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-[10px] text-gray-500">{p.user?.username?.[0]}</div>}
+                                                <ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/>
                                             </div>
                                             <span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span>
                                             <span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span>
@@ -1251,7 +1285,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- 11. APP UTAMA ---
+// --- 11. APP UTAMA (CORE LOGIC - FIXED) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1290,8 +1324,52 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    useEffect(() => onAuthStateChanged(auth, u => { if(u) { setUser(u); updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); requestNotificationPermission(u.uid); } else { setUser(null); setProfile(null); } }), []);
-    useEffect(() => { if(!user) return; if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home'); const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => s.exists() ? setProfile({...s.data(), uid:user.uid, email:user.email}) : setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {username:user.email.split('@')[0], email:user.email, uid:user.uid, following:[], followers:[], photoURL:'', lastSeen: serverTimestamp(), savedPosts: []})); const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); const uids = [...new Set(raw.map(r=>r.userId))]; const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u)))); const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()}); setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user}))); }); const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})))); const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); }; }, [user]);
+    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
+    useEffect(() => {
+        const unsubscribeAuth = onAuthStateChanged(auth, u => {
+            if(u) {
+                setUser(u);
+                // Update lastSeen saja, JANGAN buat profile baru di sini
+                updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                requestNotificationPermission(u.uid);
+            } else {
+                setUser(null);
+                setProfile(null);
+            }
+        });
+        return () => unsubscribeAuth();
+    }, []);
+
+    useEffect(() => {
+        if(!user) return;
+        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
+        
+        // HANYA BACA PROFILE, JANGAN MENULIS (setDoc) DI SINI
+        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
+            if (s.exists()) {
+                setProfile({...s.data(), uid:user.uid, email:user.email});
+            } else {
+                // Jika profile tidak ditemukan (kasus langka), biarkan null atau handle manual
+                // Jangan otomatis setDoc agar tidak menimpa data yg mungkin sedang loading
+                console.warn("Profile belum siap atau tidak ditemukan.");
+            }
+        });
+
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
+            const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+            const uids = [...new Set(raw.map(r=>r.userId))];
+            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
+            const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
+            const map = {};
+            snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
+            setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user})));
+        });
+
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
+        const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
+        
+        return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); };
+    }, [user]);
 
     const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
@@ -1299,7 +1377,7 @@ const App = () => {
     if (showSplash) return <SplashScreen />;
     if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
     if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
-    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
+    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] flex-col"><Loader2 className="animate-spin text-sky-500 mb-2"/><p className="text-xs text-gray-400">Memuat profil...</p></div>;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
