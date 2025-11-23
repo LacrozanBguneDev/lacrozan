@@ -198,9 +198,9 @@ const uploadToFaaAPI = async (file, onProgress) => {
             await delay(100); 
         }
 
-        // Fetch dengan timeout 30 detik
+        // Fetch dengan timeout 60 detik (lebih lama untuk koneksi lambat)
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         const response = await fetch(apiUrl, { 
             method: 'POST', 
@@ -329,66 +329,79 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- IMAGE WITH RETRY & FALLBACK (FIX UNTUK GAMBAR RUSAK) ---
+// --- IMAGE WITH INFINITE RETRY (LOGIKA BARU: PANTANG MENYERAH) ---
+// Ini fitur sesuai request kamu: Jika gagal, coba lagi URL yg SAMA sampai bisa.
 const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
-    const [error, setError] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [retryCount, setRetryCount] = useState(0);
-    
+    const [status, setStatus] = useState('loading'); // loading, loaded, error
+    const [retryKey, setRetryKey] = useState(0); // Key untuk memaksa re-render elemen img
+    const [attempts, setAttempts] = useState(0);
+
+    // Reset jika URL berubah (misal ganti profil)
     useEffect(() => {
-        // Reset state jika src berubah
-        setError(false);
-        setLoading(true);
-        setRetryCount(0);
+        setStatus('loading');
+        setRetryKey(0);
+        setAttempts(0);
     }, [src]);
 
+    // Logika "Puter Terus Sampai Bisa"
     useEffect(() => {
-        let timer;
-        if (loading) {
-            // Timeout 15 detik, jika belum load anggap error
-            timer = setTimeout(() => {
-                if (loading) { setLoading(false); setError(true); }
-            }, 15000); 
+        let timeout;
+        if (status === 'error') {
+            // Tunggu 3 detik, lalu coba lagi
+            timeout = setTimeout(() => {
+                // Set status loading lagi untuk menampilkan spinner/indikator
+                // Increment retryKey agar React membuang elemen img lama dan buat yg baru
+                // Browser akan mencoba request ulang ke URL yang sama
+                setRetryKey(prev => prev + 1);
+                setStatus('loading'); 
+                setAttempts(prev => prev + 1);
+                console.log(`Mencoba memuat ulang gambar... Percobaan ke-${attempts + 1}`);
+            }, 3000);
         }
-        return () => clearTimeout(timer);
-    }, [loading, src]);
+        return () => clearTimeout(timeout);
+    }, [status, attempts]);
 
-    const handleRetry = (e) => {
-        e.stopPropagation(); setError(false); setLoading(true); setRetryCount(prev => prev + 1);
+    const handleSuccess = () => {
+        setStatus('loaded');
     };
 
-    const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
+    const handleError = () => {
+        setStatus('error');
+    };
 
-    // JIKA ERROR, TAMPILKAN FALLBACK YANG BAGUS, JANGAN HANYA TEKS
-    if (error || !src) {
+    // Jika tidak ada source, langsung fallback
+    if (!src) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`} style={{minHeight: className.includes('h-') ? undefined : '200px'}}>
-                {fallbackText ? (
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`}>
+                 {fallbackText ? (
                     <div className="w-full h-full flex items-center justify-center bg-sky-100 text-sky-600 font-black text-2xl uppercase">
                         {fallbackText[0]}
                     </div>
-                ) : (
-                    <>
-                        <ImageOff size={24} className="mb-2 opacity-50"/>
-                        <p className="text-[10px] mb-2 text-center px-2">Gagal memuat</p>
-                        <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Coba Lagi</button>
-                    </>
-                )}
+                ) : <ImageOff size={24} className="opacity-30"/>}
             </div>
         );
     }
 
     return (
-        <div className={`relative ${className} overflow-hidden bg-gray-100`}>
-            {loading && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 bg-gray-50"><Loader2 className="animate-spin text-gray-400" size={20}/></div>
+        <div className={`relative ${className} overflow-hidden bg-gray-50`}>
+            {/* Tampilkan Loading Spinner SELAMA belum loaded (termasuk saat retrying) */}
+            {status !== 'loaded' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 backdrop-blur-sm transition-all duration-300">
+                    <Loader2 className="animate-spin text-sky-500 mb-2" size={20}/>
+                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Menghubungkan...</span>}
+                </div>
             )}
+            
+            {/* Elemen Gambar Utama */}
+            {/* key={retryKey} adalah RAHASIA-nya. Saat key berubah, React menghancurkan img lama dan pasang baru. */}
+            {/* Ini memaksa browser fetch ulang tanpa ubah URL. */}
             <img 
-                src={displaySrc} 
+                key={retryKey} 
+                src={src} 
                 alt={alt} 
-                className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setError(true); }}
+                className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity duration-500`}
+                onLoad={handleSuccess}
+                onError={handleError}
                 loading="lazy"
                 referrerPolicy="no-referrer"
                 crossOrigin="anonymous"
