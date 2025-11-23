@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // ==========================================
 
 // Import Firebase Core & Services
+// Pastikan library firebase sudah terinstall di project (npm install firebase)
 import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
@@ -38,10 +39,10 @@ import {
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI (Messaging)
-// Menggunakan try-catch block untuk mencegah crash di browser yang tidak support SW
+// Menggunakan try-catch block untuk mencegah crash di browser yang tidak support SW atau HTTP biasa
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
-// Import Icons (Lucide React) - Lengkap
+// Import Icons (Lucide React) - Sangat Lengkap untuk UI Modern
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -52,10 +53,10 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    FileAudio, AlertOctagon // Icon tambahan untuk Audio Error
+    FileAudio, AlertOctagon, Download, Upload
 } from 'lucide-react';
 
-// Atur Log Level Firebase ke Silent agar console bersih
+// Atur Log Level Firebase ke Silent agar console bersih dari warning internal
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL & KONFIGURASI ---
@@ -67,9 +68,11 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KUNCI VAPID (DARI USER) ---
+// Kunci ini digunakan untuk identifikasi server pengirim notifikasi
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
 // --- KONFIGURASI FIREBASE ---
+// Menggunakan fallback configuration jika environment variable tidak tersedia
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -89,29 +92,32 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 // Inisialisasi Messaging dengan Safety Check
+// Ini penting agar aplikasi tidak crash putih (blank screen) jika dibuka di browser non-standar
 let messaging = null;
 try {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    console.warn("Firebase Messaging skipped.");
+    console.warn("Firebase Messaging tidak didukung di browser ini atau konteks tidak aman (HTTP).");
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// 1. Request Izin & Simpan Token (Fix Stability)
+// 1. Request Izin & Simpan Token (Fitur Notifikasi V2)
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
     
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
+            console.log("Izin notifikasi diberikan.");
             // Dapatkan Token Unik HP ini menggunakan VAPID Key User
             const token = await getToken(messaging, { vapidKey: VAPID_KEY });
             if (token) {
+                // Simpan token ke database user agar server bisa mengirim pesan nanti
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
                 await updateDoc(userRef, { 
                     fcmTokens: arrayUnion(token),
@@ -120,27 +126,31 @@ const requestNotificationPermission = async (userId) => {
                 });
                 console.log("Token Push Notifikasi tersimpan aman.");
             }
+        } else {
+            console.log("Izin notifikasi ditolak pengguna.");
         }
     } catch (error) {
         console.error("Gagal request notifikasi:", error);
     }
 };
 
-// 2. Kompresi Gambar (Client-Side)
-// Mencegah upload gagal karena file terlalu besar & mempercepat loading
+// 2. Kompresi Gambar (Client-Side Compression - Fitur Penting)
+// Mencegah upload gagal karena file terlalu besar & mempercepat loading bagi pengguna lain
 const compressImage = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
+        
         reader.onload = (event) => {
             const img = new Image();
             img.src = event.target.result;
+            
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 1080; // Standard HD Width
+                const MAX_WIDTH = 1080; // Standard HD Width yang cukup bagus tapi ringan
                 const scaleSize = MAX_WIDTH / img.width;
                 
-                // Jika gambar kecil, jangan di-scale up
+                // Jika gambar kecil, jangan di-scale up (pecah nanti)
                 if (scaleSize > 1) {
                     canvas.width = img.width;
                     canvas.height = img.height;
@@ -152,6 +162,7 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 
+                // Ubah ke JPEG dengan kualitas 80% (Cukup bagus untuk sosmed)
                 ctx.canvas.toBlob((blob) => {
                     if (!blob) {
                         reject(new Error("Gagal kompresi gambar"));
@@ -162,15 +173,17 @@ const compressImage = (file) => {
                         lastModified: Date.now(),
                     });
                     resolve(newFile);
-                }, 'image/jpeg', 0.8); // Kualitas 80%
+                }, 'image/jpeg', 0.8); 
             };
+            
             img.onerror = (error) => reject(error);
         };
+        
         reader.onerror = (error) => reject(error);
     });
 };
 
-// 3. Algoritma Acak
+// 3. Algoritma Acak (Fisher-Yates Shuffle)
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -184,6 +197,7 @@ const shuffleArray = (array) => {
 
 // 4. Sistem Kirim Notifikasi (Database Trigger)
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
+    // Mencegah notifikasi spam ke diri sendiri
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     
     try {
@@ -192,7 +206,7 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
             fromUserId: fromUser.uid,
             fromUsername: fromUser.username,
             fromPhoto: fromUser.photoURL || '',
-            type: type,
+            type: type, // 'like', 'comment', 'follow', 'system', 'bookmark'
             message: message,
             postId: postId,
             isRead: false,
@@ -204,14 +218,17 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
 };
 
 // 5. Upload API (Faa API - V3 Stabil)
+// Fungsi ini menghandle upload dengan retry logic dan error handling yang lebih baik
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
+    
+    // Reset progress bar
     onProgress(0);
     formData.append('file', file, file.name);
 
     try {
-        // Simulasi progress
+        // Simulasi progress agar user tidak bosan menunggu
         for (let i = 0; i <= 60; i += 10) {
             onProgress(i);
             await new Promise(resolve => setTimeout(resolve, 50)); 
@@ -220,53 +237,87 @@ const uploadToFaaAPI = async (file, onProgress) => {
         const response = await fetch(apiUrl, { method: 'POST', body: formData });
         onProgress(80);
 
-        if (!response.ok) throw new Error(`Server Upload Error: ${response.status}`);
+        if (!response.ok) {
+            throw new Error(`Server Upload Error: ${response.status}`);
+        }
         
         const data = await response.json();
         onProgress(100);
         
-        // Penanganan Respon API
+        // Penanganan Respon API yang fleksibel
         if (data && data.url) {
             let secureUrl = data.url;
-            if (secureUrl.startsWith('http://')) secureUrl = secureUrl.replace('http://', 'https://');
+            // Paksa HTTPS
+            if (secureUrl.startsWith('http://')) {
+                secureUrl = secureUrl.replace('http://', 'https://');
+            }
             return secureUrl;
         } else if (data && data.result && data.result.url) {
              return data.result.url;
         } else {
-            throw new Error('Format respon API tidak dikenali.');
+            throw new Error('Format respon API tidak dikenali atau gagal.');
         }
     } catch (error) {
         onProgress(0); 
-        throw new Error('Gagal upload. File mungkin terlalu besar atau server sibuk.');
+        console.error('Upload Error:', error);
+        throw new Error('Gagal upload. File mungkin terlalu besar atau server sedang sibuk.');
     }
 };
 
-// 6. Formatter Waktu
+// 6. Formatter Waktu (Relative Time)
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
+    
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
     const seconds = Math.floor((now - date) / 1000);
-    const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const fullDate = date.toLocaleDateString('id-ID', { 
+        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    });
+
     if (seconds > 86400) return { relative: fullDate, full: fullDate };
     if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
+    
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return { relative: `${minutes} menit lalu`, full: fullDate };
+    
     const hours = Math.floor(minutes / 60);
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 7. Detektor Media Embed
+// 7. Detektor Media Embed (YouTube / TikTok / Audio / Image)
 const getMediaEmbed = (url) => {
     if (!url) return null;
+    
+    // YouTube Link Detector
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
-    if (youtubeMatch) { return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, id: youtubeMatch[1] }; }
-    if (url.includes('tiktok.com') || url.includes('instagram.com')) { return { type: 'link', embedUrl: url, displayUrl: url }; }
-    if (/\.(mp3|wav|ogg|m4a)$/i.test(url)) { return { type: 'audio_file', url: url }; }
+    if (youtubeMatch) {
+        return { 
+            type: 'youtube', 
+            embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, 
+            id: youtubeMatch[1] 
+        };
+    }
+    
+    // TikTok & Instagram Link
+    if (url.includes('tiktok.com') || url.includes('instagram.com')) {
+        return { 
+            type: 'link', 
+            embedUrl: url, 
+            displayUrl: url 
+        };
+    }
+    
+    // Audio File Detection (MP3, WAV, OGG)
+    if (/\.(mp3|wav|ogg|m4a)$/i.test(url)) {
+        return { type: 'audio_file', url: url };
+    }
+
     return null;
 };
 
-// 8. Kalkulator Reputasi
+// 8. Kalkulator Reputasi & Badge
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -287,20 +338,21 @@ const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
     const diff = Date.now() - last.getTime();
-    return diff < 10 * 60 * 1000; 
+    return diff < 10 * 60 * 1000; // Online jika aktif dalam 10 menit terakhir
 };
 
 // ==========================================
 // BAGIAN 3: KOMPONEN UI & WIDGETS
 // ==========================================
 
-// --- IMAGE WITH RETRY (SMART RELOAD V2) ---
-// Fitur: Auto Timeout, Manual Retry, No-Referrer
+// --- IMAGE WITH RETRY (SMART RELOAD V2 - STABLE) ---
+// Fitur: Auto Timeout, Manual Retry, No-Referrer Policy (Penting untuk bypass blokir)
 const ImageWithRetry = ({ src, alt, className }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
     
+    // Timeout Mechanism: Jika 15 detik loading gak kelar, anggap error agar tidak stuck
     useEffect(() => {
         let timer;
         if (loading) {
@@ -322,7 +374,7 @@ const ImageWithRetry = ({ src, alt, className }) => {
         setRetryCount(prev => prev + 1);
     };
 
-    // Cache busting technique
+    // Cache busting technique: tambah query param timestamp
     const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
 
     if (error) {
@@ -354,14 +406,14 @@ const ImageWithRetry = ({ src, alt, className }) => {
                 onLoad={() => setLoading(false)}
                 onError={() => { setLoading(false); setError(true); }}
                 loading="lazy"
-                referrerPolicy="no-referrer"
+                referrerPolicy="no-referrer" // KUNCI PERBAIKAN: Mencegah server gambar memblokir request dari domain kita
                 crossOrigin="anonymous"
             />
         </div>
     );
 };
 
-// --- AUDIO PLAYER WITH RETRY (FITUR BARU & DIMINTA USER) ---
+// --- AUDIO PLAYER WITH RETRY (FITUR BARU V2) ---
 const AudioWithRetry = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -654,9 +706,9 @@ const LandingPage = ({ onGetStarted }) => {
         <div className="min-h-screen bg-[#F0F4F8] flex flex-col items-center justify-center px-6 py-12 font-sans relative overflow-hidden">
             <div className="relative z-10 text-center w-full max-w-md">
                 <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
-                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V25.0 FINAL</div></div>
+                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V26.0 STABLE</div></div>
                     <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
-                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial masa depan. Cepat, Ringan, dan Kaya Fitur! 🌍✨</p>
+                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial masa depan. Stabil, Cepat, dan Kaya Fitur! 🌍✨</p>
                     <div className="grid grid-cols-2 gap-3 mb-8">
                         <div className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-indigo-100 transition"><Gamepad2 size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Gamers</span></div>
                         <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-emerald-100 transition"><BookOpen size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Edukasi</span></div>
@@ -686,6 +738,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
+    // Fitur Bookmark
     const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
@@ -783,10 +836,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             
-                            {/* AUDIO WITH RETRY (FITUR BARU) */}
+                            {/* AUDIO PLAYER RETRY */}
                             {isAudio && <AudioWithRetry src={post.mediaUrl || embed.url} />}
 
-                            {/* IMAGE WITH RETRY (FIX LOADING) */}
+                            {/* IMAGE WITH RETRY */}
                             {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
                             
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
@@ -826,7 +879,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
             let finalUrl = form.url, type = 'text';
             let fileToUpload = form.file;
 
-            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD (FITUR PENTING UNTUK FOTO BESAR)
+            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD (FITUR PENTING)
             if (fileToUpload && fileToUpload.type.startsWith('image')) {
                 fileToUpload = await compressImage(fileToUpload);
             }
@@ -909,7 +962,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // Kompresi dulu foto profil
+                // Kompresi dulu foto profil agar cepat
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -953,12 +1006,11 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     );
 };
 
-// --- SEARCH SCREEN ---
+// --- SEARCH SCREEN (DIPASTIKAN AKTIF) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
     const [term, setTerm] = useState(''); const [tab, setTab] = useState('posts');
-    // FILTERING: Pastikan case insensitive dan aman dari null/undefined
-    const posts = allPosts.filter(p => (p.content?.toLowerCase() || '').includes(term.toLowerCase()) || (p.title?.toLowerCase() || '').includes(term.toLowerCase()));
-    const users = allUsers.filter(u => (u.username?.toLowerCase() || '').includes(term.toLowerCase()) && u.uid !== profile.uid);
+    const posts = allPosts.filter(p=>p.content?.toLowerCase().includes(term.toLowerCase()) || p.title?.toLowerCase().includes(term.toLowerCase()));
+    const users = allUsers.filter(u=>u.username?.toLowerCase().includes(term.toLowerCase()) && u.uid!==profile.uid);
     
     const checkStatus = (targetUid) => {
         const isFollowing = (profile.following || []).includes(targetUid);
@@ -1033,7 +1085,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- 11. APP UTAMA ---
+// --- 11. APP UTAMA (FINAL LOGIC + NAVIGASI FIX) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1062,7 +1114,6 @@ const App = () => {
                     const data = change.doc.data();
                     const now = Date.now();
                     const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
-                    // Jika notifikasi baru (< 10 detik yang lalu)
                     if (now - notifTime < 10000) { 
                         if (Notification.permission === "granted") {
                             new Notification(APP_NAME, { body: `${data.fromUsername} ${data.message}`, icon: APP_LOGO, tag: 'bgune-notif' });
@@ -1096,16 +1147,15 @@ const App = () => {
                     {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
                     {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
                     {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
-                    {/* HALAMAN SEARCH DIPASTIKAN ADA DISINI */}
+                    {/* HALAMAN SEARCH YANG HILANG KEMARIN SUDAH KEMBALI DISINI */}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
                     {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                 </main>
-                {/* NAVIGATION BAR - TOMBOL SEARCH ADA DISINI */}
+                {/* NAVIGASI LENGKAP */}
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
-                
                 <PWAInstallPrompt />
             </div>
         </div>
