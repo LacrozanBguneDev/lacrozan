@@ -34,7 +34,7 @@ import {
     limit,
     increment,
     writeBatch,
-    getDocs // --- DITAMBAHKAN untuk terminal ---
+    getDocs 
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -53,25 +53,18 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     BookOpen as BookOpenIcon,
     Sparkles as SparklesIcon,
-    // --- DITAMBAHKAN untuk terminal ---
-    HardDrive, Terminal, ServerCrash
+    HardDrive, Terminal, ServerCrash,
+    Download // --- ICON BARU DITAMBAHKAN ---
 } from 'lucide-react';
 
 // ==========================================
 // STABILISASI APLIKASI: Global Console Silencer
 // ==========================================
-
-// Simpan console asli
 const originalConsole = { ...console };
-
-// Nonaktifkan semua log secara default untuk pengguna biasa
-// Ini akan "menstabilkan" aplikasi dan membersihkan log eror tersembunyi
 console.log = () => {};
 console.warn = () => {};
 console.error = () => {};
 console.info = () => {};
-
-// Fungsi untuk mengaktifkan kembali console, HANYA untuk developer
 const enableDevConsole = () => {
     console.log = originalConsole.log;
     console.warn = originalConsole.warn;
@@ -81,7 +74,6 @@ const enableDevConsole = () => {
 };
 // ==========================================
 
-// SET LOG LEVEL FIRESTORE (INI SUDAH BENAR)
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -92,13 +84,9 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-// --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
 const globalImageCache = new Set();
-
-// --- KUNCI VAPID BARU ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
-// --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -122,20 +110,13 @@ try {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    originalConsole.log("Messaging skipped"); // Gunakan console asli
+    originalConsole.log("Messaging skipped");
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// --- FUNGSI BARU: Global Error Logger ---
-/**
- * Mencatat eror fatal ke Firestore agar bisa dilihat di Developer Dashboard.
- * @param {Error} error Objek eror
- * @param {React.ErrorInfo} errorInfo Info komponen stack
- * @param {string} userId ID pengguna yang mengalami
- */
 const logErrorToFirestore = async (error, errorInfo, userId = 'unknown') => {
     try {
         await addDoc(collection(db, getPublicCollection('globalErrors')), {
@@ -323,14 +304,15 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
-const PWAInstallPrompt = () => {
-    const [deferredPrompt, setDeferredPrompt] = useState(null);
+// --- DIPERBARUI: Menerima props dari App ---
+const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
+    // const [deferredPrompt, setDeferredPrompt] = useState(null); // --- DIHAPUS: State diangkat ke App
     const [showBanner, setShowBanner] = useState(false);
 
     useEffect(() => {
         const handler = (e) => {
             e.preventDefault();
-            setDeferredPrompt(e);
+            setDeferredPrompt(e); // --- DIPERBARUI: Set state milik parent (App)
             const lastDismiss = localStorage.getItem('pwa_dismissed');
             if (!lastDismiss || Date.now() - parseInt(lastDismiss) > 86400000) {
                 setShowBanner(true);
@@ -338,19 +320,20 @@ const PWAInstallPrompt = () => {
         };
         window.addEventListener('beforeinstallprompt', handler);
         return () => window.removeEventListener('beforeinstallprompt', handler);
-    }, []);
+    }, [setDeferredPrompt]); // Tambahkan setDeferredPrompt ke dependency array
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
-            setDeferredPrompt(null);
+            setDeferredPrompt(null); // --- DIPERBARUI: Set state milik parent (App)
             setShowBanner(false);
         }
     };
 
-    if (!showBanner) return null;
+    // --- DIPERBARUI: Sembunyikan banner jika deferredPrompt null (sudah di-install/ditolak)
+    if (!showBanner || !deferredPrompt) return null;
 
     return (
         <div className="fixed bottom-24 left-4 right-4 bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700">
@@ -536,19 +519,18 @@ const renderMarkdown = (text) => {
 };
 
 // ==========================================
-// BAGIAN 4: DASHBOARD DEVELOPER (DIPERBARUI)
+// BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
 const DeveloperDashboard = ({ onClose }) => {
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
-    const [allUsers, setAllUsers] = useState([]); // --- Diperlukan untuk terminal
+    const [allUsers, setAllUsers] = useState([]); 
     const [onlineUsers, setOnlineUsers] = useState([]);
     const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [broadcastMsg, setBroadcastMsg] = useState('');
     const [sendingBC, setSendingBC] = useState(false);
 
-    // --- STATE BARU UNTUK KONSOL & TERMINAL ---
-    const [devTab, setDevTab] = useState('stats'); // 'stats', 'errors', 'terminal'
+    const [devTab, setDevTab] = useState('stats'); 
     const [errorLogs, setErrorLogs] = useState([]);
     const [terminalCmd, setTerminalCmd] = useState('');
     const [terminalOutput, setTerminalOutput] = useState([
@@ -556,7 +538,6 @@ const DeveloperDashboard = ({ onClose }) => {
     ]);
     const [isExecuting, setIsExecuting] = useState(false);
     const terminalEndRef = useRef(null);
-    // --- AKHIR STATE BARU ---
 
     useEffect(() => {
         const fetchData = async () => {
@@ -568,7 +549,7 @@ const DeveloperDashboard = ({ onClose }) => {
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
             
             const usersList = usersSnap.docs.map(d => ({id: d.id, ...d.data()}));
-            setAllUsers(usersList); // Simpan daftar pengguna
+            setAllUsers(usersList); 
 
             const tenMinAgo = Date.now() - 10 * 60 * 1000;
             const active = usersList.filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
@@ -589,7 +570,6 @@ const DeveloperDashboard = ({ onClose }) => {
         };
         fetchData();
         
-        // Listener untuk Global Errors
         const qErrors = query(collection(db, getPublicCollection('globalErrors')), orderBy('timestamp', 'desc'), limit(50));
         const unsubErrors = onSnapshot(qErrors, (snapshot) => {
             setErrorLogs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -598,7 +578,6 @@ const DeveloperDashboard = ({ onClose }) => {
         return () => unsubErrors();
     }, []);
 
-    // Scroll ke bawah terminal
     useEffect(() => {
         terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [terminalOutput]);
@@ -607,7 +586,6 @@ const DeveloperDashboard = ({ onClose }) => {
         setTerminalOutput(prev => [...prev, { type, msg }]);
     };
 
-    // --- HANDLER BARU: Terminal ---
     const handleTerminalCommand = async (e) => {
         e.preventDefault();
         const cmd = terminalCmd.trim();
@@ -1656,7 +1634,7 @@ const LegalScreen = ({ setPage }) => {
 };
 
 // ==========================================
-// BAGIAN 11: ERROR BOUNDARY (BARU)
+// BAGIAN 11: ERROR BOUNDARY
 // ==========================================
 
 class ErrorBoundary extends React.Component {
@@ -1670,7 +1648,6 @@ class ErrorBoundary extends React.Component {
     }
 
     componentDidCatch(error, errorInfo) {
-        // Log eror ini ke database
         originalConsole.error("ErrorBoundary caught an error:", error, errorInfo);
         logErrorToFirestore(error, errorInfo, this.props.userId || 'unknown_user');
     }
@@ -1722,6 +1699,9 @@ const App = () => {
     const [profileLoadTimeout, setProfileLoadTimeout] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
     const profileTimerRef = useRef(null);
+
+    // --- STATE BARU: Untuk PWA Install Button ---
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
 
     useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => originalConsole.log('SW registered')).catch(err => originalConsole.log('SW failed')); } }, []);
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
@@ -1780,11 +1760,9 @@ const App = () => {
                 const profileData = s.data();
                 setProfile({...profileData, uid:user.uid, email:user.email});
 
-                // --- AKTIVASI DEV CONSOLE ---
                 if (profileData.email === DEVELOPER_EMAIL) {
                     enableDevConsole();
                 }
-                // ---
 
                 if (!profileData.hasCompletedOnboarding) {
                     setShowOnboarding(true);
@@ -1815,6 +1793,20 @@ const App = () => {
 
     const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
+
+    // --- HANDLER BARU: Untuk tombol PWA di Header ---
+    const handlePWAInstall = async () => {
+        if (!deferredPrompt) {
+            // Ini tidak seharusnya terjadi jika tombolnya terlihat, tapi sebagai cadangan
+            alert("Aplikasi sudah ter-install atau browser Anda tidak mendukung.");
+            return;
+        }
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setDeferredPrompt(null); // Sembunyikan tombol setelah install
+        }
+    };
 
     if (showSplash) return <SplashScreen />;
     if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
@@ -1869,7 +1861,6 @@ const App = () => {
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
-        // --- SELURUH APP DIBUNGKUS OLEH ERROR BOUNDARY ---
         <ErrorBoundary userId={profile.uid}>
             {showOnboarding && <OnboardingComponent profile={profile} onClose={async () => {
                 try {
@@ -1882,7 +1873,39 @@ const App = () => {
             }} />}
 
             <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
-                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 shadow-lg shadow-sky-100/30 transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+                {page!=='shorts' && ( 
+                    <header className="fixed top-0 w-full bg-white/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 shadow-lg shadow-sky-100/30 transition-colors duration-300">
+                        <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
+                            <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
+                            <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami">
+                                <Gift size={20}/>
+                            </a>
+                            
+                            {/* --- TOMBOL INSTALL PWA DITAMBAHKAN DI SINI --- */}
+                            {deferredPrompt && (
+                                <button 
+                                    onClick={handlePWAInstall}
+                                    className="p-2 bg-sky-50 text-sky-600 rounded-full shadow-sm hover:bg-sky-100 transition animate-in fade-in duration-300" 
+                                    title="Install Aplikasi"
+                                >
+                                    <Download size={20}/>
+                                </button>
+                            )}
+                            {/* --- AKHIR TOMBOL INSTALL PWA --- */}
+
+                            <button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative">
+                                <Bell size={20}/>
+                                {notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                            </button>
+                            <button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition">
+                                <LogOut size={20}/>
+                            </button>
+                        </div>
+                    </header> 
+                )}
                 
                 <main className={page!=='shorts'?'pt-16':''}>
                     {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
@@ -1901,7 +1924,8 @@ const App = () => {
                 
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-t from-white/95 to-white/90 backdrop-blur-2xl border-t border-white rounded-full px-6 py-3 shadow-2xl shadow-sky-200/60 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
                 
-                <PWAInstallPrompt />
+                {/* --- DIPERBARUI: Mengirim props ke PWAInstallPrompt --- */}
+                <PWAInstallPrompt deferredPrompt={deferredPrompt} setDeferredPrompt={setDeferredPrompt} />
             </div>
         </ErrorBoundary>
     );
