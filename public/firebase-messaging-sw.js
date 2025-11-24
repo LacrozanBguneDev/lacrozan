@@ -1,7 +1,8 @@
+// IMPORTS Wajib
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging-compat.js');
 
-// Masukkan Config Firebase KAMU di sini (Sama seperti di file React)
+// CONFIG FIREBASE
 firebase.initializeApp({
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -14,16 +15,38 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Ini yang menangani pesan saat Web Tertutup (Background)
+// Background notif (Firebase)
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
-    icon: 'https://n.uguu.se/qXDmMTZB.jpg', // Ganti icon app kamu
+  const n = payload.notification;
+  self.registration.showNotification(n.title, {
+    body: n.body,
+    icon: 'https://n.uguu.se/qXDmMTZB.jpg',
     badge: 'https://n.uguu.se/qXDmMTZB.jpg'
-  };
+  });
+});
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+// ======== Fitur PWA ========
+
+// Install SW
+self.addEventListener('install', () => {
+  console.log('[SW] Installed');
+});
+
+// Push Notif Manual
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  const data = event.data.json();
+  self.registration.showNotification(data.title, {
+    body: data.body,
+    icon: data.icon || 'https://n.uguu.se/qXDmMTZB.jpg',
+    badge: 'https://n.uguu.se/qXDmMTZB.jpg',
+    data: { url: data.click_action || '/' }
+  });
+});
+
+// Klik Notif
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data.url));
 });
