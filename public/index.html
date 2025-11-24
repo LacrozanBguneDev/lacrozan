@@ -46,7 +46,17 @@
 
 <script>
 window.addEventListener("load", () => {
-  navigator.serviceWorker.register('/firebase-messaging-sw.js');
+  // Cek apakah browser mendukung Service Worker
+  if ('serviceWorker' in navigator) {
+    // Daftarkan Service Worker utama Anda
+    navigator.serviceWorker.register('/service-worker.js')
+      .then(registration => {
+        console.log('Service Worker berhasil didaftarkan. Scope:', registration.scope);
+      })
+      .catch(error => {
+        console.error('Pendaftaran Service Worker gagal:', error);
+      });
+  }
 });
 </script>
 
