@@ -33,7 +33,8 @@ import {
     orderBy, 
     limit,
     increment,
-    writeBatch
+    writeBatch,
+    getDocs // --- DITAMBAHKAN untuk terminal ---
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -50,12 +51,37 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    // --- PENAMBAHAN ICON UNTUK FITUR BARU ---
-    BookOpen as BookOpenIcon, // Mengganti nama agar tidak konflik dengan nama komponen
-    Sparkles as SparklesIcon 
+    BookOpen as BookOpenIcon,
+    Sparkles as SparklesIcon,
+    // --- DITAMBAHKAN untuk terminal ---
+    HardDrive, Terminal, ServerCrash
 } from 'lucide-react';
 
-// SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
+// ==========================================
+// STABILISASI APLIKASI: Global Console Silencer
+// ==========================================
+
+// Simpan console asli
+const originalConsole = { ...console };
+
+// Nonaktifkan semua log secara default untuk pengguna biasa
+// Ini akan "menstabilkan" aplikasi dan membersihkan log eror tersembunyi
+console.log = () => {};
+console.warn = () => {};
+console.error = () => {};
+console.info = () => {};
+
+// Fungsi untuk mengaktifkan kembali console, HANYA untuk developer
+const enableDevConsole = () => {
+    console.log = originalConsole.log;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+    console.info = originalConsole.info;
+    originalConsole.log("Developer console diaktifkan.");
+};
+// ==========================================
+
+// SET LOG LEVEL FIRESTORE (INI SUDAH BENAR)
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -67,7 +93,6 @@ const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
-// Set ini menyimpan URL gambar yang SUDAH berhasil dimuat.
 const globalImageCache = new Set();
 
 // --- KUNCI VAPID BARU ---
@@ -97,12 +122,34 @@ try {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    console.log("Messaging skipped");
+    originalConsole.log("Messaging skipped"); // Gunakan console asli
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
+
+// --- FUNGSI BARU: Global Error Logger ---
+/**
+ * Mencatat eror fatal ke Firestore agar bisa dilihat di Developer Dashboard.
+ * @param {Error} error Objek eror
+ * @param {React.ErrorInfo} errorInfo Info komponen stack
+ * @param {string} userId ID pengguna yang mengalami
+ */
+const logErrorToFirestore = async (error, errorInfo, userId = 'unknown') => {
+    try {
+        await addDoc(collection(db, getPublicCollection('globalErrors')), {
+            userId: userId,
+            message: error.message || 'Unknown error',
+            stack: errorInfo ? errorInfo.componentStack : error.stack || 'No stack available',
+            timestamp: serverTimestamp(),
+            userAgent: navigator.userAgent
+        });
+        originalConsole.error("ERROR FATAL TERCATAT KE DB:", error);
+    } catch (dbError) {
+        originalConsole.error("GAGAL MENCATAT ERROR KE DB:", dbError);
+    }
+};
 
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
@@ -319,11 +366,7 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
-// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
-// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
 const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
-    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
     const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
     const [status, setStatus] = useState(initialState);
     const [retryKey, setRetryKey] = useState(0);
@@ -342,9 +385,7 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     useEffect(() => {
         let timeout;
         if (status === 'error') {
-            // Retry otomatis setiap 4 detik jika gagal
             timeout = setTimeout(() => {
-                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
                 if (globalImageCache.has(src)) {
                     setStatus('loaded');
                 } else {
@@ -358,7 +399,7 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     }, [status, src]);
 
     const handleSuccess = () => {
-        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
+        globalImageCache.add(src); 
         setStatus('loaded');
     };
 
@@ -495,15 +536,27 @@ const renderMarkdown = (text) => {
 };
 
 // ==========================================
-// BAGIAN 4: DASHBOARD DEVELOPER
+// BAGIAN 4: DASHBOARD DEVELOPER (DIPERBARUI)
 // ==========================================
 const DeveloperDashboard = ({ onClose }) => {
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
+    const [allUsers, setAllUsers] = useState([]); // --- Diperlukan untuk terminal
     const [onlineUsers, setOnlineUsers] = useState([]);
     const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [broadcastMsg, setBroadcastMsg] = useState('');
     const [sendingBC, setSendingBC] = useState(false);
+
+    // --- STATE BARU UNTUK KONSOL & TERMINAL ---
+    const [devTab, setDevTab] = useState('stats'); // 'stats', 'errors', 'terminal'
+    const [errorLogs, setErrorLogs] = useState([]);
+    const [terminalCmd, setTerminalCmd] = useState('');
+    const [terminalOutput, setTerminalOutput] = useState([
+        { type: 'info', msg: `Selamat datang di ${APP_NAME} Terminal. Ketik '/help' untuk melihat perintah.` }
+    ]);
+    const [isExecuting, setIsExecuting] = useState(false);
+    const terminalEndRef = useRef(null);
+    // --- AKHIR STATE BARU ---
 
     useEffect(() => {
         const fetchData = async () => {
@@ -513,8 +566,13 @@ const DeveloperDashboard = ({ onClose }) => {
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const rawPosts = postsSnap.docs.map(d => d.data());
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+            
+            const usersList = usersSnap.docs.map(d => ({id: d.id, ...d.data()}));
+            setAllUsers(usersList); // Simpan daftar pengguna
+
             const tenMinAgo = Date.now() - 10 * 60 * 1000;
-            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
+            const active = usersList.filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
+            
             const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
             const last7Days = [];
             for (let i = 6; i >= 0; i--) {
@@ -530,57 +588,225 @@ const DeveloperDashboard = ({ onClose }) => {
             setLoading(false);
         };
         fetchData();
+        
+        // Listener untuk Global Errors
+        const qErrors = query(collection(db, getPublicCollection('globalErrors')), orderBy('timestamp', 'desc'), limit(50));
+        const unsubErrors = onSnapshot(qErrors, (snapshot) => {
+            setErrorLogs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        return () => unsubErrors();
     }, []);
+
+    // Scroll ke bawah terminal
+    useEffect(() => {
+        terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [terminalOutput]);
+
+    const addOutput = (type, msg) => {
+        setTerminalOutput(prev => [...prev, { type, msg }]);
+    };
+
+    // --- HANDLER BARU: Terminal ---
+    const handleTerminalCommand = async (e) => {
+        e.preventDefault();
+        const cmd = terminalCmd.trim();
+        if (!cmd || isExecuting) return;
+
+        addOutput('input', `> ${cmd}`);
+        setTerminalCmd('');
+        setIsExecuting(true);
+
+        try {
+            if (cmd === '/help') {
+                addOutput('info', "Perintah Tersedia:");
+                addOutput('info', "  /help                 - Menampilkan pesan ini");
+                addOutput('info', "  /list_users           - Melihat daftar semua pengguna");
+                addOutput('info', "  /clear_errors         - Menghapus semua log eror");
+                addOutput('info', "  /clear_posts_by_user [email] - (BAHAYA) Hapus semua post dari email");
+            } 
+            else if (cmd === '/list_users') {
+                addOutput('info', `Menampilkan ${allUsers.length} pengguna:`);
+                allUsers.forEach(u => {
+                    addOutput('info', `  - ${u.username} (${u.email}) - Followers: ${u.followers?.length || 0}`);
+                });
+            }
+            else if (cmd === '/clear_errors') {
+                if (!confirm("Hapus semua log eror?")) throw new Error("Operasi dibatalkan.");
+                addOutput('warn', "Menghapus semua log eror...");
+                const q = query(collection(db, getPublicCollection('globalErrors')));
+                const snapshot = await getDocs(q);
+                const batch = writeBatch(db);
+                snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+                addOutput('success', `Berhasil menghapus ${snapshot.size} log eror.`);
+            }
+            else if (cmd.startsWith('/clear_posts_by_user ')) {
+                const email = cmd.split(' ')[1];
+                if (!email) throw new Error("Email pengguna harus diisi. Cth: /clear_posts_by_user test@gmail.com");
+
+                const userToClean = allUsers.find(u => u.email === email);
+                if (!userToClean) throw new Error(`Pengguna dengan email ${email} tidak ditemukan.`);
+
+                if (!confirm(`PERINGATAN: Anda akan menghapus SEMUA postingan dari ${userToClean.username} (${email}). Ini tidak bisa dibatalkan.`)) {
+                    throw new Error("Operasi dibatalkan.");
+                }
+
+                addOutput('warn', `Mencari semua postingan dari ${userToClean.username} (UID: ${userToClean.id})...`);
+                const qPosts = query(collection(db, getPublicCollection('posts')), where('userId', '==', userToClean.id));
+                const snapshot = await getDocs(qPosts);
+                
+                if (snapshot.empty) {
+                    addOutput('info', `Pengguna ${userToClean.username} tidak memiliki postingan.`);
+                } else {
+                    addOutput('warn', `Menghapus ${snapshot.size} postingan...`);
+                    const batch = writeBatch(db);
+                    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    addOutput('success', `Berhasil menghapus ${snapshot.size} postingan dari ${userToClean.username}.`);
+                }
+            }
+            else {
+                throw new Error(`Perintah tidak dikenali: ${cmd}. Ketik '/help'.`);
+            }
+        } catch (error) {
+            addOutput('error', `Error: ${error.message}`);
+        } finally {
+            setIsExecuting(false);
+        }
+    };
+
 
     const handleBroadcast = async () => {
         if(!broadcastMsg.trim()) return;
         if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
         setSendingBC(true);
         try {
-            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
-            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), {
-                toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
+            const promises = allUsers.map(u => addDoc(collection(db, getPublicCollection('notifications')), {
+                toUserId: u.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
             }));
             await Promise.all(promises);
             alert("Pengumuman berhasil dikirim!"); setBroadcastMsg('');
         } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
     };
 
+    const DevTabs = () => (
+        <div className="flex p-1 bg-gray-200 rounded-xl mb-6 shadow-inner">
+            <button onClick={() => setDevTab('stats')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${devTab === 'stats' ? 'bg-white text-sky-600 shadow-md' : 'text-gray-600'}`}>
+                <BarChart3 size={16}/> Statistik
+            </button>
+            <button onClick={() => setDevTab('errors')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${devTab === 'errors' ? 'bg-white text-red-600 shadow-md' : 'text-gray-600'}`}>
+                <ServerCrash size={16}/> Error Log <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded-full">{errorLogs.length}</span>
+            </button>
+            <button onClick={() => setDevTab('terminal')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${devTab === 'terminal' ? 'bg-white text-blue-600 shadow-md' : 'text-gray-600'}`}>
+                <Terminal size={16}/> Terminal
+            </button>
+        </div>
+    );
+
+    const renderTabContent = () => {
+        if (devTab === 'stats') {
+            return (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold">{stats.users}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p></div>
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
+                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                        <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
+                        <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                        <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
+                        <button onClick={async () => { if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; } const permission = await Notification.requestPermission(); if (permission === "granted") { new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO }); } else { alert("Izin notifikasi ditolak oleh user."); } }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
+                        <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
+                        <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">{onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => ( <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div><div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div><div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div></div> ))}</div>
+                    </div>
+                </div>
+            );
+        }
+        if (devTab === 'errors') {
+            return (
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-red-100 animate-in fade-in duration-300">
+                    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><ServerCrash size={18} className="text-red-500"/> Global Error Log</h3>
+                    {errorLogs.length === 0 ? (
+                        <p className="text-gray-400 text-sm text-center py-10">Tidak ada eror tercatat. Aplikasi stabil! 🎉</p>
+                    ) : (
+                        <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scrollbar">
+                            {errorLogs.map(log => (
+                                <details key={log.id} className="bg-red-50 p-3 rounded-xl border border-red-100 cursor-pointer">
+                                    <summary className="text-xs font-bold text-red-700 flex justify-between items-center">
+                                        <span>{log.message}</span>
+                                        <span className="text-red-400 text-[10px]">{formatTimeAgo(log.timestamp).relative}</span>
+                                    </summary>
+                                    <div className="mt-3 pt-3 border-t border-red-100">
+                                        <p className="text-[10px] text-gray-600 font-medium mb-1"><strong className="text-gray-800">User:</strong> {log.userId}</p>
+                                        <p className="text-[10px] text-gray-600 font-medium mb-2"><strong className="text-gray-800">Device:</strong> {log.userAgent}</p>
+                                        <pre className="text-[10px] text-red-900 bg-red-100 p-2 rounded overflow-auto font-mono">{log.stack}</pre>
+                                    </div>
+                                </details>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+        if (devTab === 'terminal') {
+            return (
+                <div className="bg-gray-900 p-4 rounded-2xl shadow-lg border border-gray-700 animate-in fade-in duration-300">
+                    <div className="h-80 bg-black rounded-lg p-3 overflow-y-auto custom-scrollbar-dark font-mono text-sm space-y-2 mb-3">
+                        {terminalOutput.map((out, i) => (
+                            <p key={i} className={`w-full break-words ${
+                                out.type === 'error' ? 'text-red-400' :
+                                out.type === 'success' ? 'text-green-400' :
+                                out.type === 'warn' ? 'text-yellow-400' :
+                                out.type === 'input' ? 'text-sky-300' :
+                                'text-gray-300'
+                            }`}>
+                                {out.msg}
+                            </p>
+                        ))}
+                        <div ref={terminalEndRef} />
+                    </div>
+                    <form onSubmit={handleTerminalCommand} className="flex gap-2">
+                        <span className="text-sky-400 font-bold text-lg p-2">$</span>
+                        <input 
+                            value={terminalCmd}
+                            onChange={(e) => setTerminalCmd(e.target.value)}
+                            disabled={isExecuting}
+                            placeholder="Ketik perintah... (cth: /help)"
+                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 outline-none focus:ring-2 focus:ring-sky-500"
+                            autoComplete="off"
+                        />
+                        <button type="submit" disabled={isExecuting} className="bg-sky-500 text-white px-4 rounded-lg font-bold text-sm hover:bg-sky-600 disabled:opacity-50">
+                            {isExecuting ? <Loader2 className="animate-spin" size={20}/> : "Run"}
+                        </button>
+                    </form>
+                </div>
+            );
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-gray-100 z-[60] overflow-y-auto p-4 pb-20">
             <div className="max-w-2xl mx-auto">
-                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button></div>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><HardDrive className="text-sky-600"/> Developer Panel</h2>
+                    <button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button>
+                </div>
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold">{stats.users}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p></div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
-                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
-                        </div>
-                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
-                            <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
-                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
-                        </div>
-                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
-                            <button onClick={async () => {
-                                if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; }
-                                const permission = await Notification.requestPermission();
-                                if (permission === "granted") { 
-                                    new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO });
-                                } else { alert("Izin notifikasi ditolak oleh user."); }
-                            }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
-                        </div>
-                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
-                            <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
-                        </div>
-                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
-                            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">{onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => ( <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div><div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div><div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div></div> ))}</div>
-                        </div>
-                    </div>
+                    <>
+                        <DevTabs />
+                        {renderTabContent()}
+                    </>
                 )}
             </div>
         </div>
@@ -606,14 +832,8 @@ const AuthScreen = ({ onLoginSuccess }) => {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
-                // Cek username unik (opsional tapi bagus)
-                // const q = query(collection(db, getPublicCollection('userProfiles')), where('username', '==', username.trim()));
-                // const userCheck = await getDocs(q);
-                // if (!userCheck.empty) throw new Error("Username sudah dipakai!");
-
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 
-                // --- PENTING: TAMBAHKAN hasCompletedOnboarding ---
                 await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
                     username: username.trim(), 
                     email: email, 
@@ -624,12 +844,10 @@ const AuthScreen = ({ onLoginSuccess }) => {
                     followers: [], 
                     lastSeen: serverTimestamp(), 
                     savedPosts: [], 
-                    mood: 'Baru di ' + APP_NAME + '!', // Mood default
-                    hasCompletedOnboarding: false // Flag untuk onboarding
+                    mood: 'Baru di ' + APP_NAME + '!',
+                    hasCompletedOnboarding: false
                 });
             }
-            // onLoginSuccess tidak ada di props, tapi biarkan saja
-            // onAuthStateChanged akan menangani sisanya
         } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
     };
 
@@ -678,7 +896,6 @@ const LandingPage = ({ onGetStarted }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-// --- POST ITEM (LENGKAP DENGAN UI BARU) ---
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper }) => {
     const [liked, setLiked] = useState(post.likes?.includes(currentUserId));
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -758,10 +975,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
-    // --- UI IMPROVEMENT ---
-    // Bayangan lebih modern: shadow-xl shadow-sky-100/70
-    // Transisi saat hover: hover:shadow-2xl hover:shadow-sky-200/50
-    // Tombol diubah jadi pills (lihat di bawah)
     return (
         <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-xl shadow-sky-100/70 border border-white relative overflow-hidden group transition-all duration-300 hover:shadow-2xl hover:shadow-sky-200/50">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
@@ -790,9 +1003,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
                     <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
-                    {/* --- UI IMPROVEMENT ---
-                    // Efek hover: group-hover:scale-[1.03]
-                    */}
                     {(isImage || isVideo || isAudio || embed) && (
                         <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none transition-transform duration-300 group-hover:scale-[1.03]" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
@@ -806,9 +1016,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 </>
             )}
 
-            {/* --- UI IMPROVEMENT ---
-            // Tombol diubah menjadi 'pills' (pil) yang lebih modern
-            */}
             <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
                 <button 
                     onClick={handleLike} 
@@ -846,7 +1053,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// --- CREATE POST (DENGAN KOMPRESI & AUDIO) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
@@ -858,7 +1064,6 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
             let finalUrl = form.url, type = 'text';
             let fileToUpload = form.file;
 
-            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD
             if (fileToUpload && fileToUpload.type.startsWith('image')) {
                 console.log("Mengompres gambar...");
                 fileToUpload = await compressImage(fileToUpload);
@@ -917,7 +1122,6 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN (DENGAN UI BARU & LINK LEGAL) ---
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, setPage }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
@@ -943,7 +1147,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // Kompresi dulu foto profil agar cepat
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -963,9 +1166,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            {/* --- UI IMPROVEMENT ---
-            // Bayangan lebih modern: shadow-xl shadow-sky-100/70
-            */}
             <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-xl shadow-sky-100/70 border border-white mb-8 mx-4 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
@@ -982,9 +1182,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
                 {!isSelf && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
                 
-                {/* --- UI IMPROVEMENT ---
-                // Statistik dibuat lebih menarik
-                */}
                 <div className="grid grid-cols-3 gap-3 mt-6 border-t border-gray-100 pt-6">
                     <div className="bg-gray-50/70 border border-gray-100/0 rounded-2xl p-3">
                         <span className="font-bold text-xl block">{followersCount}</span>
@@ -1000,9 +1197,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
                     </div>
                 </div>
 
-                {/* --- PENAMBAHAN ---
-                // Tombol untuk membuka Halaman Legal
-                */}
                 {isSelf && (
                     <button 
                         onClick={() => setPage('legal')} 
@@ -1020,7 +1214,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
     );
 };
 
-// --- TRENDING TAGS ---
 const TrendingTags = ({ posts }) => {
     const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
     if (tags.length === 0) return null;
@@ -1029,7 +1222,6 @@ const TrendingTags = ({ posts }) => {
     );
 };
 
-// --- HOME SCREEN ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
@@ -1112,7 +1304,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
-// --- SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
     useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
@@ -1172,7 +1363,6 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     );
 };
 
-// --- NOTIFICATION SCREEN ---
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     useEffect(() => {
@@ -1183,14 +1373,11 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
-// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
     const [queryText, setQueryText] = useState('');
-    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
+    const [searchTerm, setSearchTerm] = useState(''); 
     const [tab, setTab] = useState('users');
 
-    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
-    // Ini mencegah render berlebihan saat mengetik cepat
     useEffect(() => {
         const delayDebounceFn = setTimeout(() => {
             setSearchTerm(queryText);
@@ -1204,7 +1391,6 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
         const term = searchTerm.toLowerCase();
         
         return allUsers.filter(u => {
-            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
             if (!u || !u.username) return false;
             return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
         });
@@ -1215,10 +1401,9 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
         const term = searchTerm.toLowerCase();
 
         return allPosts.filter(p => {
-            // SAFE CHECK: Pastikan p dan kontennya ada
             const contentMatch = p.content && p.content.toLowerCase().includes(term);
             const titleMatch = p.title && p.title.toLowerCase().includes(term);
-            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
+            const tagMatch = p.category && p.category.toLowerCase().includes(term); 
             
             return contentMatch || titleMatch || tagMatch;
         });
@@ -1340,7 +1525,6 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
     );
 };
 
-// --- SINGLE POST VIEW ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
@@ -1355,13 +1539,9 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 };
 
 // ======================================================
-// BAGIAN 10: LAYAR LEGAL & ONBOARDING (FITUR BARU)
+// BAGIAN 10: LAYAR LEGAL & ONBOARDING
 // ======================================================
 
-/**
- * Komponen Onboarding untuk pengguna baru.
- * Muncul sebagai modal overlay.
- */
 const OnboardingComponent = ({ profile, onClose }) => {
     return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-500">
@@ -1389,14 +1569,9 @@ const OnboardingComponent = ({ profile, onClose }) => {
     );
 };
 
-/**
- * Komponen Halaman Legal (Privacy, Terms, dll.)
- * Diakses dari halaman profil.
- */
 const LegalScreen = ({ setPage }) => {
     const [tab, setTab] = useState('terms');
     
-    // Konten dinamis berdasarkan tab yang dipilih
     const LegalContent = () => {
         switch(tab) {
             case 'privacy': return (
@@ -1472,7 +1647,6 @@ const LegalScreen = ({ setPage }) => {
                     <button onClick={() => setTab('cookie')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'cookie' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Cookie</button>
                     <button onClick={() => setTab('security')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'security' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Keamanan</button>
                 </div>
-                {/* 'prose' class untuk styling teks otomatis */}
                 <div className="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none">
                     <LegalContent />
                 </div>
@@ -1482,7 +1656,56 @@ const LegalScreen = ({ setPage }) => {
 };
 
 // ==========================================
-// BAGIAN 11: APP UTAMA (CORE LOGIC - FIXED)
+// BAGIAN 11: ERROR BOUNDARY (BARU)
+// ==========================================
+
+class ErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error: error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        // Log eror ini ke database
+        originalConsole.error("ErrorBoundary caught an error:", error, errorInfo);
+        logErrorToFirestore(error, errorInfo, this.props.userId || 'unknown_user');
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="fixed inset-0 bg-white z-[200] flex items-center justify-center p-8 text-center">
+                    <div className="max-w-md">
+                        <ServerCrash size={64} className="text-red-400 mx-auto mb-6"/>
+                        <h1 className="text-2xl font-black text-gray-800 mb-3">Oops! Aplikasi Mengalami Eror</h1>
+                        <p className="text-gray-600 mb-6">
+                            Terjadi kesalahan yang tidak terduga. Tim developer telah diberitahu.
+                            Coba muat ulang halaman ini.
+                        </p>
+                        <p className="text-xs text-gray-400 bg-gray-100 p-3 rounded-lg mb-6">
+                            Detail: {this.state.error?.message || 'Unknown error'}
+                        </p>
+                        <button 
+                            onClick={() => window.location.reload()}
+                            className="bg-sky-500 text-white font-bold px-6 py-3 rounded-xl shadow-lg hover:bg-sky-600 transition"
+                        >
+                            Muat Ulang Halaman
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
+
+// ==========================================
+// BAGIAN 12: APP UTAMA (CORE LOGIC - FIXED)
 // ==========================================
 const App = () => {
     const [user, setUser] = useState(undefined); 
@@ -1496,13 +1719,11 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
     
-    // --- PENAMBAHAN UNTUK BUG FIX & ONBOARDING ---
     const [profileLoadTimeout, setProfileLoadTimeout] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
     const profileTimerRef = useRef(null);
-    // --- AKHIR PENAMBAHAN ---
 
-    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
+    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => originalConsole.log('SW registered')).catch(err => originalConsole.log('SW failed')); } }, []);
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
     useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
@@ -1528,12 +1749,10 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, u => {
             if(u) {
                 setUser(u);
-                // Update lastSeen saja, JANGAN buat profile baru di sini
                 updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 requestNotificationPermission(u.uid);
             } else {
@@ -1548,40 +1767,37 @@ const App = () => {
         if(!user) return;
         if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
         
-        // --- PERBAIKAN UNTUK PROFILE LOADING TIMEOUT ---
-        // Hapus timer lama jika ada
         if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
-        // Set timer baru. Jika 8 detik tidak ada profile, tampilkan tombol pulihkan
         profileTimerRef.current = setTimeout(() => {
             setProfileLoadTimeout(true);
-        }, 8000); // 8 detik
+        }, 8000); 
 
         const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
             if (s.exists()) {
-                // Data ditemukan, batalkan timer & sembunyikan tombol
                 clearTimeout(profileTimerRef.current);
                 setProfileLoadTimeout(false);
                 
                 const profileData = s.data();
                 setProfile({...profileData, uid:user.uid, email:user.email});
 
-                // Cek untuk onboarding
+                // --- AKTIVASI DEV CONSOLE ---
+                if (profileData.email === DEVELOPER_EMAIL) {
+                    enableDevConsole();
+                }
+                // ---
+
                 if (!profileData.hasCompletedOnboarding) {
                     setShowOnboarding(true);
                 }
 
             } else {
                 console.warn("Profile belum siap atau tidak ditemukan. Timer pemulihan berjalan...");
-                // Jangan set profile, biarkan null
-                // Jangan batalkan timer, biarkan berjalan
             }
         });
-        // --- AKHIR PERBAIKAN ---
 
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
             const uids = [...new Set(raw.map(r=>r.userId))];
-            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
             const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
             const map = {};
             snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
@@ -1592,9 +1808,7 @@ const App = () => {
         const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
         
         return () => { 
-            // --- Pastikan timer dibersihkan saat unmount ---
             if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
-            // ---
             unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); 
         };
     }, [user]);
@@ -1606,7 +1820,6 @@ const App = () => {
     if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
     if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
     
-    // --- PERBAIKAN: TAMPILKAN TOMBOL PULIHKAN JIKA TIMEOUT ---
     if(!profile) {
         return (
             <div className="h-screen w-full flex items-center justify-center bg-[#F0F4F8] flex-col p-4">
@@ -1621,10 +1834,10 @@ const App = () => {
                         <button 
                             onClick={async () => {
                                 console.log("Mencoba memulihkan/membuat profil untuk:", user.uid);
-                                setProfileLoadTimeout(false); // Sembunyikan tombol, coba lagi
+                                setProfileLoadTimeout(false); 
                                 try {
                                     const defaultProfile = { 
-                                        username: user.email.split('@')[0] + Math.floor(Math.random() * 99), // Tambah angka acak biar unik
+                                        username: user.email.split('@')[0] + Math.floor(Math.random() * 99), 
                                         email: user.email, 
                                         createdAt: serverTimestamp(), 
                                         uid: user.uid, 
@@ -1634,13 +1847,10 @@ const App = () => {
                                         lastSeen: serverTimestamp(), 
                                         savedPosts: [], 
                                         mood: 'Baru di ' + APP_NAME + '!',
-                                        hasCompletedOnboarding: false // Pastikan ini ada
+                                        hasCompletedOnboarding: false
                                     };
-                                    // Gunakan setDoc dengan merge: true. 
-                                    // Ini AMAN: tidak akan menimpa data jika sudah ada, tapi akan MEMBUAT jika tidak ada.
                                     await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), defaultProfile, { merge: true });
                                     console.log("Profile restore/create signal sent!");
-                                    // Listener onSnapshot akan otomatis mengambil data baru
                                 } catch (e) {
                                     alert("Gagal memulihkan: " + e.message);
                                 }
@@ -1659,24 +1869,19 @@ const App = () => {
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
-        <div>
-            {/* --- PENAMBAHAN ONBOARDING --- */}
+        // --- SELURUH APP DIBUNGKUS OLEH ERROR BOUNDARY ---
+        <ErrorBoundary userId={profile.uid}>
             {showOnboarding && <OnboardingComponent profile={profile} onClose={async () => {
                 try {
-                    // Set flag di Firestore agar tidak muncul lagi
                     await updateDoc(doc(db, getPublicCollection('userProfiles'), profile.uid), { hasCompletedOnboarding: true });
                     setShowOnboarding(false);
                 } catch (e) {
                     console.error("Gagal update onboarding flag:", e);
-                    setShowOnboarding(false); // Tutup saja walau gagal update
+                    setShowOnboarding(false); 
                 }
             }} />}
-            {/* --- AKHIR PENAMBAHAN --- */}
 
             <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
-                {/* --- UI IMPROVEMENT ---
-                // Backdrop blur lebih kuat, shadow lebih terlihat
-                */}
                 {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 shadow-lg shadow-sky-100/30 transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
                 
                 <main className={page!=='shorts'?'pt-16':''}>
@@ -1686,24 +1891,19 @@ const App = () => {
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     
-                    {/* --- PENAMBAHAN: Prop setPage diteruskan --- */}
                     {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
                     {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
                     
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                     
-                    {/* --- PENAMBAHAN: Halaman Legal --- */}
                     {page==='legal' && <LegalScreen setPage={setPage} />}
                 </main>
                 
-                {/* --- UI IMPROVEMENT ---
-                // Gradient, border atas, shadow lebih modern
-                */}
                 {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-t from-white/95 to-white/90 backdrop-blur-2xl border-t border-white rounded-full px-6 py-3 shadow-2xl shadow-sky-200/60 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
                 
                 <PWAInstallPrompt />
             </div>
-        </div>
+        </ErrorBoundary>
     );
 };
 
