@@ -29,9 +29,7 @@
   <meta name="twitter:image" content="https://c.termai.cc/i46/b87.png" />
 
   <!-- 📱 PWA & Theme -->
-  <meta name="theme-color" content="#ffff" />
-  <link rel="manifest" href="/manifest.json" />
-
+  <meta name="theme-color" content="#ffffff" />
   <!-- 🖼️ Favicon -->
   <link rel="icon" href="https://c.termai.cc/i46/b87.png" type="image/png" />
 </head>
@@ -46,11 +44,10 @@
     <script defer src="/_vercel/insights/script.js"></script>
 
 <script>
-
-
-navigator.serviceWorker.register('/firebase-messaging-sw.js');
+window.addEventListener("load", () => {
+  navigator.serviceWorker.register('/firebase-messaging-sw.js');
+});
 </script>
-
 
 </body>
 </html>
