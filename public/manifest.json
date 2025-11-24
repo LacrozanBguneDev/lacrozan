@@ -3,14 +3,14 @@
   "name": "BguneNet Social App",
   "icons": [
     {
-      "src": "https://n.uguu.se/qXDmMTZB.jpg",
+      "src": "20251125_062524.png",
       "sizes": "192x192",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
-      "src": "https://n.uguu.se/qXDmMTZB.jpg",
+      "src": "20251125_062524.png",
       "sizes": "512x512",
-      "type": "image/jpeg"
+      "type": "image/png"
     }
   ],
   "start_url": "/?source=pwa",
