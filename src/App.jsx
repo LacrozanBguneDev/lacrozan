@@ -33,8 +33,7 @@ import {
     orderBy, 
     limit,
     increment,
-    writeBatch,
-    getDocs 
+    writeBatch
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -45,35 +44,15 @@ import {
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
     Edit, Trash2, X, Check, Save, PlusCircle, Search, UserCheck, ChevronRight,
-    Share2, TrendingUp, Flame, ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle,
+    Share2, Film, TrendingUp, Flame, ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle,
     RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    BookOpen as BookOpenIcon,
-    Sparkles as SparklesIcon,
-    HardDrive, Terminal, ServerCrash,
-    Download // --- ICON BARU DITAMBAHKAN ---
+    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2
 } from 'lucide-react';
 
-// ==========================================
-// STABILISASI APLIKASI: Global Console Silencer
-// ==========================================
-const originalConsole = { ...console };
-console.log = () => {};
-console.warn = () => {};
-console.error = () => {};
-console.info = () => {};
-const enableDevConsole = () => {
-    console.log = originalConsole.log;
-    console.warn = originalConsole.warn;
-    console.error = originalConsole.error;
-    console.info = originalConsole.info;
-    originalConsole.log("Developer console diaktifkan.");
-};
-// ==========================================
-
+// SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -84,9 +63,14 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-const globalImageCache = new Set(); // Cache gambar global agar tidak loading ulang
+// --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
+// Set ini menyimpan URL gambar yang SUDAH berhasil dimuat.
+const globalImageCache = new Set();
+
+// --- KUNCI VAPID BARU ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
+// --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -110,27 +94,12 @@ try {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    originalConsole.log("Messaging skipped");
+    console.log("Messaging skipped");
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
-
-const logErrorToFirestore = async (error, errorInfo, userId = 'unknown') => {
-    try {
-        await addDoc(collection(db, getPublicCollection('globalErrors')), {
-            userId: userId,
-            message: error.message || 'Unknown error',
-            stack: errorInfo ? errorInfo.componentStack : error.stack || 'No stack available',
-            timestamp: serverTimestamp(),
-            userAgent: navigator.userAgent
-        });
-        originalConsole.error("ERROR FATAL TERCATAT KE DB:", error);
-    } catch (dbError) {
-        originalConsole.error("GAGAL MENCATAT ERROR KE DB:", dbError);
-    }
-};
 
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
@@ -146,7 +115,6 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// --- MODIFIKASI: Smart Compress untuk Base64 ---
 const compressImage = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -156,8 +124,7 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Kecilkan Max Width agar muat di Firestore Base64 (Max 1MB document limit)
-                const MAX_WIDTH = 600; 
+                const MAX_WIDTH = 1080; 
                 let width = img.width;
                 let height = img.height;
 
@@ -172,7 +139,6 @@ const compressImage = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Kompresi agresif (quality 0.7) agar ringan
                 ctx.canvas.toBlob((blob) => {
                     if (!blob) {
                         reject(new Error("Gagal kompresi gambar"));
@@ -183,20 +149,11 @@ const compressImage = (file) => {
                         lastModified: Date.now(),
                     });
                     resolve(newFile);
-                }, 'image/jpeg', 0.7); 
+                }, 'image/jpeg', 0.8); 
             };
             img.onerror = (error) => reject(error);
         };
         reader.onerror = (error) => reject(error);
-    });
-};
-
-const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = error => reject(error);
     });
 };
 
@@ -221,6 +178,53 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
+const uploadToFaaAPI = async (file, onProgress) => {
+    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
+    const formData = new FormData();
+    if(onProgress) onProgress(10);
+    formData.append('file', file, file.name);
+
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
+    try {
+        for (let i = 10; i <= 50; i += 10) { 
+            if(onProgress) onProgress(i); 
+            await delay(100); 
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const response = await fetch(apiUrl, { 
+            method: 'POST', 
+            body: formData,
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if(onProgress) onProgress(80);
+        
+        if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
+        
+        const data = await response.json();
+        if(onProgress) onProgress(100);
+        
+        if (data && data.url) {
+            let secureUrl = data.url;
+            if (secureUrl.startsWith('http://')) { secureUrl = secureUrl.replace('http://', 'https://'); }
+            return secureUrl;
+        } else if (data && data.result && data.result.url) { 
+            return data.result.url;
+        } else { 
+            throw new Error('Format respon API tidak dikenali.'); 
+        }
+    } catch (error) {
+        if(onProgress) onProgress(0); 
+        console.error("Upload Error:", error);
+        throw new Error('Gagal upload. Koneksi server gambar sedang sibuk.');
+    }
+};
+
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -237,9 +241,6 @@ const formatTimeAgo = (timestamp) => {
 
 const getMediaEmbed = (url) => {
     if (!url) return null;
-    // Cek Base64 Image
-    if (url.startsWith('data:image')) { return { type: 'base64_image', url: url }; }
-    
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
     if (youtubeMatch) { return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, id: youtubeMatch[1] }; }
     if (url.includes('tiktok.com') || url.includes('instagram.com')) { return { type: 'link', embedUrl: url, displayUrl: url }; }
@@ -272,13 +273,14 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
-const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
+const PWAInstallPrompt = () => {
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
 
     useEffect(() => {
         const handler = (e) => {
             e.preventDefault();
-            setDeferredPrompt(e); 
+            setDeferredPrompt(e);
             const lastDismiss = localStorage.getItem('pwa_dismissed');
             if (!lastDismiss || Date.now() - parseInt(lastDismiss) > 86400000) {
                 setShowBanner(true);
@@ -286,25 +288,25 @@ const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
         };
         window.addEventListener('beforeinstallprompt', handler);
         return () => window.removeEventListener('beforeinstallprompt', handler);
-    }, [setDeferredPrompt]);
+    }, []);
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
-            setDeferredPrompt(null); 
+            setDeferredPrompt(null);
             setShowBanner(false);
         }
     };
 
-    if (!showBanner || !deferredPrompt) return null;
+    if (!showBanner) return null;
 
     return (
         <div className="fixed bottom-24 left-4 right-4 bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700">
             <div className="flex items-center gap-3">
                 <div className="bg-sky-500 p-2.5 rounded-xl shadow-lg shadow-sky-500/20"><Smartphone size={24}/></div>
-                <div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-300">Akses Cepat & Ringan</p></div>
+                <div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-300">Notifikasi & Fullscreen</p></div>
             </div>
             <div className="flex items-center gap-2">
                 <button onClick={()=>{setShowBanner(false); localStorage.setItem('pwa_dismissed', Date.now())}} className="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-full"><X size={16}/></button>
@@ -314,11 +316,15 @@ const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
     );
 };
 
+// --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
+// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
+// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
 const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
-    // --- UPDATE: Cek Global Cache agar tidak loading lagi ---
+    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
     const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
     const [status, setStatus] = useState(initialState);
     const [retryKey, setRetryKey] = useState(0);
+    const [attempts, setAttempts] = useState(0);
 
     useEffect(() => {
         if (globalImageCache.has(src)) {
@@ -326,11 +332,30 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
         } else {
             setStatus('loading');
             setRetryKey(0);
+            setAttempts(0);
         }
     }, [src]);
 
+    useEffect(() => {
+        let timeout;
+        if (status === 'error') {
+            // Retry otomatis setiap 4 detik jika gagal
+            timeout = setTimeout(() => {
+                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
+                if (globalImageCache.has(src)) {
+                    setStatus('loaded');
+                } else {
+                    setRetryKey(prev => prev + 1);
+                    setStatus('loading');
+                    setAttempts(prev => prev + 1);
+                }
+            }, 4000);
+        }
+        return () => clearTimeout(timeout);
+    }, [status, src]);
+
     const handleSuccess = () => {
-        if (src) globalImageCache.add(src); // Simpan ke cache memory
+        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
         setStatus('loaded');
     };
 
@@ -355,6 +380,7 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
             {status !== 'loaded' && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 backdrop-blur-sm transition-all duration-300">
                     <Loader2 className="animate-spin text-sky-500 mb-2" size={20}/>
+                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Mencoba lagi ({attempts})...</span>}
                 </div>
             )}
             
@@ -362,7 +388,7 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
                 key={retryKey} 
                 src={src} 
                 alt={alt} 
-                className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
+                className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity duration-500`}
                 onLoad={handleSuccess}
                 onError={handleError}
                 loading="lazy"
@@ -468,18 +494,102 @@ const renderMarkdown = (text) => {
 // ==========================================
 // BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
-// (Kode Developer Dashboard Tetap Sama - Dipersingkat untuk fokus pada permintaan user)
 const DeveloperDashboard = ({ onClose }) => {
-    // ... (Logika Dashboard tetap sama)
-    return <div className="fixed inset-0 bg-gray-100 z-[60] flex items-center justify-center"><p>Developer Mode Active (Hubungi Admin untuk Akses Penuh)</p><button onClick={onClose} className="bg-red-500 text-white p-2 rounded ml-2">Tutup</button></div>
+    const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
+    const [onlineUsers, setOnlineUsers] = useState([]);
+    const [chartData, setChartData] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [broadcastMsg, setBroadcastMsg] = useState('');
+    const [sendingBC, setSendingBC] = useState(false);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => { resolve(snap); unsub(); }); });
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const rawPosts = postsSnap.docs.map(d => d.data());
+            const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+            const tenMinAgo = Date.now() - 10 * 60 * 1000;
+            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
+            const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+            const last7Days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+                const dayEnd = dayStart + 86400000;
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
+                last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
+            }
+            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
+            setOnlineUsers(active);
+            setChartData(last7Days);
+            setLoading(false);
+        };
+        fetchData();
+    }, []);
+
+    const handleBroadcast = async () => {
+        if(!broadcastMsg.trim()) return;
+        if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
+        setSendingBC(true);
+        try {
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
+            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), {
+                toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
+            }));
+            await Promise.all(promises);
+            alert("Pengumuman berhasil dikirim!"); setBroadcastMsg('');
+        } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-gray-100 z-[60] overflow-y-auto p-4 pb-20">
+            <div className="max-w-2xl mx-auto">
+                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button></div>
+                {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold">{stats.users}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                            <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
+                            <button onClick={async () => {
+                                if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; }
+                                const permission = await Notification.requestPermission();
+                                if (permission === "granted") { 
+                                    new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO });
+                                } else { alert("Izin notifikasi ditolak oleh user."); }
+                            }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
+                            <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
+                            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">{onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => ( <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div><div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div><div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div></div> ))}</div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 };
 
 // ==========================================
-// BAGIAN 5: LAYAR OTENTIKASI (Landing Page Dihapus)
+// BAGIAN 5: LAYAR OTENTIKASI & LANDING
 // ==========================================
 
-const AuthScreen = ({ onLoginSuccess, initialMode = 'login' }) => {
-    const [isLogin, setIsLogin] = useState(initialMode === 'login');
+const AuthScreen = ({ onLoginSuccess }) => {
+    const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [username, setUsername] = useState('');
@@ -491,7 +601,6 @@ const AuthScreen = ({ onLoginSuccess, initialMode = 'login' }) => {
         try {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
-                onLoginSuccess();
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -506,19 +615,18 @@ const AuthScreen = ({ onLoginSuccess, initialMode = 'login' }) => {
                     followers: [], 
                     lastSeen: serverTimestamp(), 
                     savedPosts: [], 
-                    mood: 'Baru di ' + APP_NAME + '!',
-                    hasCompletedOnboarding: false
+                    mood: '' 
                 });
-                onLoginSuccess();
             }
+            onLoginSuccess();
         } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
     };
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] p-6 font-sans">
-            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
-                <div className="text-center mb-8 mt-2"><h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2><p className="text-gray-400 text-sm">Masuk untuk berinteraksi di {APP_NAME}</p></div>
+                <div className="text-center mb-8 mt-2"><h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2><p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p></div>
                 {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
                 <form onSubmit={handleAuth} className="space-y-4">
                     {!isLogin && <div className="group relative"><User size={18} className="absolute left-4 top-3.5 text-gray-400"/><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username Unik" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>}
@@ -533,11 +641,34 @@ const AuthScreen = ({ onLoginSuccess, initialMode = 'login' }) => {
     );
 };
 
+const LandingPage = ({ onGetStarted }) => {
+    return (
+        <div className="min-h-screen bg-[#F0F4F8] flex flex-col items-center justify-center px-6 py-12 font-sans relative overflow-hidden">
+            <div className="relative z-10 text-center w-full max-w-md">
+                <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
+                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V24.0 (Ultimate)</div></div>
+                    <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
+                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial masa depan. Cepat, Ringan, dan Kaya Fitur! 🌍✨</p>
+                    <div className="grid grid-cols-2 gap-3 mb-8">
+                        <div className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-indigo-100 transition"><Gamepad2 size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Gamers</span></div>
+                        <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-emerald-100 transition"><BookOpen size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Edukasi</span></div>
+                        <div className="bg-rose-50 text-rose-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-rose-100 transition"><Users size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Sosial</span></div>
+                        <div className="bg-amber-50 text-amber-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-amber-100 transition"><Globe size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Global</span></div>
+                    </div>
+                    <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/></button>
+                </div>
+                <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default"><div className="relative"><img src={DEV_PHOTO} className="w-14 h-14 rounded-full border-2 border-white shadow-md object-cover" alt="Developer"/><div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"><Check size={10} className="text-white absolute top-0.5 left-0.5"/></div></div><div className="text-left"><p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Developed By</p><h3 className="font-bold text-gray-800 text-sm flex items-center gap-1">M. Irham Andika Putra <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/></h3><p className="text-xs text-gray-500">Siswa SMP Negeri 3 Mentok • 14 Tahun</p></div></div>
+            </div>
+        </div>
+    );
+};
+
 // ==========================================
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, setPage }) => {
+// --- POST ITEM (LENGKAP) ---
+const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper }) => {
     const [liked, setLiked] = useState(post.likes?.includes(currentUserId));
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
     const [showComments, setShowComments] = useState(false);
@@ -547,18 +678,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
-    const [isSaved, setIsSaved] = useState(profile?.savedPosts?.includes(post.id) || false);
+    const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
 
-    const isGuest = !currentUserId; // Cek apakah tamu
-
-    const isOwner = currentUserId && post.userId === currentUserId;
+    const isOwner = post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
 
-    const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
-    const isFollowedByTarget = profile ? (profile.followers || []).includes(post.userId) : false;
+    const isFollowing = (profile.following || []).includes(post.userId);
+    const isFollowedByTarget = (profile.followers || []).includes(post.userId);
     const isFriend = isFollowing && isFollowedByTarget;
 
     const MAX_CHARS = 250;
@@ -568,22 +697,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     useEffect(() => {
         setLiked(post.likes?.includes(currentUserId));
         setLikeCount(post.likes?.length || 0);
-        setIsSaved(profile?.savedPosts?.includes(post.id));
-    }, [post, currentUserId, profile?.savedPosts]);
-
-    const handleActionGuest = () => {
-        if (isGuest) {
-            if(confirm("Anda harus login untuk berinteraksi. Login sekarang?")) {
-                setPage('auth');
-            }
-            return true;
-        }
-        return false;
-    };
+        setIsSaved(profile.savedPosts?.includes(post.id));
+    }, [post, currentUserId, profile.savedPosts]);
 
     const handleLike = async () => {
-        if (handleActionGuest()) return;
-
         const newLiked = !liked;
         setLiked(newLiked);
         setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
@@ -598,14 +715,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
-    const handleDoubleTap = () => { 
-        setShowHeartOverlay(true); 
-        setTimeout(() => setShowHeartOverlay(false), 800); 
-        if (!liked) { handleLike(); } 
-    };
+    const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
 
     const handleSave = async () => {
-        if (handleActionGuest()) return;
         const newSaved = !isSaved;
         setIsSaved(newSaved);
         const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
@@ -613,9 +725,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
 
     const handleComment = async (e) => {
-        e.preventDefault(); 
-        if (handleActionGuest()) return;
-        if (!newComment.trim()) return;
+        e.preventDefault(); if (!newComment.trim()) return;
         try {
             await addDoc(collection(db, getPublicCollection('comments')), { postId: post.id, userId: currentUserId, text: newComment, username: profile.username, timestamp: serverTimestamp() });
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
@@ -634,18 +744,17 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
-    // Cek Base64 juga
-    const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaUrl.startsWith('data:image') || post.mediaType === 'image')) && !embed;
+    const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
-        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-xl shadow-sky-100/70 border border-white relative overflow-hidden group transition-all duration-300 hover:shadow-2xl hover:shadow-sky-200/50">
+        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 relative overflow-hidden group transition hover:shadow-lg">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
             {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 text-orange-600 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
             {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
 
             <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => { if(handleActionGuest()) return; goToProfile(post.userId); }}>
+                <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
                     <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
                         <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
                             <ImageWithRetry src={post.user?.photoURL} alt="User" className="w-full h-full object-cover" fallbackText={post.user?.username}/>
@@ -654,7 +763,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
                 <div className="flex gap-2">
-                    {!isOwner && post.userId !== currentUserId && !isGuest && ( <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                     {(isOwner || isMeDeveloper) && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
                 </div>
             </div>
@@ -667,7 +776,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
                     {(isImage || isVideo || isAudio || embed) && (
-                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none transition-transform duration-300 group-hover:scale-[1.03]" onDoubleClick={handleDoubleTap}>
+                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
                             {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer" />}
@@ -679,31 +788,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 </>
             )}
 
-            <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
-                <button 
-                    onClick={handleLike} 
-                    className={`flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all duration-300 ${liked ? 'bg-rose-50 text-rose-500 border border-rose-100' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
-                >
-                    <Heart size={16} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}
-                </button>
-                <button 
-                    onClick={() => setShowComments(!showComments)} 
-                    className="flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all bg-gray-50 text-gray-500 hover:bg-gray-100"
-                >
-                    <MessageSquare size={16}/> {post.commentsCount || 0}
-                </button>
-                <button 
-                    onClick={sharePost} 
-                    className="flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all bg-gray-50 text-gray-500 hover:bg-gray-100"
-                >
-                    <Share2 size={16}/>
-                </button>
-                <button 
-                    onClick={handleSave} 
-                    className={`ml-auto p-2 rounded-full transition-all ${isSaved ? 'bg-sky-50 text-sky-500' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}
-                >
-                    <Bookmark size={18} fill={isSaved ? 'currentColor' : 'none'} />
-                </button>
+            <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
+                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
+                <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
+                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
             </div>
 
             {showComments && (
@@ -716,9 +805,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
+// --- CREATE POST (DENGAN KOMPRESI & AUDIO) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false, isAudio: false });
-    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
+    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
 
     const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
     const submit = async (e) => {
@@ -727,34 +817,28 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
             let finalUrl = form.url, type = 'text';
             let fileToUpload = form.file;
 
-            // --- SISTEM UPLOAD BARU: BASE64 + SMART COMPRESS ---
-            if (fileToUpload) {
-                if (fileToUpload.type.startsWith('image')) {
-                    // Kompresi Pintar (Kecilkan size agar muat di DB)
-                    fileToUpload = await compressImage(fileToUpload);
-                    type = 'image';
-                    setProg(50);
-                    // Convert ke Base64 String
-                    finalUrl = await fileToBase64(fileToUpload);
-                    setProg(80);
-                } else {
-                    // Untuk Video/Audio (Note: Firestore punya limit 1MB, video besar mungkin gagal jika tidak dikompres eksternal, 
-                    // tapi request user spesifik ganti API upload ke Base64 system)
-                    // Kita coba convert langsung, jika terlalu besar akan error di catch
-                    finalUrl = await fileToBase64(fileToUpload);
-                    if (fileToUpload.type.startsWith('video')) type = 'video';
-                    else if (fileToUpload.type.startsWith('audio')) type = 'audio';
-                    setProg(80);
-                }
-            } else if(form.url) { type='link'; }
+            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD
+            if (fileToUpload && fileToUpload.type.startsWith('image')) {
+                console.log("Mengompres gambar...");
+                fileToUpload = await compressImage(fileToUpload);
+                console.log("Gambar dikompres. Ukuran baru:", fileToUpload.size);
+            }
+
+            if(fileToUpload) { 
+                finalUrl = await uploadToFaaAPI(fileToUpload, setProg); 
+                if (fileToUpload.type.startsWith('image')) type = 'image';
+                else if (fileToUpload.type.startsWith('video')) type = 'video';
+                else if (fileToUpload.type.startsWith('audio')) type = 'audio';
+            }
+            else if(form.url) { type='link'; }
             
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             const ref = await addDoc(collection(db, getPublicCollection('posts')), {
                 userId, title: form.title, content: form.content, mediaUrl: finalUrl, mediaType: type, 
-                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: false, category: category, user: {username, uid: userId}
+                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, category: category, user: {username, uid: userId}
             });
-            setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
-        } catch(e){ alert("Gagal Upload: " + e.message + " (Mungkin file terlalu besar untuk disimpan langsung)"); } finally { setLoading(false); }
+            setProg(100); setTimeout(()=>onSuccess(ref.id, form.isShort), 500);
+        } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
 
     return (
@@ -772,7 +856,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                         <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}>
                             <ImageIcon size={18} className="mr-2"/>
                             <span className="text-xs font-bold">{form.file && !form.isAudio ?'File Dipilih':'Foto/Video'}</span>
-                            <input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: false, isAudio: false});}}} disabled={loading}/>
+                            <input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video'), isAudio: false}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/>
                         </label>
                         
                         <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.isAudio ?'bg-pink-50 border-pink-200 text-pink-600':'border-gray-200 text-gray-500'}`}>
@@ -780,18 +864,20 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                             <span className="text-xs font-bold">{form.isAudio ? 'Audio Siap' : 'Audio'}</span>
                             <input type="file" className="hidden" accept="audio/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: false, isAudio: true});}}} disabled={loading}/>
                         </label>
+
+                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Shorts</span></div>
                     </div>
                     
-                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
-                    <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Memproses & Mengompres...' : 'Posting Sekarang'}</button>
+                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
+                    <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
                 </form>
             </div>
         </div>
     );
 };
 
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, setPage }) => {
-    // ... (Logika Profile Tetap Sama)
+// --- PROFILE SCREEN ---
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
@@ -801,7 +887,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
 
-    const isSelf = viewerProfile?.uid === profileData.uid; 
+    const isSelf = viewerProfile.uid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
     const userPosts = allPosts.filter(p=>p.userId===profileData.uid).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
@@ -816,9 +902,9 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
         try { 
             let url = profileData.photoURL;
             if (file) {
+                // Kompresi dulu foto profil agar cepat
                 const compressedFile = await compressImage(file);
-                // Upload Base64 Profile Pic
-                url = await fileToBase64(compressedFile);
+                url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
             await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
             setEdit(false); 
@@ -828,15 +914,15 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
-    const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
-    const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
+    const isFollowing = (viewerProfile.following || []).includes(profileData.uid); 
+    const isFollowedByTarget = (viewerProfile.followers || []).includes(profileData.uid);
     const isFriend = isFollowing && isFollowedByTarget; 
     const isOnline = isUserOnline(profileData.lastSeen);
     const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-xl shadow-sky-100/70 border border-white mb-8 mx-4 text-center relative overflow-hidden">
+            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
                     <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
@@ -847,43 +933,20 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, set
                     {isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
 
-                {edit ? ( <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Menyimpan...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
+                {edit ? ( <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
-                {!isSelf && ( <button onClick={()=>{ if(!viewerProfile) { setPage('auth'); return; } handleFollow(profileData.uid, isFollowing)}} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                {!isSelf && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-                
-                <div className="grid grid-cols-3 gap-3 mt-6 border-t border-gray-100 pt-6">
-                    <div className="bg-gray-50/70 border border-gray-100/0 rounded-2xl p-3">
-                        <span className="font-bold text-xl block">{followersCount}</span>
-                        <span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span>
-                    </div>
-                    <div className="bg-gray-50/70 border border-gray-100/0 rounded-2xl p-3">
-                        <span className="font-bold text-xl block">{followingCount}</span>
-                        <span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span>
-                    </div>
-                    <div className="bg-emerald-50/70 border border-emerald-100/0 rounded-2xl p-3">
-                        <span className="font-bold text-xl block text-emerald-600">{friendsCount}</span>
-                        <span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span>
-                    </div>
-                </div>
-
-                {isSelf && (
-                    <button 
-                        onClick={() => setPage('legal')} 
-                        className="mt-8 w-full text-xs text-gray-400 hover:text-sky-600 font-medium flex items-center justify-center gap-1.5 transition group"
-                    >
-                        <BookOpenIcon size={14} className="group-hover:text-sky-500"/> 
-                        Baca Ketentuan, Kebijakan Privasi & Bantuan
-                    </button>
-                )}
+                <div className="flex justify-center gap-6 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
             {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Disimpan</button></div> )}
-            <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile?.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} setPage={setPage}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile?.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} setPage={setPage}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
+            <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
     );
 };
 
+// --- TRENDING TAGS ---
 const TrendingTags = ({ posts }) => {
     const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
     if (tags.length === 0) return null;
@@ -892,7 +955,8 @@ const TrendingTags = ({ posts }) => {
     );
 };
 
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, setPage }) => {
+// --- HOME SCREEN ---
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
     const [isFirstLoad, setIsFirstLoad] = useState(true);
@@ -903,7 +967,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
     useEffect(() => {
         if (allPosts.length === 0) { setLoadingFeed(false); return; }
-        // Filter Shorts (sudah dihapus fiturnya, tapi jaga-jaga filter data lama)
         let basePosts = allPosts.filter(p => !p.isShort);
         let pinnedPost = null;
         if (newPostId) {
@@ -962,7 +1025,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                     {visiblePosts.map(p => (
                         <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
-                            <PostItem post={p} currentUserId={currentUserId} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} setPage={setPage}/>
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper}/>
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-10 w-full flex items-center justify-center">
@@ -975,25 +1038,85 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
+// --- SHORTS SCREEN (INFINITE LOOP) ---
+const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
+    const [feed, setFeed] = useState([]);
+    useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
+    const handleScroll = (e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+        if (scrollHeight - scrollTop <= clientHeight + 200) { setFeed(prev => [...prev, ...prev]); }
+    };
+    return (
+        <div className="fixed inset-0 bg-black z-50 flex justify-center">
+             <div className="w-full max-w-md h-[100dvh] overflow-y-scroll snap-y snap-mandatory snap-always no-scrollbar bg-black" onScroll={handleScroll}>
+                {feed.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-500 font-bold"><Film size={48} className="mb-4 opacity-50"/> <p>Belum ada video Shorts</p></div>
+                ) : (
+                    feed.map((p, i) => <ShortItem key={`${p.id}-${i}`} post={p} currentUserId={currentUserId} handleFollow={handleFollow} profile={profile}/>)
+                )}
+            </div>
+        </div>
+    );
+};
+
+const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
+    const ref = useRef(); const vidRef = useRef();
+    const [playing, setPlaying] = useState(false); const [muted, setMuted] = useState(false);
+    const [showCom, setShowCom] = useState(false); const [comments, setComments] = useState([]); const [txt, setTxt] = useState('');
+    const isLiked = post.likes?.includes(currentUserId); const embed = useMemo(()=>getMediaEmbed(post.mediaUrl),[post.mediaUrl]);
+
+    useEffect(() => {
+        const obs = new IntersectionObserver(e => { e.forEach(en => { setPlaying(en.isIntersecting); if(vidRef.current) { if(en.isIntersecting) vidRef.current.play().catch(()=>{}); else { vidRef.current.pause(); vidRef.current.currentTime = 0; } } }); }, {threshold: 0.6});
+        if(ref.current) obs.observe(ref.current); return () => ref.current && obs.unobserve(ref.current);
+    }, []);
+
+    const toggleLike = async () => {
+        const r = doc(db, getPublicCollection('posts'), post.id);
+        if(isLiked) updateDoc(r, {likes:arrayRemove(currentUserId)});
+        else { updateDoc(r, {likes:arrayUnion(currentUserId)}); if(post.userId!==currentUserId) sendNotification(post.userId, 'like', 'menyukai shorts Anda', profile, post.id); }
+    };
+
+    useEffect(()=>{if(showCom) return onSnapshot(query(collection(db,getPublicCollection('comments')), where('postId','==',post.id)),s=>setComments(s.docs.map(d=>d.data())))},[showCom,post.id]);
+
+    return (
+        <div ref={ref} className="snap-start w-full h-[100dvh] relative bg-gray-900 flex items-center justify-center overflow-hidden border-b border-gray-800">
+             {embed?.type==='youtube' ? <div className="w-full h-full relative pointer-events-auto">{playing?<iframe src={`${embed.embedUrl}&autoplay=1&controls=0&loop=1`} className="w-full h-full"/>:<div className="w-full h-full bg-black"/>}<div className="absolute inset-0 bg-transparent pointer-events-none"/></div> : <video ref={vidRef} src={post.mediaUrl} className="w-full h-full object-cover" loop muted={muted} playsInline onClick={()=>setMuted(!muted)}/>}
+             <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/80 pointer-events-none flex flex-col justify-end p-5 pb-24">
+                <div className="pointer-events-auto flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full border-2 border-white/50 p-0.5"><img src={post.user?.photoURL||APP_LOGO} className="w-full h-full rounded-full object-cover"/></div>
+                    <div><p className="text-white font-bold text-sm drop-shadow-md">@{post.user?.username}</p><button onClick={()=>handleFollow(post.userId, false)} className="bg-white/20 backdrop-blur-md text-white text-[10px] px-3 py-0.5 rounded-full mt-1 hover:bg-white/40 transition">Ikuti</button></div>
+                </div>
+                <p className="text-white text-sm drop-shadow-md line-clamp-3 mb-2">{post.content}</p>
+             </div>
+             <div className="absolute right-3 bottom-28 flex flex-col gap-6 pointer-events-auto z-20">
+                <button onClick={toggleLike} className="flex flex-col items-center group"><div className={`p-3 rounded-full backdrop-blur-md transition ${isLiked?'bg-rose-500/80 text-white':'bg-black/30 text-white border border-white/20'}`}><Heart size={24} fill={isLiked?'currentColor':'none'}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">{post.likes?.length||0}</span></button>
+                <button onClick={()=>setShowCom(true)} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><MessageSquare size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">{post.commentsCount||0}</span></button>
+                <button onClick={()=>{navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin')}} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><Share2 size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">Share</span></button>
+             </div>
+             {showCom && <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-end pointer-events-auto"><div className="w-full h-[60%] bg-white rounded-t-3xl p-5 flex flex-col animate-in slide-in-from-bottom duration-300"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800">Komentar</h3><button onClick={()=>setShowCom(false)} className="bg-gray-100 p-1 rounded-full"><X size={20}/></button></div><div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">{comments.map((c,i)=><div key={i} className="text-xs text-gray-800 border-b border-gray-50 pb-2"><span className="font-bold text-sky-600 mr-2">{c.username}</span>{c.text}</div>)}</div><div className="flex gap-2 mt-2 pt-2 border-t"><input value={txt} onChange={e=>setTxt(e.target.value)} className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-xs outline-none" placeholder="Ketik..."/><button onClick={async()=>{if(!txt.trim())return;await addDoc(collection(db,getPublicCollection('comments')),{postId:post.id,userId:currentUserId,text:txt,username:profile.username});await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });setTxt('')}} className="text-sky-600 font-bold text-xs px-2">Kirim</button></div></div></div>}
+        </div>
+    );
+};
+
+// --- NOTIFICATION SCREEN ---
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     useEffect(() => {
-        if (!userId) return; // Guest check
         const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50));
         return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead)));
     }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
-    
-    if (!userId) return <div className="p-10 text-center text-gray-400">Silakan Login untuk melihat notifikasi.</div>;
-
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
+// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
     const [queryText, setQueryText] = useState('');
-    const [searchTerm, setSearchTerm] = useState(''); 
+    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
     const [tab, setTab] = useState('users');
 
+    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
+    // Ini mencegah render berlebihan saat mengetik cepat
     useEffect(() => {
         const delayDebounceFn = setTimeout(() => {
             setSearchTerm(queryText);
@@ -1007,8 +1130,9 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
         const term = searchTerm.toLowerCase();
         
         return allUsers.filter(u => {
+            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
             if (!u || !u.username) return false;
-            return u.username.toLowerCase().includes(term) && u.uid !== profile?.uid;
+            return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
         });
     }, [allUsers, searchTerm, profile?.uid]);
 
@@ -1017,9 +1141,10 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
         const term = searchTerm.toLowerCase();
 
         return allPosts.filter(p => {
+            // SAFE CHECK: Pastikan p dan kontennya ada
             const contentMatch = p.content && p.content.toLowerCase().includes(term);
             const titleMatch = p.title && p.title.toLowerCase().includes(term);
-            const tagMatch = p.category && p.category.toLowerCase().includes(term); 
+            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
             
             return contentMatch || titleMatch || tagMatch;
         });
@@ -1069,9 +1194,9 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
                                 </div>
                             ) : (
                                 filteredUsers.map(u => {
-                                    const isFollowing = profile ? (profile.following || []).includes(u.uid) : false;
+                                    const isFollowing = (profile.following || []).includes(u.uid);
                                     return (
-                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-lg shadow-sky-50/70 hover:shadow-sky-100/90 border border-white flex items-center justify-between transition duration-300">
+                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:shadow-md transition duration-300">
                                             <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}>
                                                 <div className="relative">
                                                     <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
@@ -1105,7 +1230,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
                                 </div>
                             ) : (
                                 filteredPosts.map(p => (
-                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-lg shadow-sky-50/70 border border-white hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
+                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
                                         <div className="flex items-center gap-2 mb-3">
                                             <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
                                                 <ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/>
@@ -1141,6 +1266,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }
     );
 };
 
+// --- SINGLE POST VIEW ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
@@ -1154,136 +1280,11 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// ======================================================
-// BAGIAN 10: LAYAR LEGAL & ONBOARDING
-// ======================================================
-
-const OnboardingComponent = ({ profile, onClose }) => {
-    return (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-500">
-            <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full shadow-2xl border-4 border-white/50 relative text-center transform animate-in zoom-in-90 duration-300">
-                <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-gradient-to-br from-sky-400 to-purple-500 rounded-full border-4 border-white shadow-lg flex items-center justify-center">
-                    <SparklesIcon size={48} className="text-white animate-pulse" style={{animationDuration: '3s'}}/>
-                </div>
-                <h2 className="text-2xl font-black text-gray-800 mt-16 mb-3">Selamat Datang, {profile.username}!</h2>
-                <p className="text-gray-600 text-sm mb-6 leading-relaxed">
-                    Senang melihatmu di {APP_NAME}. Ini adalah tempat untuk berbagi, terhubung, dan bersenang-senang.
-                </p>
-                <button 
-                    onClick={onClose} 
-                    className="w-full py-3 bg-gray-900 text-white font-bold rounded-2xl shadow-lg shadow-gray-200 hover:bg-gray-800 transform active:scale-95 transition"
-                >
-                    Mulai Jelajahi
-                </button>
-            </div>
-        </div>
-    );
-};
-
-// ... (LegalScreen Tetap Sama)
-const LegalScreen = ({ setPage }) => {
-    const [tab, setTab] = useState('terms');
-    
-    const LegalContent = () => {
-        switch(tab) {
-            case 'privacy': return (
-                <div className="space-y-4">
-                    <h3 className="font-bold text-lg">Kebijakan Privasi (Privacy Policy)</h3>
-                    <p>Kami menghargai privasi Anda. Aplikasi ini mengumpulkan data berikut untuk fungsionalitas inti:</p>
-                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
-                        <li><strong>Email & Kata Sandi:</strong> Untuk otentikasi dan keamanan akun Anda.</li>
-                        <li><strong>Username:</strong> Untuk identitas publik Anda di aplikasi.</li>
-                        <li><strong>Foto & Postingan:</strong> Konten (gambar, video, teks) yang Anda unggah secara sukarela.</li>
-                    </ul>
-                </div>
-            );
-            case 'terms': return (
-                <div className="space-y-4">
-                    <h3 className="font-bold text-lg">Ketentuan Layanan (Terms of Service)</h3>
-                    <p>Dengan menggunakan {APP_NAME}, Anda (Pengguna) setuju untuk:</p>
-                    <ul className="list-disc list-inside text-sm space-y-1 pl-4">
-                        <li>Tidak memposting konten ilegal, pornografi, kekerasan, kebencian, atau spam.</li>
-                        <li>Tidak menyamar sebagai orang lain (impersonasi).</li>
-                    </ul>
-                </div>
-            );
-            default: return null;
-        }
-    };
-
-    return (
-        <div className="max-w-lg mx-auto p-4 pb-40 pt-6 animate-in fade-in">
-            <button onClick={() => setPage('profile')} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali ke Profil</button>
-            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-gray-100">
-                <h2 className="text-2xl font-black text-gray-800 mb-6">Info Legal & Bantuan</h2>
-                <div className="flex overflow-x-auto no-scrollbar gap-2 mb-6 border-b pb-2">
-                    <button onClick={() => setTab('terms')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'terms' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Ketentuan</button>
-                    <button onClick={() => setTab('privacy')} className={`text-xs font-bold whitespace-nowrap px-4 py-2 rounded-full ${tab === 'privacy' ? 'bg-sky-500 text-white' : 'bg-gray-100 text-gray-600'}`}>Privasi</button>
-                </div>
-                <div className="text-sm text-gray-700 leading-relaxed prose prose-sm max-w-none">
-                    <LegalContent />
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// ==========================================
-// BAGIAN 11: ERROR BOUNDARY
-// ==========================================
-
-class ErrorBoundary extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-    }
-
-    static getDerivedStateFromError(error) {
-        return { hasError: true, error: error };
-    }
-
-    componentDidCatch(error, errorInfo) {
-        originalConsole.error("ErrorBoundary caught an error:", error, errorInfo);
-        logErrorToFirestore(error, errorInfo, this.props.userId || 'unknown_user');
-    }
-
-    render() {
-        if (this.state.hasError) {
-            return (
-                <div className="fixed inset-0 bg-white z-[200] flex items-center justify-center p-8 text-center">
-                    <div className="max-w-md">
-                        <ServerCrash size={64} className="text-red-400 mx-auto mb-6"/>
-                        <h1 className="text-2xl font-black text-gray-800 mb-3">Oops! Aplikasi Mengalami Eror</h1>
-                        <p className="text-gray-600 mb-6">
-                            Terjadi kesalahan yang tidak terduga. Tim developer telah diberitahu.
-                            Coba muat ulang halaman ini.
-                        </p>
-                        <p className="text-xs text-gray-400 bg-gray-100 p-3 rounded-lg mb-6">
-                            Detail: {this.state.error?.message || 'Unknown error'}
-                        </p>
-                        <button 
-                            onClick={() => window.location.reload()}
-                            className="bg-sky-500 text-white font-bold px-6 py-3 rounded-xl shadow-lg hover:bg-sky-600 transition"
-                        >
-                            Muat Ulang Halaman
-                        </button>
-                    </div>
-                </div>
-            );
-        }
-        return this.props.children;
-    }
-}
-
-
-// ==========================================
-// BAGIAN 12: APP UTAMA (CORE LOGIC - FIXED)
-// ==========================================
+// --- 11. APP UTAMA (CORE LOGIC - FIXED) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
-    // --- UBAH: Default page 'home' agar guest langsung masuk ---
-    const [page, setPage] = useState('home'); 
+    const [page, setPage] = useState('landing'); 
     const [posts, setPosts] = useState([]); 
     const [users, setUsers] = useState([]); 
     const [targetUid, setTargetUid] = useState(null); 
@@ -1291,15 +1292,8 @@ const App = () => {
     const [notifCount, setNotifCount] = useState(0); 
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
-    
-    const [profileLoadTimeout, setProfileLoadTimeout] = useState(false);
-    const [showOnboarding, setShowOnboarding] = useState(false);
-    const profileTimerRef = useRef(null);
 
-    // --- STATE BARU: Untuk PWA Install Button ---
-    const [deferredPrompt, setDeferredPrompt] = useState(null);
-
-    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => originalConsole.log('SW registered')).catch(err => originalConsole.log('SW failed')); } }, []);
+    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
     useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
@@ -1325,10 +1319,12 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
+    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, u => {
             if(u) {
                 setUser(u);
+                // Update lastSeen saja, JANGAN buat profile baru di sini
                 updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 requestNotificationPermission(u.uid);
             } else {
@@ -1340,10 +1336,24 @@ const App = () => {
     }, []);
 
     useEffect(() => {
-        // Fetch posts & users walaupun guest (public)
+        if(!user) return;
+        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
+        
+        // HANYA BACA PROFILE, JANGAN MENULIS (setDoc) DI SINI
+        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
+            if (s.exists()) {
+                setProfile({...s.data(), uid:user.uid, email:user.email});
+            } else {
+                // Jika profile tidak ditemukan (kasus langka), biarkan null atau handle manual
+                // Jangan otomatis setDoc agar tidak menimpa data yg mungkin sedang loading
+                console.warn("Profile belum siap atau tidak ditemukan.");
+            }
+        });
+
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
             const uids = [...new Set(raw.map(r=>r.userId))];
+            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
             const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
             const map = {};
             snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
@@ -1351,194 +1361,40 @@ const App = () => {
         });
 
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
-        
-        // Logic khusus User Login
-        if (!user) {
-            // Guest Logic
-            return () => { unsubPosts(); unsubUsers(); }
-        }
-
-        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
-        
-        if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
-        profileTimerRef.current = setTimeout(() => {
-            setProfileLoadTimeout(true);
-        }, 8000); 
-
-        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
-            if (s.exists()) {
-                clearTimeout(profileTimerRef.current);
-                setProfileLoadTimeout(false);
-                
-                const profileData = s.data();
-                setProfile({...profileData, uid:user.uid, email:user.email});
-
-                if (profileData.email === DEVELOPER_EMAIL) {
-                    enableDevConsole();
-                }
-
-                if (!profileData.hasCompletedOnboarding) {
-                    setShowOnboarding(true);
-                }
-
-            } else {
-                console.warn("Profile belum siap atau tidak ditemukan. Timer pemulihan berjalan...");
-            }
-        });
-
         const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
         
-        return () => { 
-            if (profileTimerRef.current) clearTimeout(profileTimerRef.current);
-            unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); 
-        };
+        return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); };
     }, [user]);
 
-    const handleFollow = async (uid, isFollowing) => { 
-        if (!user || !profile) { setPage('auth'); return; } // Guest Check
-        const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } 
-    };
+    const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
-
-    const handlePWAInstall = async () => {
-        if (!deferredPrompt) return;
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        if (outcome === 'accepted') {
-            setDeferredPrompt(null);
-        }
-    };
 
     if (showSplash) return <SplashScreen />;
     if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
-    
-    // --- GANTI: Jika !user (Guest), tampilkan App UI, bukan Landing Page ---
-    // Landing Page sudah dihapus. Jika page === 'auth', tampilkan login.
-    if(page === 'auth' && !user) return <AuthScreen onLoginSuccess={()=>{setPage('home')}} />;
-    
-    // Jika user login tapi profile belum load
-    if(user && !profile) {
-        return (
-            <div className="h-screen w-full flex items-center justify-center bg-[#F0F4F8] flex-col p-4">
-                <Loader2 className="animate-spin text-sky-500 mb-3" size={32}/>
-                <p className="text-sm text-gray-500 font-medium">Memuat profil...</p>
-                
-                {profileLoadTimeout && (
-                    <div className="mt-8 p-5 bg-white rounded-2xl shadow-xl border border-gray-100 text-center w-full max-w-xs animate-in fade-in duration-500">
-                        <AlertTriangle size={32} className="text-yellow-500 mx-auto mb-3"/>
-                        <h3 className="text-base font-bold text-gray-800">Data Gagal Dimuat?</h3>
-                        <p className="text-xs text-gray-500 mb-4 mt-1 leading-relaxed">Ini bisa terjadi jika akun Anda baru atau ada gangguan jaringan.</p>
-                        <button 
-                            onClick={async () => {
-                                setProfileLoadTimeout(false); 
-                                try {
-                                    const defaultProfile = { 
-                                        username: user.email.split('@')[0] + Math.floor(Math.random() * 99), 
-                                        email: user.email, 
-                                        createdAt: serverTimestamp(), 
-                                        uid: user.uid, 
-                                        photoURL: '', 
-                                        following: [], 
-                                        followers: [], 
-                                        lastSeen: serverTimestamp(), 
-                                        savedPosts: [], 
-                                        mood: 'Baru di ' + APP_NAME + '!',
-                                        hasCompletedOnboarding: false
-                                    };
-                                    await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), defaultProfile, { merge: true });
-                                } catch (e) {
-                                    alert("Gagal memulihkan: " + e.message);
-                                }
-                            }}
-                            className="w-full bg-sky-500 text-white px-4 py-3 rounded-xl font-bold text-sm hover:bg-sky-600 transition transform active:scale-95"
-                        >
-                            Pulihkan Profil
-                        </button>
-                    </div>
-                )}
-            </div>
-        );
-    }
+    if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
+    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] flex-col"><Loader2 className="animate-spin text-sky-500 mb-2"/><p className="text-xs text-gray-400">Memuat profil...</p></div>;
 
-    const isMeDeveloper = user?.email === DEVELOPER_EMAIL;
+    const isMeDeveloper = user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
-        <ErrorBoundary userId={profile?.uid || 'guest'}>
-            {showOnboarding && profile && <OnboardingComponent profile={profile} onClose={async () => {
-                try {
-                    await updateDoc(doc(db, getPublicCollection('userProfiles'), profile.uid), { hasCompletedOnboarding: true });
-                    setShowOnboarding(false);
-                } catch (e) { setShowOnboarding(false); }
-            }} />}
-
+        <div>
             <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
-                <header className="fixed top-0 w-full bg-white/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 shadow-lg shadow-sky-100/30 transition-colors duration-300">
-                    <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
-                        <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
-                        <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami">
-                            <Gift size={20}/>
-                        </a>
-                        
-                        {deferredPrompt && (
-                            <button 
-                                onClick={handlePWAInstall}
-                                className="p-2 bg-sky-50 text-sky-600 rounded-full shadow-sm hover:bg-sky-100 transition animate-in fade-in duration-300" 
-                                title="Install Aplikasi"
-                            >
-                                <Download size={20}/>
-                            </button>
-                        )}
-
-                        <button onClick={()=>{ if(!user) setPage('auth'); else setPage('notifications'); }} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative">
-                            <Bell size={20}/>
-                            {notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
-                        </button>
-                        
-                        {user ? (
-                            <button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition">
-                                <LogOut size={20}/>
-                            </button>
-                        ) : (
-                            <button onClick={()=>setPage('auth')} className="px-4 py-1.5 bg-gray-900 text-white rounded-full shadow-sm text-xs font-bold hover:bg-black transition">
-                                Login
-                            </button>
-                        )}
-                    </div>
-                </header> 
-                
-                <main className='pt-16'>
-                    {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} setPage={setPage}/>}
-                    {/* Halaman Create hanya bisa diakses user login. Guest akan dialihkan di button navigation */}
-                    {page==='create' && user && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{setNewPostId(id); setPage('home')}}/>}
+                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 shadow-sm transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+                <main className={page!=='shorts'?'pt-16':''}>
+                    {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
+                    {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
+                    {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='notifications' && user && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    
-                    {page==='profile' && user && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
-                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
-                    
-                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} setPage={setPage}/>}
-                    
-                    {page==='legal' && <LegalScreen setPage={setPage} />}
+                    {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
+                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
                 </main>
-                
-                {/* Navbar dimodifikasi untuk menghandle guest click */}
-                <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-t from-white/95 to-white/90 backdrop-blur-2xl border-t border-white rounded-full px-6 py-3 shadow-2xl shadow-sky-200/60 flex items-center gap-6 z-40">
-                    <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
-                    <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
-                    <button onClick={()=>{ if(!user) setPage('auth'); else setPage('create'); }} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition">
-                        <PlusCircle size={24}/>
-                    </button>
-                    {/* Fitur Shorts Dihapus dari Nav */}
-                    <NavBtn icon={User} active={page==='profile'} onClick={()=>{ if(!user) setPage('auth'); else setPage('profile'); }}/>
-                </nav>
-                
-                <PWAInstallPrompt deferredPrompt={deferredPrompt} setDeferredPrompt={setDeferredPrompt} />
+                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                <PWAInstallPrompt />
             </div>
-        </ErrorBoundary>
+        </div>
     );
 };
 
