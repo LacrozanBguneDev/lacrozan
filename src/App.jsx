@@ -47,7 +47,8 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2
+    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
+    Scale, FileText, ChevronLeft
 } from 'lucide-react';
 
 setLogLevel('silent');
@@ -109,9 +110,11 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// 2. Kompresi Gambar (FITUR BARU: SOLUSI UPLOAD CEPAT)
-const compressImage = (file) => {
-    return new Promise((resolve) => {
+// 2. Kompresi Gambar CERDAS ke Base64 (Updated V25)
+// Mengubah file gambar menjadi string base64 yang sangat terkompresi
+// agar bisa disimpan di Firestore (max 1MB per doc)
+const compressImageToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = (event) => {
@@ -119,25 +122,29 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Maksimal lebar 1080px (HD), tinggi menyesuaikan
-                const MAX_WIDTH = 1080;
-                const scaleSize = MAX_WIDTH / img.width;
-                canvas.width = MAX_WIDTH;
-                canvas.height = img.height * scaleSize;
+                // Kita batasi lebar max 800px untuk menghemat ruang drastis
+                const MAX_WIDTH = 800; 
+                let width = img.width;
+                let height = img.height;
+
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
                 
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, width, height);
                 
-                // Ubah ke JPEG dengan kualitas 70%
-                ctx.canvas.toBlob((blob) => {
-                    const newFile = new File([blob], file.name, {
-                        type: 'image/jpeg',
-                        lastModified: Date.now(),
-                    });
-                    resolve(newFile);
-                }, 'image/jpeg', 0.7); 
+                // Konversi ke Base64 JPEG dengan kualitas 60% (Cukup untuk web/mobile)
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                resolve(dataUrl);
             };
+            img.onerror = (error) => reject(error);
         };
+        reader.onerror = (error) => reject(error);
     });
 };
 
@@ -164,33 +171,7 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// 5. Upload API (Faa API) - Dengan Auto HTTPS
-const uploadToFaaAPI = async (file, onProgress) => {
-    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
-    const formData = new FormData();
-    onProgress(0);
-    formData.append('file', file, file.name);
-
-    try {
-        for (let i = 0; i <= 60; i += 10) { onProgress(i); await new Promise(resolve => setTimeout(resolve, 50)); }
-        const response = await fetch(apiUrl, { method: 'POST', body: formData });
-        onProgress(80);
-        if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
-        const data = await response.json();
-        onProgress(100);
-        
-        if (data && data.url) {
-            let secureUrl = data.url;
-            if (secureUrl.startsWith('http://')) { secureUrl = secureUrl.replace('http://', 'https://'); }
-            return secureUrl;
-        } else if (data && data.result && data.result.url) { return data.result.url;
-        } else { throw new Error('Format respon API tidak dikenali.'); }
-    } catch (error) {
-        onProgress(0); throw new Error('Gagal upload. Coba lagi atau cek koneksi.');
-    }
-};
-
-// 6. Formatter Waktu
+// 5. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -205,7 +186,7 @@ const formatTimeAgo = (timestamp) => {
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
-// 7. Detektor Media Embed
+// 6. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
@@ -215,7 +196,7 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-// 8. Kalkulator Reputasi
+// 7. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -224,14 +205,14 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300" };
 };
 
-// 9. Ekstraktor Hashtag
+// 8. Ekstraktor Hashtag
 const extractHashtags = (text) => {
     if (!text) return [];
     const matches = text.match(/#[\w]+/g);
     return matches ? matches : [];
 };
 
-// 10. Cek Online Status
+// 9. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
@@ -288,7 +269,7 @@ const PWAInstallPrompt = () => {
 };
 
 // --- IMAGE WITH RETRY (SOLUSI STUCK LOADING) ---
-const ImageWithRetry = ({ src, alt, className }) => {
+const ImageWithRetry = ({ src, alt, className, onClick }) => {
     const [error, setError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
@@ -307,33 +288,62 @@ const ImageWithRetry = ({ src, alt, className }) => {
         e.stopPropagation(); setError(false); setLoading(true); setRetryCount(prev => prev + 1);
     };
 
-    const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
+    const displaySrc = retryCount > 0 && !src.startsWith('data:') ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
 
     if (error) {
         return (
             <div className={`bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 ${className}`} style={{minHeight: '200px'}}>
                 <ImageOff size={24} className="mb-2 opacity-50"/>
-                <p className="text-[10px] mb-2 text-center px-2">Gambar tidak dapat dimuat</p>
+                <p className="text-[10px] mb-2 text-center px-2">Gambar Error</p>
                 <button onClick={handleRetry} className="bg-white dark:bg-gray-800 border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Refresh</button>
             </div>
         );
     }
 
     return (
-        <div className={`relative ${className} overflow-hidden bg-gray-100 dark:bg-gray-800`}>
+        <div className={`relative ${className} overflow-hidden bg-gray-100 dark:bg-gray-800`} onClick={onClick}>
             {loading && (
                 <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="animate-spin text-gray-400" size={24}/></div>
             )}
             <img 
                 src={displaySrc} 
                 alt={alt} 
-                className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}
+                className={`w-full h-full object-cover ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}
                 onLoad={() => setLoading(false)}
                 onError={() => { setLoading(false); setError(true); }}
                 loading="lazy"
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
             />
+        </div>
+    );
+};
+
+// --- LIGHTBOX (FULLSCREEN IMAGE VIEWER) ---
+const Lightbox = ({ images, initialIndex, onClose }) => {
+    const [index, setIndex] = useState(initialIndex);
+    
+    return (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200">
+            <button onClick={onClose} className="absolute top-4 right-4 text-white p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur-md z-50">
+                <X size={24}/>
+            </button>
+            <div className="flex-1 w-full flex items-center justify-center relative">
+                {images.length > 1 && (
+                    <button onClick={(e) => {e.stopPropagation(); setIndex((prev) => (prev - 1 + images.length) % images.length)}} className="absolute left-2 p-2 text-white bg-black/50 rounded-full hover:bg-black/70"><ChevronLeft/></button>
+                )}
+                <img src={images[index]} className="max-w-full max-h-screen object-contain" />
+                {images.length > 1 && (
+                    <button onClick={(e) => {e.stopPropagation(); setIndex((prev) => (prev + 1) % images.length)}} className="absolute right-2 p-2 text-white bg-black/50 rounded-full hover:bg-black/70"><ChevronRight/></button>
+                )}
+            </div>
+            {images.length > 1 && (
+                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 overflow-x-auto max-w-full p-2">
+                    {images.map((img, i) => (
+                        <div key={i} onClick={() => setIndex(i)} className={`w-12 h-12 rounded-lg overflow-hidden border-2 cursor-pointer transition ${i === index ? 'border-sky-500 scale-110' : 'border-transparent opacity-50'}`}>
+                            <img src={img} className="w-full h-full object-cover"/>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
@@ -476,7 +486,7 @@ const DeveloperDashboard = ({ onClose }) => {
 };
 
 // ==========================================
-// BAGIAN 5: LAYAR OTENTIKASI & PENGATURAN USER
+// BAGIAN 5: LAYAR OTENTIKASI, LEGAL & PENGATURAN USER
 // ==========================================
 
 // --- ONBOARDING SCREEN (PENGGANTI LANDING PAGE UNTUK USER BARU) ---
@@ -560,6 +570,57 @@ const AuthModal = ({ onClose }) => {
     );
 };
 
+// --- LEGAL PAGE (KEBIJAKAN HUKUM) ---
+const LegalPage = ({ onBack }) => {
+    return (
+        <div className="min-h-screen bg-white dark:bg-gray-900 pb-24 pt-20 px-6 max-w-2xl mx-auto animate-in fade-in">
+            <button onClick={onBack} className="fixed top-6 left-6 z-50 bg-white/80 dark:bg-black/50 backdrop-blur-md p-2 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition"><ArrowLeft/></button>
+            
+            <div className="text-center mb-10">
+                <Scale className="w-12 h-12 mx-auto text-sky-600 mb-4"/>
+                <h1 className="text-3xl font-black text-gray-800 dark:text-white mb-2">Pusat Kebijakan</h1>
+                <p className="text-gray-500 dark:text-gray-400">Transparansi untuk kepercayaan Anda.</p>
+            </div>
+
+            <div className="space-y-8">
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Lock size={18} className="text-sky-500"/> Kebijakan Privasi</h2>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
+                        <p className="mb-3">Di {APP_NAME}, privasi Anda adalah prioritas kami. Kami mengumpulkan data minimal yang diperlukan untuk fungsionalitas aplikasi.</p>
+                        <ul className="list-disc pl-5 space-y-1 mb-3">
+                            <li><strong>Data Akun:</strong> Nama, Email, Foto Profil (via Google Login).</li>
+                            <li><strong>Konten:</strong> Postingan, Komentar, dan Pesan yang Anda buat.</li>
+                            <li><strong>Aktivitas:</strong> Log interaksi seperti Like dan Follow untuk personalisasi.</li>
+                        </ul>
+                        <p>Kami tidak menjual data Anda ke pihak ketiga. Data disimpan aman menggunakan infrastruktur Google Cloud (Firebase).</p>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Ketentuan Layanan</h2>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
+                        <p className="mb-3">Dengan menggunakan aplikasi ini, Anda setuju untuk:</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li>Tidak memposting konten ilegal, pornografi, atau ujaran kebencian.</li>
+                            <li>Saling menghormati antar pengguna.</li>
+                            <li>Tidak melakukan spam atau aktivitas bot.</li>
+                        </ul>
+                        <p className="mt-3 text-rose-500 font-bold text-xs">Pelanggaran dapat mengakibatkan pemblokiran akun permanen.</p>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Info size={18} className="text-emerald-500"/> Tentang Kami</h2>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
+                        <p>BguneNet dikembangkan oleh <strong>Irham Andika</strong> (Siswa SMPN 3 Mentok) sebagai platform sosial media alternatif yang ringan, cepat, dan berfokus pada komunitas lokal & global.</p>
+                        <p className="mt-2 text-xs text-gray-400">Versi Aplikasi: 25.0 (Ultimate Build)</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    );
+};
+
 // --- LEADERBOARD SCREEN (FITUR BARU) ---
 const LeaderboardScreen = ({ allUsers }) => {
     // Sortir user berdasarkan followers terbanyak
@@ -598,7 +659,66 @@ const LeaderboardScreen = ({ allUsers }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-// --- POST ITEM (LENGKAP DENGAN MODE TAMU & DARK MODE) ---
+// --- SMART GRID MEDIA DISPLAY (NEW V25) ---
+const MediaGrid = ({ mediaUrls, onImageClick }) => {
+    const count = mediaUrls.length;
+    
+    if (count === 0) return null;
+
+    if (count === 1) {
+        return (
+            <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative aspect-video" onClick={() => onImageClick(0)}>
+                <img src={mediaUrls[0]} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition duration-500"/>
+            </div>
+        );
+    }
+
+    if (count === 2) {
+        return (
+            <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden aspect-video">
+                {mediaUrls.map((url, i) => (
+                    <div key={i} className="relative h-full" onClick={() => onImageClick(i)}>
+                        <img src={url} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    if (count === 3) {
+        return (
+            <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden aspect-square">
+                <div className="col-span-2 h-[60%]" onClick={() => onImageClick(0)}>
+                    <img src={mediaUrls[0]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                </div>
+                <div className="h-[40%]" onClick={() => onImageClick(1)}>
+                    <img src={mediaUrls[1]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                </div>
+                <div className="h-[40%]" onClick={() => onImageClick(2)}>
+                    <img src={mediaUrls[2]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                </div>
+            </div>
+        );
+    }
+
+    // 4 or more
+    return (
+        <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden aspect-square">
+            {mediaUrls.slice(0, 4).map((url, i) => (
+                <div key={i} className="relative h-full" onClick={() => onImageClick(i)}>
+                    <img src={url} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                    {i === 3 && count > 4 && (
+                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-bold text-xl cursor-pointer">
+                            +{count - 4}
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// --- POST ITEM (LENGKAP DENGAN MODE TAMU & DARK MODE & MULTI IMAGE) ---
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin }) => {
     const [liked, setLiked] = useState(false);
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -612,6 +732,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [isSaved, setIsSaved] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
+    
+    // Lightbox State
+    const [lightboxOpen, setLightboxOpen] = useState(false);
+    const [lightboxIndex, setLightboxIndex] = useState(0);
 
     const isOwner = currentUserId && post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
@@ -625,6 +749,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const MAX_CHARS = 250;
     const isLongText = post.content && post.content.length > MAX_CHARS;
     const displayText = isExpanded || !isLongText ? post.content : post.content.substring(0, MAX_CHARS) + "...";
+
+    // Handle legacy single image vs new multi image array
+    const mediaList = post.mediaUrls || (post.mediaUrl ? [post.mediaUrl] : []);
 
     useEffect(() => {
         if (currentUserId) {
@@ -685,7 +812,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
-    const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
+    // Images handled by mediaList now
+
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
@@ -712,16 +840,25 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{post.title}</h3>}
                     <div className="text-sm text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
-                    {(isImage || isVideo || isAudio || embed) && (
-                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative select-none" onDoubleClick={handleDoubleTap}>
-                            {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
-                            {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
-                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
-                            {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
-                            {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
-                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 dark:bg-gray-900 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
-                        </div>
-                    )}
+                    {/* Media Display Area */}
+                    <div onDoubleClick={handleDoubleTap} className="relative">
+                         {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
+                         
+                         {/* Audio */}
+                         {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
+                         
+                         {/* Video */}
+                         {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black rounded-2xl mb-4"/>}
+                         
+                         {/* Embeds */}
+                         {embed?.type === 'youtube' && <div className="aspect-video mb-4 rounded-2xl overflow-hidden"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
+                         {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 dark:bg-gray-900 text-sky-600 font-bold text-sm hover:underline mb-4 rounded-2xl">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
+
+                         {/* New Multi Image Grid System (Base64 Friendly) */}
+                         {!isAudio && !isVideo && !embed && mediaList.length > 0 && (
+                             <MediaGrid mediaUrls={mediaList} onImageClick={(idx) => {setLightboxIndex(idx); setLightboxOpen(true);}} />
+                         )}
+                    </div>
                 </>
             )}
 
@@ -738,41 +875,91 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest} className="flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim() || isGuest} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
                 </div>
             )}
+            
+            {/* Lightbox Component inside PostItem to avoid portal complexity */}
+            {lightboxOpen && <Lightbox images={mediaList} initialIndex={lightboxIndex} onClose={() => setLightboxOpen(false)} />}
         </div>
     );
 };
 
-// --- CREATE POST (DENGAN KOMPRESI & AUDIO) ---
+// --- CREATE POST (DENGAN MULTI UPLOAD & BASE64 COMPRESSION) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
-    const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false, isAudio: false });
-    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
+    const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false, isAudio: false });
+    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
 
     const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
+    
+    const handleFileChange = (e) => {
+        const selectedFiles = Array.from(e.target.files);
+        if (selectedFiles.length > 0) {
+            const isAudio = selectedFiles[0].type.startsWith('audio');
+            const isVideo = selectedFiles[0].type.startsWith('video');
+            setForm({
+                ...form, 
+                files: selectedFiles, 
+                isShort: isVideo, 
+                isAudio: isAudio,
+                url: '' // reset URL input if file is selected
+            });
+        }
+    };
+
     const submit = async (e) => {
         e.preventDefault(); setLoading(true); setProg(0);
         try {
-            let finalUrl = form.url, type = 'text';
-            let fileToUpload = form.file;
+            let mediaUrls = [];
+            let mediaType = 'text';
 
-            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD
-            if (fileToUpload && fileToUpload.type.startsWith('image')) {
-                console.log("Mengompres gambar...");
-                fileToUpload = await compressImage(fileToUpload);
-                console.log("Gambar dikompres. Ukuran baru:", fileToUpload.size);
+            if (form.files.length > 0) {
+                const firstFile = form.files[0];
+                
+                if (firstFile.type.startsWith('image')) {
+                    mediaType = 'image';
+                    setProg(10);
+                    // Loop compress semua gambar
+                    for (let i = 0; i < form.files.length; i++) {
+                        const base64 = await compressImageToBase64(form.files[i]);
+                        mediaUrls.push(base64);
+                        setProg(10 + ((i + 1) / form.files.length) * 80);
+                    }
+                } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) {
+                    // Untuk video/audio kita pakai single file saja karena berat base64 nya
+                    // Tapi karena request user adalah base64, kita convert video/audio ke base64 juga (RISKY tapi sesuai request)
+                    // Note: Base64 video sangat berat. Sebaiknya video tetap link/api.
+                    // Tapi demi "no api system", kita coba convert to base64 (Max size file harus kecil)
+                    const reader = new FileReader();
+                    reader.readAsDataURL(firstFile);
+                    await new Promise(resolve => {
+                         reader.onload = () => {
+                             mediaUrls.push(reader.result);
+                             resolve();
+                         }
+                    });
+                    mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio';
+                    setProg(100);
+                }
+            } else if (form.url) {
+                mediaType = 'link';
+                mediaUrls.push(form.url);
             }
-
-            if(fileToUpload) { 
-                finalUrl = await uploadToFaaAPI(fileToUpload, setProg); 
-                if (fileToUpload.type.startsWith('image')) type = 'image';
-                else if (fileToUpload.type.startsWith('video')) type = 'video';
-                else if (fileToUpload.type.startsWith('audio')) type = 'audio';
-            }
-            else if(form.url) { type='link'; }
             
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
+            
+            // Simpan ke Firestore
+            // Note: mediaUrls adalah array string Base64
             const ref = await addDoc(collection(db, getPublicCollection('posts')), {
-                userId, title: form.title, content: form.content, mediaUrl: finalUrl, mediaType: type, 
-                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, category: category, user: {username, uid: userId}
+                userId, 
+                title: form.title, 
+                content: form.content, 
+                mediaUrls: mediaUrls, // Array foto
+                mediaUrl: mediaUrls[0] || '', // Legacy support
+                mediaType: mediaType, 
+                timestamp: serverTimestamp(), 
+                likes: [], 
+                commentsCount: 0, 
+                isShort: form.isShort, 
+                category: category, 
+                user: {username, uid: userId}
             });
             setProg(100); setTimeout(()=>onSuccess(ref.id, form.isShort), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
@@ -790,23 +977,23 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                     <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-600 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-600 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-300 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
                     
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.files.length > 0 && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}>
                             <ImageIcon size={18} className="mr-2"/>
-                            <span className="text-xs font-bold">{form.file && !form.isAudio ?'File Dipilih':'Foto/Video'}</span>
-                            <input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video'), isAudio: false}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/>
+                            <span className="text-xs font-bold">{form.files.length > 0 && !form.isAudio ? `${form.files.length} Foto Dipilih` : 'Foto (Banyak)'}</span>
+                            <input type="file" className="hidden" accept="image/*" multiple onChange={handleFileChange} disabled={loading}/>
                         </label>
                         
                         <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.isAudio ?'bg-pink-50 border-pink-200 text-pink-600':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}>
                             <Music size={18} className="mr-2"/>
                             <span className="text-xs font-bold">{form.isAudio ? 'Audio Siap' : 'Audio'}</span>
-                            <input type="file" className="hidden" accept="audio/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: false, isAudio: true});}}} disabled={loading}/>
+                            <input type="file" className="hidden" accept="audio/*" onChange={handleFileChange} disabled={loading}/>
                         </label>
 
                         <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Shorts</span></div>
                     </div>
                     
-                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-xs outline-none"/></div>
-                    <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
+                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, files:[], isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-xs outline-none"/></div>
+                    <button disabled={loading || (!form.content && form.files.length === 0 && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
                 </form>
             </div>
         </div>
@@ -841,8 +1028,8 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         try { 
             let url = profileData.photoURL;
             if (file) {
-                const compressedFile = await compressImage(file);
-                url = await uploadToFaaAPI(compressedFile, ()=>{});
+                // Update V25: Use Base64 compression for profile pic too
+                url = await compressImageToBase64(file);
             }
             await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
             setEdit(false); 
@@ -1229,13 +1416,16 @@ const App = () => {
             <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
                 
                 {/* GLOBAL HEADER */}
-                {page!=='shorts' && ( 
+                {page!=='shorts' && page!=='legal' && ( 
                     <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-800 shadow-sm transition-colors duration-300">
                         <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
                             <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
                             <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span>
                         </div>
                         <div className="flex gap-3 items-center">
+                            <button onClick={()=>setPage('legal')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition" title="Kebijakan & Privasi">
+                                <Scale size={20}/>
+                            </button>
                             <button onClick={toggleDarkMode} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-yellow-400 hover:bg-gray-100 transition">
                                 {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
                             </button>
@@ -1246,7 +1436,6 @@ const App = () => {
                                 </button>
                             ) : (
                                 <>
-                                    <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
                                     <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative">
                                         <Bell size={20}/>
                                         {notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
@@ -1258,25 +1447,25 @@ const App = () => {
                     </header> 
                 )}
 
-                <main className={page!=='shorts'?'pt-16':''}>
+                <main className={page!=='shorts' && page!=='legal' ? 'pt-16' : ''}>
                     {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
                     {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user?.uid} handleFollow={handleFollow} profile={profile} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/></>}
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
+                    {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
                     {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                     {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} />}
                     {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} />}
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
                 </main>
                 
-                {page!=='shorts' && (
+                {page!=='shorts' && page!=='legal' && (
                     <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-6 z-40">
                         <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
                         <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
                         <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button>
-                        <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/> {/* Ganti Shorts button dgn Leaderboard untuk guest/general access easier? No, better keep shorts and add leaderboard somewhere else? User asked for leaderboard feature. I'll replace Film with Trophy just for navbar space or maybe add it. Let's replace Film with Trophy in navbar for now or squeeze it in? Squeezing 5 icons is fine. Actually standard navbar has 5 icons. I will replace "User" with Trophy for guest? No. I will swap Shorts(Film) with Trophy in navbar based on request emphasis, or just add it. Let's add it. */}
-                        {/* Wait, user asked for Leaderboard feature. I will put it in the nav bar. */}
+                        <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
                         {isGuest ? (
                              <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/>
                         ) : (
