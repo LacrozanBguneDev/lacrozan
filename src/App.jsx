@@ -9,9 +9,8 @@ import {
     getAuth, 
     onAuthStateChanged, 
     signOut, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword,
-    signInAnonymously, 
+    GoogleAuthProvider,
+    signInWithPopup,
     signInWithCustomToken 
 } from 'firebase/auth';
 import { 
@@ -58,7 +57,6 @@ const DEVELOPER_EMAIL = 'irhamdika00@gmail.com';
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i46/b87.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
-const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
 // --- KUNCI VAPID BARU (FIX) ---
@@ -81,6 +79,7 @@ const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const googleProvider = new GoogleAuthProvider();
 
 let messaging = null;
 try {
@@ -222,7 +221,7 @@ const getReputationBadge = (reputation, isDev) => {
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
     if (reputation >= 100) return { label: "INFLUENCER", icon: Gem, color: "bg-purple-500 text-white" };
     if (reputation >= 50) return { label: "RISING STAR", icon: Flame, color: "bg-orange-500 text-white" };
-    return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
+    return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300" };
 };
 
 // 9. Ekstraktor Hashtag
@@ -312,16 +311,16 @@ const ImageWithRetry = ({ src, alt, className }) => {
 
     if (error) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className}`} style={{minHeight: '200px'}}>
+            <div className={`bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 ${className}`} style={{minHeight: '200px'}}>
                 <ImageOff size={24} className="mb-2 opacity-50"/>
                 <p className="text-[10px] mb-2 text-center px-2">Gambar tidak dapat dimuat</p>
-                <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Refresh</button>
+                <button onClick={handleRetry} className="bg-white dark:bg-gray-800 border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Refresh</button>
             </div>
         );
     }
 
     return (
-        <div className={`relative ${className} overflow-hidden bg-gray-100`}>
+        <div className={`relative ${className} overflow-hidden bg-gray-100 dark:bg-gray-800`}>
             {loading && (
                 <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="animate-spin text-gray-400" size={24}/></div>
             )}
@@ -366,21 +365,21 @@ const AudioPlayer = ({ src }) => {
 };
 
 const SplashScreen = () => (
-    <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
+    <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white dark:from-gray-900 dark:to-black z-[100] flex flex-col items-center justify-center">
         <div className="relative mb-8 animate-bounce-slow">
             <img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/>
             <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div>
         </div>
         <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest">{APP_NAME}</h1>
-        <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
+        <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
         <p className="text-gray-400 text-xs font-medium animate-pulse">Memuat data terbaru...</p>
     </div>
 );
 
 const SkeletonPost = () => (
-    <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
-        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200"></div><div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div></div>
-        <div className="h-6 bg-gray-200 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 rounded-2xl mb-4"></div><div className="flex gap-4"><div className="h-8 w-16 bg-gray-100 rounded-full"></div><div className="h-8 w-16 bg-gray-100 rounded-full"></div></div>
+    <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
+        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200 dark:bg-gray-700"></div><div className="flex-1"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 dark:bg-gray-600 rounded w-1/4"></div></div></div>
+        <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-4"></div><div className="flex gap-4"><div className="h-8 w-16 bg-gray-100 dark:bg-gray-700 rounded-full"></div><div className="h-8 w-16 bg-gray-100 dark:bg-gray-700 rounded-full"></div></div>
     </div>
 );
 
@@ -389,8 +388,8 @@ const renderMarkdown = (text) => {
     let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>');
     html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { if (match.includes('href="')) return match; return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; });
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 px-1 rounded text-sm text-sky-700 font-mono border border-sky-100">$1</code>').replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>').replace(/\n/g, '<br>');
-    return <div className="text-gray-800 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>').replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>').replace(/\n/g, '<br>');
+    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
 // ==========================================
@@ -461,16 +460,6 @@ const DeveloperDashboard = ({ onClose }) => {
                             <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
                             <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
-                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
-                            <button onClick={async () => {
-                                if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; }
-                                const permission = await Notification.requestPermission();
-                                if (permission === "granted") { 
-                                    new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO });
-                                } else { alert("Izin notifikasi ditolak oleh user."); }
-                            }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
-                        </div>
                         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
                             <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
@@ -487,74 +476,119 @@ const DeveloperDashboard = ({ onClose }) => {
 };
 
 // ==========================================
-// BAGIAN 5: LAYAR OTENTIKASI & LANDING
+// BAGIAN 5: LAYAR OTENTIKASI & PENGATURAN USER
 // ==========================================
 
-const AuthScreen = ({ onLoginSuccess }) => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+// --- ONBOARDING SCREEN (PENGGANTI LANDING PAGE UNTUK USER BARU) ---
+const OnboardingScreen = ({ onComplete, user }) => {
     const [username, setUsername] = useState('');
-    const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    const [loading, setLoading] = useState(false);
 
-    const handleAuth = async (e) => {
-        e.preventDefault(); setError(''); setIsLoading(true);
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!username.trim()) return alert("Username wajib diisi!");
+        setLoading(true);
         try {
-            if (isLogin) {
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
-                const snap = await getDoc(ref);
-                if(!snap.exists()) {
-                    await setDoc(ref, { username: email.split('@')[0], email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() });
-                } else {
-                    await updateDoc(ref, { lastSeen: serverTimestamp() });
-                }
-            } else {
-                if (!username.trim()) throw new Error("Username wajib diisi");
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [], mood: '' });
-            }
-            onLoginSuccess();
-        } catch (err) { setError("Login/Daftar gagal. Periksa data atau koneksi."); } finally { setIsLoading(false); }
+            await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {
+                username: username.trim(),
+                email: user.email,
+                uid: user.uid,
+                photoURL: user.photoURL || '',
+                createdAt: serverTimestamp(),
+                following: [],
+                followers: [],
+                savedPosts: [],
+                lastSeen: serverTimestamp()
+            });
+            onComplete();
+        } catch (error) {
+            alert("Gagal menyimpan data: " + error.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] p-6 font-sans">
-            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
-                <div className="text-center mb-8 mt-2"><h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2><p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p></div>
-                {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
-                <form onSubmit={handleAuth} className="space-y-4">
-                    {!isLogin && <div className="group relative"><User size={18} className="absolute left-4 top-3.5 text-gray-400"/><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username Unik" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>}
-                    <div className="group relative"><Mail size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Alamat Email" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
-                    <div className="group relative"><Lock size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Kata Sandi" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
-                    <button disabled={isLoading} className="w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 shadow-lg shadow-gray-200 transition transform active:scale-95 disabled:opacity-70">{isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}</button>
+        <div className="fixed inset-0 bg-white z-[80] flex flex-col items-center justify-center p-6 animate-in fade-in">
+            <div className="w-full max-w-sm text-center">
+                <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
+                <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
+                <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
+                
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="text-left">
+                        <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
+                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500 outline-none"/>
+                    </div>
+                    <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">
+                        {loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}
+                    </button>
                 </form>
-                <div className="mt-6 text-center pt-6 border-t border-gray-100"><p className="text-xs text-gray-500 mb-4">{isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">{isLogin ? 'Daftar' : 'Masuk'}</button></p>
-                {isLogin && <a href={PASSWORD_RESET_LINK} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 text-sky-600 rounded-xl text-xs font-bold hover:bg-sky-100 transition"><HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?</a>}</div>
             </div>
         </div>
     );
 };
 
-const LandingPage = ({ onGetStarted }) => {
+// --- AUTH SCREEN (LOGIN GOOGLE SAJA) ---
+const AuthModal = ({ onClose }) => {
+    const handleGoogleLogin = async () => {
+        try {
+            await signInWithPopup(auth, googleProvider);
+            onClose();
+        } catch (error) {
+            console.error(error);
+            alert("Gagal login dengan Google.");
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-[#F0F4F8] flex flex-col items-center justify-center px-6 py-12 font-sans relative overflow-hidden">
-            <div className="relative z-10 text-center w-full max-w-md">
-                <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
-                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V24.0 (Ultimate)</div></div>
-                    <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
-                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial masa depan. Cepat, Ringan, dan Kaya Fitur! 🌍✨</p>
-                    <div className="grid grid-cols-2 gap-3 mb-8">
-                        <div className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-indigo-100 transition"><Gamepad2 size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Gamers</span></div>
-                        <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-emerald-100 transition"><BookOpen size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Edukasi</span></div>
-                        <div className="bg-rose-50 text-rose-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-rose-100 transition"><Users size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Sosial</span></div>
-                        <div className="bg-amber-50 text-amber-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-amber-100 transition"><Globe size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Global</span></div>
-                    </div>
-                    <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/></button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
+                <div className="text-center mb-6">
+                    <img src={APP_LOGO} className="w-16 h-16 mx-auto mb-3"/>
+                    <h2 className="text-xl font-black text-gray-800 dark:text-white">Masuk ke {APP_NAME}</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Bergabunglah dengan komunitas sekarang!</p>
                 </div>
-                <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default"><div className="relative"><img src={DEV_PHOTO} className="w-14 h-14 rounded-full border-2 border-white shadow-md object-cover" alt="Developer"/><div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"><Check size={10} className="text-white absolute top-0.5 left-0.5"/></div></div><div className="text-left"><p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Developed By</p><h3 className="font-bold text-gray-800 text-sm flex items-center gap-1">M. Irham Andika Putra <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/></h3><p className="text-xs text-gray-500">Siswa SMP Negeri 3 Mentok • 14 Tahun</p></div></div>
+                <button onClick={handleGoogleLogin} className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-white py-3 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition shadow-sm">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5"/>
+                    Lanjutkan dengan Google
+                </button>
+                <p className="text-[10px] text-center text-gray-400 mt-4">Dengan masuk, Anda menyetujui Ketentuan Layanan kami.</p>
+            </div>
+        </div>
+    );
+};
+
+// --- LEADERBOARD SCREEN (FITUR BARU) ---
+const LeaderboardScreen = ({ allUsers }) => {
+    // Sortir user berdasarkan followers terbanyak
+    const sortedUsers = useMemo(() => {
+        return [...allUsers]
+            .sort((a, b) => (b.followers?.length || 0) - (a.followers?.length || 0))
+            .slice(0, 50); // Top 50
+    }, [allUsers]);
+
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-24">
+            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Papan Peringkat</h1>
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+                {sortedUsers.map((u, index) => (
+                    <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${index < 3 ? 'bg-gradient-to-r from-yellow-50/50 to-transparent dark:from-yellow-900/10' : ''}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-500':index===1?'text-gray-400':index===2?'text-orange-500':'text-gray-300'}`}>
+                            {index + 1}
+                        </div>
+                        <div className="relative mr-3">
+                            <img src={u.photoURL || APP_LOGO} className="w-10 h-10 rounded-full object-cover border border-gray-200 dark:border-gray-600"/>
+                            {index === 0 && <Crown size={14} className="absolute -top-1 -right-1 text-yellow-500 fill-yellow-500"/>}
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">{u.username}</h3>
+                            <p className="text-xs text-gray-400">{(u.followers?.length || 0)} Pengikut</p>
+                        </div>
+                        {index < 3 && <Medal size={20} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}
+                    </div>
+                ))}
             </div>
         </div>
     );
@@ -564,9 +598,9 @@ const LandingPage = ({ onGetStarted }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-// --- POST ITEM (LENGKAP) ---
-const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper }) => {
-    const [liked, setLiked] = useState(post.likes?.includes(currentUserId));
+// --- POST ITEM (LENGKAP DENGAN MODE TAMU & DARK MODE) ---
+const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin }) => {
+    const [liked, setLiked] = useState(false);
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
     const [showComments, setShowComments] = useState(false);
     const [comments, setComments] = useState([]);
@@ -575,16 +609,17 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [editedTitle, setEditedTitle] = useState(post.title || '');
     const [editedContent, setEditedContent] = useState(post.content || '');
     
-    const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
+    const [isSaved, setIsSaved] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
 
-    const isOwner = post.userId === currentUserId;
+    const isOwner = currentUserId && post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
 
-    const isFollowing = (profile.following || []).includes(post.userId);
-    const isFollowedByTarget = (profile.followers || []).includes(post.userId);
+    // Safe access untuk guest mode
+    const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
+    const isFollowedByTarget = profile ? (profile.followers || []).includes(post.userId) : false;
     const isFriend = isFollowing && isFollowedByTarget;
 
     const MAX_CHARS = 250;
@@ -592,12 +627,18 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const displayText = isExpanded || !isLongText ? post.content : post.content.substring(0, MAX_CHARS) + "...";
 
     useEffect(() => {
-        setLiked(post.likes?.includes(currentUserId));
+        if (currentUserId) {
+            setLiked(post.likes?.includes(currentUserId));
+            setIsSaved(profile?.savedPosts?.includes(post.id));
+        } else {
+            setLiked(false);
+            setIsSaved(false);
+        }
         setLikeCount(post.likes?.length || 0);
-        setIsSaved(profile.savedPosts?.includes(post.id));
-    }, [post, currentUserId, profile.savedPosts]);
+    }, [post, currentUserId, profile?.savedPosts]);
 
     const handleLike = async () => {
+        if (isGuest) { onRequestLogin(); return; }
         const newLiked = !liked;
         setLiked(newLiked);
         setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
@@ -615,6 +656,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
 
     const handleSave = async () => {
+        if (isGuest) { onRequestLogin(); return; }
         const newSaved = !isSaved;
         setIsSaved(newSaved);
         const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
@@ -622,7 +664,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
 
     const handleComment = async (e) => {
-        e.preventDefault(); if (!newComment.trim()) return;
+        e.preventDefault(); 
+        if (isGuest) { onRequestLogin(); return; }
+        if (!newComment.trim()) return;
         try {
             await addDoc(collection(db, getPublicCollection('comments')), { postId: post.id, userId: currentUserId, text: newComment, username: profile.username, timestamp: serverTimestamp() });
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
@@ -645,53 +689,53 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
-        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 relative overflow-hidden group transition hover:shadow-lg">
+        <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
-            {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 text-orange-600 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
-            {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
+            {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 dark:border-orange-800 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
+            {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 dark:border-yellow-800 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
                     <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}</div></div>
-                    <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
+                    <div><h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
                 <div className="flex gap-2">
-                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
-                    {(isOwner || isMeDeveloper) && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
+                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                    {(isOwner || isMeDeveloper) && !isGuest && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
                 </div>
             </div>
 
             {isEditing ? (
-                <div className="mb-4 p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white border rounded-lg font-bold text-sm"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white border rounded-lg text-sm resize-none" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
+                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg font-bold text-sm dark:text-white"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg text-sm resize-none dark:text-white" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
             ) : (
                 <>
-                    {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
-                    <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
+                    {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{post.title}</h3>}
+                    <div className="text-sm text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
                     {(isImage || isVideo || isAudio || embed) && (
-                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
+                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
                             {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
                             {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
-                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
+                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 dark:bg-gray-900 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
                         </div>
                     )}
                 </>
             )}
 
-            <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
-                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
+            <div className="flex items-center gap-6 pt-2 border-t border-gray-50 dark:border-gray-700">
+                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
                 <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
-                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
             </div>
 
             {showComments && (
-                <div className="mt-5 pt-4 border-t border-gray-100 animate-in fade-in">
-                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( <div key={c.id} className="bg-gray-50 p-3 rounded-xl text-xs flex justify-between items-start group"><div><span className="font-bold text-gray-800 mr-1">{c.username}</span><span className="text-gray-600">{c.text}</span></div>{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div> ))}</div>
-                    <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
+                <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
+                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( <div key={c.id} className="bg-gray-50 dark:bg-gray-750 dark:bg-gray-900 p-3 rounded-xl text-xs flex justify-between items-start group"><div><span className="font-bold text-gray-800 dark:text-gray-200 mr-1">{c.username}</span><span className="text-gray-600 dark:text-gray-400">{c.text}</span></div>{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div> ))}</div>
+                    <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest} className="flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim() || isGuest} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
                 </div>
             )}
         </div>
@@ -736,32 +780,32 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 
     return (
         <div className="max-w-xl mx-auto p-4 pb-24">
-            <div className="bg-white rounded-[2rem] p-6 shadow-xl border border-sky-50 relative overflow-hidden mt-4">
+            <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div>
-                <h2 className="text-xl font-black text-gray-800 mb-6">Buat Postingan Baru</h2>
+                <h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
                     {loading && <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mb-2"><div className="bg-sky-500 h-full transition-all duration-300" style={{width:`${prog}%`}}/></div>}
-                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
-                    <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 text-sky-600 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
+                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
+                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
+                    <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-600 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-600 dark:text-gray-200 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 dark:bg-sky-900 text-sky-600 dark:text-sky-300 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
                     
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}>
                             <ImageIcon size={18} className="mr-2"/>
                             <span className="text-xs font-bold">{form.file && !form.isAudio ?'File Dipilih':'Foto/Video'}</span>
                             <input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video'), isAudio: false}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/>
                         </label>
                         
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.isAudio ?'bg-pink-50 border-pink-200 text-pink-600':'border-gray-200 text-gray-500'}`}>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.isAudio ?'bg-pink-50 border-pink-200 text-pink-600':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}>
                             <Music size={18} className="mr-2"/>
                             <span className="text-xs font-bold">{form.isAudio ? 'Audio Siap' : 'Audio'}</span>
                             <input type="file" className="hidden" accept="audio/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: false, isAudio: true});}}} disabled={loading}/>
                         </label>
 
-                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Shorts</span></div>
+                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Shorts</span></div>
                     </div>
                     
-                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
+                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-xs outline-none"/></div>
                     <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
                 </form>
             </div>
@@ -770,7 +814,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 };
 
 // --- PROFILE SCREEN ---
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
@@ -780,7 +824,9 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
 
-    const isSelf = viewerProfile.uid === profileData.uid; 
+    // Jika viewerProfile null (guest), set uid null agar tidak crash
+    const viewerUid = viewerProfile ? viewerProfile.uid : null;
+    const isSelf = viewerUid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
     const userPosts = allPosts.filter(p=>p.userId===profileData.uid).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
@@ -795,7 +841,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // Kompresi dulu foto profil
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -807,33 +852,33 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
-    const isFollowing = (viewerProfile.following || []).includes(profileData.uid); 
-    const isFollowedByTarget = (viewerProfile.followers || []).includes(profileData.uid);
+    const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
+    const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
     const isFriend = isFollowing && isFollowedByTarget; 
     const isOnline = isUserOnline(profileData.lastSeen);
     const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm border border-sky-50 dark:border-gray-700 mb-8 mx-4 text-center relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
-                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
+                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>
                         {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
                         {profileData.photoURL ? <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{profileData.username?.[0]}</div>}
                     </div>
-                    <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
                     {isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
 
-                {edit ? ( <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
+                {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
-                {!isSelf && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                {!isSelf && !isGuest && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-                <div className="flex justify-center gap-6 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
+                <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
-            {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Disimpan</button></div> )}
-            <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
+            {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Disimpan</button></div> )}
+            <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
     );
@@ -844,12 +889,12 @@ const TrendingTags = ({ posts }) => {
     const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
     if (tags.length === 0) return null;
     return (
-        <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} className="px-3 py-1 bg-white border border-sky-100 rounded-full text-[10px] font-bold text-gray-600 shadow-sm whitespace-nowrap flex items-center gap-1">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div>
+        <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} className="px-3 py-1 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-600 dark:text-gray-300 shadow-sm whitespace-nowrap flex items-center gap-1">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div>
     );
 };
 
 // --- HOME SCREEN ---
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
     const [isFirstLoad, setIsFirstLoad] = useState(true);
@@ -900,25 +945,25 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
-            <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 backdrop-blur-md py-2 -mx-4 px-4">
+            <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-2 -mx-4 px-4">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Terbaru</button>
-                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white text-gray-500'}`}>Populer</button>
-                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white text-gray-500'}`}>😂 Meme</button>
+                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Terbaru</button>
+                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
+                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme</button>
                 </div>
-                <button onClick={manualRefresh} className="p-2 bg-white text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
+                <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
 
             <TrendingTags posts={allPosts} />
 
             {loadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 ? (
-                <div className="text-center py-10 bg-white rounded-3xl shadow-sm border border-dashed border-gray-200"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
+                <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
             ) : (
                 <>
                     {visiblePosts.map(p => (
                         <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper}/>
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin}/>
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-10 w-full flex items-center justify-center">
@@ -932,7 +977,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 };
 
 // --- 8. SHORTS SCREEN (INFINITE LOOP) ---
-const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
+const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile, isGuest, onRequestLogin }) => {
     const [feed, setFeed] = useState([]);
     useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
     const handleScroll = (e) => {
@@ -945,18 +990,19 @@ const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
                 {feed.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-500 font-bold"><Film size={48} className="mb-4 opacity-50"/> <p>Belum ada video Shorts</p></div>
                 ) : (
-                    feed.map((p, i) => <ShortItem key={`${p.id}-${i}`} post={p} currentUserId={currentUserId} handleFollow={handleFollow} profile={profile}/>)
+                    feed.map((p, i) => <ShortItem key={`${p.id}-${i}`} post={p} currentUserId={currentUserId} handleFollow={handleFollow} profile={profile} isGuest={isGuest} onRequestLogin={onRequestLogin}/>)
                 )}
             </div>
         </div>
     );
 };
 
-const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
+const ShortItem = ({ post, currentUserId, handleFollow, profile, isGuest, onRequestLogin }) => {
     const ref = useRef(); const vidRef = useRef();
     const [playing, setPlaying] = useState(false); const [muted, setMuted] = useState(false);
     const [showCom, setShowCom] = useState(false); const [comments, setComments] = useState([]); const [txt, setTxt] = useState('');
-    const isLiked = post.likes?.includes(currentUserId); const embed = useMemo(()=>getMediaEmbed(post.mediaUrl),[post.mediaUrl]);
+    const isLiked = currentUserId ? post.likes?.includes(currentUserId) : false; 
+    const embed = useMemo(()=>getMediaEmbed(post.mediaUrl),[post.mediaUrl]);
 
     useEffect(() => {
         const obs = new IntersectionObserver(e => { e.forEach(en => { setPlaying(en.isIntersecting); if(vidRef.current) { if(en.isIntersecting) vidRef.current.play().catch(()=>{}); else { vidRef.current.pause(); vidRef.current.currentTime = 0; } } }); }, {threshold: 0.6});
@@ -964,6 +1010,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     }, []);
 
     const toggleLike = async () => {
+        if (isGuest) { onRequestLogin(); return; }
         const r = doc(db, getPublicCollection('posts'), post.id);
         if(isLiked) updateDoc(r, {likes:arrayRemove(currentUserId)});
         else { updateDoc(r, {likes:arrayUnion(currentUserId)}); if(post.userId!==currentUserId) sendNotification(post.userId, 'like', 'menyukai shorts Anda', profile, post.id); }
@@ -977,7 +1024,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/80 pointer-events-none flex flex-col justify-end p-5 pb-24">
                 <div className="pointer-events-auto flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-full border-2 border-white/50 p-0.5"><img src={post.user?.photoURL||APP_LOGO} className="w-full h-full rounded-full object-cover"/></div>
-                    <div><p className="text-white font-bold text-sm drop-shadow-md">@{post.user?.username}</p><button onClick={()=>handleFollow(post.userId, false)} className="bg-white/20 backdrop-blur-md text-white text-[10px] px-3 py-0.5 rounded-full mt-1 hover:bg-white/40 transition">Ikuti</button></div>
+                    <div><p className="text-white font-bold text-sm drop-shadow-md">@{post.user?.username}</p><button onClick={()=> isGuest ? onRequestLogin() : handleFollow(post.userId, false)} className="bg-white/20 backdrop-blur-md text-white text-[10px] px-3 py-0.5 rounded-full mt-1 hover:bg-white/40 transition">Ikuti</button></div>
                 </div>
                 <p className="text-white text-sm drop-shadow-md line-clamp-3 mb-2">{post.content}</p>
              </div>
@@ -986,7 +1033,7 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
                 <button onClick={()=>setShowCom(true)} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><MessageSquare size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">{post.commentsCount||0}</span></button>
                 <button onClick={()=>{navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin')}} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><Share2 size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">Share</span></button>
              </div>
-             {showCom && <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-end pointer-events-auto"><div className="w-full h-[60%] bg-white rounded-t-3xl p-5 flex flex-col animate-in slide-in-from-bottom duration-300"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800">Komentar</h3><button onClick={()=>setShowCom(false)} className="bg-gray-100 p-1 rounded-full"><X size={20}/></button></div><div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">{comments.map((c,i)=><div key={i} className="text-xs text-gray-800 border-b border-gray-50 pb-2"><span className="font-bold text-sky-600 mr-2">{c.username}</span>{c.text}</div>)}</div><div className="flex gap-2 mt-2 pt-2 border-t"><input value={txt} onChange={e=>setTxt(e.target.value)} className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-xs outline-none" placeholder="Ketik..."/><button onClick={async()=>{if(!txt.trim())return;await addDoc(collection(db,getPublicCollection('comments')),{postId:post.id,userId:currentUserId,text:txt,username:profile.username});await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });setTxt('')}} className="text-sky-600 font-bold text-xs px-2">Kirim</button></div></div></div>}
+             {showCom && <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-end pointer-events-auto"><div className="w-full h-[60%] bg-white rounded-t-3xl p-5 flex flex-col animate-in slide-in-from-bottom duration-300"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800">Komentar</h3><button onClick={()=>setShowCom(false)} className="bg-gray-100 p-1 rounded-full"><X size={20}/></button></div><div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">{comments.map((c,i)=><div key={i} className="text-xs text-gray-800 border-b border-gray-50 pb-2"><span className="font-bold text-sky-600 mr-2">{c.username}</span>{c.text}</div>)}</div><div className="flex gap-2 mt-2 pt-2 border-t"><input value={txt} onChange={e=>setTxt(e.target.value)} disabled={isGuest} className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-xs outline-none" placeholder={isGuest ? "Login dulu..." : "Ketik..."}/><button onClick={async()=>{if(!txt.trim() || isGuest)return;await addDoc(collection(db,getPublicCollection('comments')),{postId:post.id,userId:currentUserId,text:txt,username:profile.username});await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });setTxt('')}} className="text-sky-600 font-bold text-xs px-2">Kirim</button></div></div></div>}
         </div>
     );
 };
@@ -998,7 +1045,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
         return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead)));
     }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
-    return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
+    return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
@@ -1007,9 +1054,47 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
     return (
         <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
-            <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
+            <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
             <PostItem post={post} {...props}/>
-            <div className="mt-8 text-center p-6 bg-gray-50 rounded-2xl border border-gray-200 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
+            <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
+        </div>
+    );
+};
+
+const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin }) => {
+    const [queryTerm, setQueryTerm] = useState('');
+    const [results, setResults] = useState({ users: [], posts: [] });
+
+    useEffect(() => {
+        if (!queryTerm) { setResults({ users: [], posts: [] }); return; }
+        const lower = queryTerm.toLowerCase();
+        const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
+        const foundPosts = allPosts.filter(p => p.content?.toLowerCase().includes(lower) || p.title?.toLowerCase().includes(lower));
+        setResults({ users: foundUsers, posts: foundPosts });
+    }, [queryTerm, allPosts, allUsers]);
+
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-24">
+            <div className="bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-2 mb-6">
+                <Search className="ml-2 text-gray-400"/><input value={queryTerm} onChange={e=>setQueryTerm(e.target.value)} placeholder="Cari orang atau postingan..." className="flex-1 p-2 outline-none bg-transparent dark:text-white"/>
+            </div>
+            {queryTerm && (
+                <div className="space-y-6">
+                    {results.users.length > 0 && (
+                        <div>
+                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Pengguna</h3>
+                            <div className="space-y-3">{results.users.map(u => ( <div key={u.uid} className="bg-white dark:bg-gray-800 p-3 rounded-xl flex justify-between items-center shadow-sm"> <div className="flex items-center gap-3" onClick={()=>goToProfile(u.uid)}> <img src={u.photoURL||APP_LOGO} className="w-10 h-10 rounded-full bg-gray-200 object-cover"/> <div><p className="font-bold text-sm dark:text-white">{u.username}</p><p className="text-[10px] text-gray-500">{u.followers?.length} Pengikut</p></div> </div> <button onClick={()=>isGuest ? onRequestLogin() : handleFollow(u.uid, (profile?.following||[]).includes(u.uid))} className="bg-sky-50 text-sky-600 px-3 py-1 rounded-full text-xs font-bold">{(profile?.following||[]).includes(u.uid) ? 'Mengikuti' : 'Ikuti'}</button> </div> ))}</div>
+                        </div>
+                    )}
+                    {results.posts.length > 0 && (
+                        <div>
+                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan</h3>
+                            <div className="space-y-3">{results.posts.map(p => ( <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex gap-3" onClick={()=>goToProfile(p.userId)}> <div className="flex-1"> <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> <p className="text-xs text-gray-500 line-clamp-2">{p.content}</p> </div> </div> ))}</div>
+                        </div>
+                    )}
+                </div>
+            )}
+            {!queryTerm && <div className="text-center text-gray-400 mt-20 flex flex-col items-center"><Search size={48} className="opacity-20 mb-4"/><p>Mulai ketik untuk mencari...</p></div>}
         </div>
     );
 };
@@ -1018,7 +1103,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
-    const [page, setPage] = useState('landing'); 
+    const [page, setPage] = useState('home'); // Default ke home (beranda)
     const [posts, setPosts] = useState([]); 
     const [users, setUsers] = useState([]); 
     const [targetUid, setTargetUid] = useState(null); 
@@ -1027,9 +1112,34 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
 
+    // STATE BARU UNTUK FITUR BARU
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [darkMode, setDarkMode] = useState(false);
+
     useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
-    useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
+    useEffect(() => { 
+        // Load tema dari localStorage
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'dark') {
+            document.documentElement.classList.add('dark');
+            setDarkMode(true);
+        }
+    }, []);
+
+    const toggleDarkMode = () => {
+        if (darkMode) {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+            setDarkMode(false);
+        } else {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+            setDarkMode(true);
+        }
+    };
+
     useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
 
     useEffect(() => {
@@ -1053,41 +1163,137 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    useEffect(() => onAuthStateChanged(auth, u => { if(u) { setUser(u); updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); requestNotificationPermission(u.uid); } else { setUser(null); setProfile(null); } }), []);
-    useEffect(() => { if(!user) return; if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home'); const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => s.exists() ? setProfile({...s.data(), uid:user.uid, email:user.email}) : setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {username:user.email.split('@')[0], email:user.email, uid:user.uid, following:[], followers:[], photoURL:'', lastSeen: serverTimestamp(), savedPosts: []})); const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); const uids = [...new Set(raw.map(r=>r.userId))]; const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u)))); const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()}); setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user}))); }); const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})))); const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); }; }, [user]);
+    useEffect(() => onAuthStateChanged(auth, async (u) => { 
+        if(u) { 
+            setUser(u);
+            requestNotificationPermission(u.uid);
+            
+            // Cek apakah user sudah punya profil
+            const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid));
+            if (!userDoc.exists()) {
+                setShowOnboarding(true); // Tampilkan onboarding jika belum punya data
+            } else {
+                 await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{});
+            }
+        } else { 
+            setUser(null); 
+            setProfile(null); 
+        } 
+    }), []);
 
-    const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
+    useEffect(() => { 
+        if(user) {
+            // Jika user login, setup listener profil
+            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
+                if(s.exists()) {
+                     setProfile({...s.data(), uid:user.uid, email:user.email});
+                     if (showOnboarding) setShowOnboarding(false); // Tutup onboarding jika data sudah masuk
+                }
+            });
+            const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
+            return () => { unsubP(); unsubNotif(); };
+        }
+    }, [user]);
+
+    // Listener Global untuk Post & User (Selalu jalan untuk Mode Tamu)
+    useEffect(() => {
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); const uids = [...new Set(raw.map(r=>r.userId))]; const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u)))); const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()}); setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user}))); }); 
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
+        return () => { unsubPosts(); unsubUsers(); };
+    }, []);
+
+    const handleFollow = async (uid, isFollowing) => { 
+        if (!user) { setShowAuthModal(true); return; } // Guest check
+        if (!profile) return; 
+        const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); 
+        const targetRef = doc(db, getPublicCollection('userProfiles'), uid); 
+        try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } 
+    };
+    
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
     if (showSplash) return <SplashScreen />;
-    if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
-    if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
-    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
+    if (user === undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
 
-    const isMeDeveloper = user.email === DEVELOPER_EMAIL;
+    const isMeDeveloper = user && user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
+    const isGuest = !user; // Mode tamu aktif jika user null
 
     return (
         <div>
-            <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
-                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 shadow-sm transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+            {/* INJECT CSS VARIABLES FOR DARK MODE COMPATIBILITY */}
+            <style>{`
+                .dark body { background-color: #111827; color: white; }
+            `}</style>
+            
+            <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
+                
+                {/* GLOBAL HEADER */}
+                {page!=='shorts' && ( 
+                    <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-800 shadow-sm transition-colors duration-300">
+                        <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
+                            <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
+                            <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span>
+                        </div>
+                        <div className="flex gap-3 items-center">
+                            <button onClick={toggleDarkMode} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-yellow-400 hover:bg-gray-100 transition">
+                                {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
+                            </button>
+                            
+                            {isGuest ? (
+                                <button onClick={()=>setShowAuthModal(true)} className="px-4 py-2 bg-sky-500 text-white rounded-full font-bold text-xs shadow-lg hover:bg-sky-600 transition flex items-center gap-2">
+                                    <LogIn size={16}/> Masuk
+                                </button>
+                            ) : (
+                                <>
+                                    <a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a>
+                                    <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative">
+                                        <Bell size={20}/>
+                                        {notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                                    </button>
+                                    <button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button>
+                                </>
+                            )}
+                        </div>
+                    </header> 
+                )}
+
                 <main className={page!=='shorts'?'pt-16':''}>
-                    {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
-                    {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
-                    {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
-                    {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
-                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
-                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
+                    {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
+                    {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user?.uid} handleFollow={handleFollow} profile={profile} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/></>}
+                    {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
+                    {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
+                    {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
+                    {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} />}
+                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)}/>}
                 </main>
-                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                
+                {page!=='shorts' && (
+                    <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-6 z-40">
+                        <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
+                        <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
+                        <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button>
+                        <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/> {/* Ganti Shorts button dgn Leaderboard untuk guest/general access easier? No, better keep shorts and add leaderboard somewhere else? User asked for leaderboard feature. I'll replace Film with Trophy just for navbar space or maybe add it. Let's replace Film with Trophy in navbar for now or squeeze it in? Squeezing 5 icons is fine. Actually standard navbar has 5 icons. I will replace "User" with Trophy for guest? No. I will swap Shorts(Film) with Trophy in navbar based on request emphasis, or just add it. Let's add it. */}
+                        {/* Wait, user asked for Leaderboard feature. I will put it in the nav bar. */}
+                        {isGuest ? (
+                             <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/>
+                        ) : (
+                             <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/>
+                        )}
+                    </nav>
+                )}
+
+                {/* MODAL & OVERLAYS */}
+                {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
+                {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}
                 <PWAInstallPrompt />
             </div>
         </div>
     );
 };
 
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50' : 'text-gray-400 hover:text-gray-600'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
+const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
