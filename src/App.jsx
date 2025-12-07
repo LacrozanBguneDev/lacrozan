@@ -9,8 +9,8 @@ import {
     getAuth, 
     onAuthStateChanged, 
     signOut, 
-    GoogleAuthProvider,
-    signInWithPopup,
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword,
     signInAnonymously, 
     signInWithCustomToken 
 } from 'firebase/auth';
@@ -33,8 +33,7 @@ import {
     orderBy, 
     limit,
     increment,
-    writeBatch,
-    getDocs 
+    writeBatch
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -50,30 +49,10 @@ import {
     CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    BookOpen as BookOpenIcon,
-    Sparkles as SparklesIcon,
-    HardDrive, Terminal, ServerCrash,
-    Download, LayoutGrid, Maximize2
+    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2
 } from 'lucide-react';
 
-// ==========================================
-// STABILISASI APLIKASI: Global Console Silencer
-// ==========================================
-const originalConsole = { ...console };
-console.log = () => {};
-console.warn = () => {};
-console.error = () => {};
-console.info = () => {};
-const enableDevConsole = () => {
-    console.log = originalConsole.log;
-    console.warn = originalConsole.warn;
-    console.error = originalConsole.error;
-    console.info = originalConsole.info;
-    originalConsole.log("Developer console diaktifkan.");
-};
-// ==========================================
-
+// SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -81,11 +60,17 @@ const DEVELOPER_EMAIL = 'irhamdika00@gmail.com';
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i46/b87.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
+const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
+// --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
+// Set ini menyimpan URL gambar yang SUDAH berhasil dimuat.
 const globalImageCache = new Set();
+
+// --- KUNCI VAPID BARU ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
+// --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
@@ -109,27 +94,12 @@ try {
         messaging = getMessaging(app);
     }
 } catch (e) {
-    originalConsole.log("Messaging skipped");
+    console.log("Messaging skipped");
 }
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
-
-const logErrorToFirestore = async (error, errorInfo, userId = 'unknown') => {
-    try {
-        await addDoc(collection(db, getPublicCollection('globalErrors')), {
-            userId: userId,
-            message: error.message || 'Unknown error',
-            stack: errorInfo ? errorInfo.componentStack : error.stack || 'No stack available',
-            timestamp: serverTimestamp(),
-            userAgent: navigator.userAgent
-        });
-        originalConsole.error("ERROR FATAL TERCATAT KE DB:", error);
-    } catch (dbError) {
-        originalConsole.error("GAGAL MENCATAT ERROR KE DB:", dbError);
-    }
-};
 
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
@@ -145,9 +115,7 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
-// --- BASE64 SMART COMPRESSION ---
-// Mengompres gambar menjadi string base64 yang efisien untuk Firestore (< 500KB per gambar)
-const compressImageSmart = (file) => {
+const compressImage = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -156,21 +124,13 @@ const compressImageSmart = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 800; // Resolusi optimal untuk mobile/web grid
-                const MAX_HEIGHT = 800;
+                const MAX_WIDTH = 1080; 
                 let width = img.width;
                 let height = img.height;
 
-                if (width > height) {
-                    if (width > MAX_WIDTH) {
-                        height *= MAX_WIDTH / width;
-                        width = MAX_WIDTH;
-                    }
-                } else {
-                    if (height > MAX_HEIGHT) {
-                        width *= MAX_HEIGHT / height;
-                        height = MAX_HEIGHT;
-                    }
+                if (width > MAX_WIDTH) {
+                    height *= MAX_WIDTH / width;
+                    width = MAX_WIDTH;
                 }
 
                 canvas.width = width;
@@ -179,9 +139,17 @@ const compressImageSmart = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Konversi ke Base64 dengan kualitas 0.7 (cukup bagus tapi ringan)
-                const base64String = canvas.toDataURL('image/jpeg', 0.7);
-                resolve(base64String);
+                ctx.canvas.toBlob((blob) => {
+                    if (!blob) {
+                        reject(new Error("Gagal kompresi gambar"));
+                        return;
+                    }
+                    const newFile = new File([blob], file.name, {
+                        type: 'image/jpeg',
+                        lastModified: Date.now(),
+                    });
+                    resolve(newFile);
+                }, 'image/jpeg', 0.8); 
             };
             img.onerror = (error) => reject(error);
         };
@@ -210,10 +178,51 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// Fungsi lama upload ke FAA dipertahankan tapi tidak digunakan lagi sesuai request "jangan hapus kode"
 const uploadToFaaAPI = async (file, onProgress) => {
-    // Legacy function placeholder
-    return null;
+    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
+    const formData = new FormData();
+    if(onProgress) onProgress(10);
+    formData.append('file', file, file.name);
+
+    const delay = ms => new Promise(res => setTimeout(res, ms));
+
+    try {
+        for (let i = 10; i <= 50; i += 10) { 
+            if(onProgress) onProgress(i); 
+            await delay(100); 
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const response = await fetch(apiUrl, { 
+            method: 'POST', 
+            body: formData,
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if(onProgress) onProgress(80);
+        
+        if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
+        
+        const data = await response.json();
+        if(onProgress) onProgress(100);
+        
+        if (data && data.url) {
+            let secureUrl = data.url;
+            if (secureUrl.startsWith('http://')) { secureUrl = secureUrl.replace('http://', 'https://'); }
+            return secureUrl;
+        } else if (data && data.result && data.result.url) { 
+            return data.result.url;
+        } else { 
+            throw new Error('Format respon API tidak dikenali.'); 
+        }
+    } catch (error) {
+        if(onProgress) onProgress(0); 
+        console.error("Upload Error:", error);
+        throw new Error('Gagal upload. Koneksi server gambar sedang sibuk.');
+    }
 };
 
 const formatTimeAgo = (timestamp) => {
@@ -244,7 +253,7 @@ const getReputationBadge = (reputation, isDev) => {
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
     if (reputation >= 100) return { label: "INFLUENCER", icon: Gem, color: "bg-purple-500 text-white" };
     if (reputation >= 50) return { label: "RISING STAR", icon: Flame, color: "bg-orange-500 text-white" };
-    return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300" };
+    return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
 const extractHashtags = (text) => {
@@ -264,13 +273,14 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & HELPER
 // ==========================================
 
-const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
+const PWAInstallPrompt = () => {
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
 
     useEffect(() => {
         const handler = (e) => {
             e.preventDefault();
-            setDeferredPrompt(e); 
+            setDeferredPrompt(e);
             const lastDismiss = localStorage.getItem('pwa_dismissed');
             if (!lastDismiss || Date.now() - parseInt(lastDismiss) > 86400000) {
                 setShowBanner(true);
@@ -278,49 +288,86 @@ const PWAInstallPrompt = ({ deferredPrompt, setDeferredPrompt }) => {
         };
         window.addEventListener('beforeinstallprompt', handler);
         return () => window.removeEventListener('beforeinstallprompt', handler);
-    }, [setDeferredPrompt]); 
+    }, []);
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
-            setDeferredPrompt(null); 
+            setDeferredPrompt(null);
             setShowBanner(false);
         }
     };
 
-    if (!showBanner || !deferredPrompt) return null;
+    if (!showBanner) return null;
 
     return (
-        <div className="fixed bottom-24 left-4 right-4 bg-gray-900/95 dark:bg-white/95 backdrop-blur-md text-white dark:text-gray-900 p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700 dark:border-gray-200">
+        <div className="fixed bottom-24 left-4 right-4 bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom duration-500 border border-gray-700">
             <div className="flex items-center gap-3">
                 <div className="bg-sky-500 p-2.5 rounded-xl shadow-lg shadow-sky-500/20"><Smartphone size={24}/></div>
-                <div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-300 dark:text-gray-600">Akses Lebih Cepat</p></div>
+                <div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-300">Notifikasi & Fullscreen</p></div>
             </div>
             <div className="flex items-center gap-2">
-                <button onClick={()=>{setShowBanner(false); localStorage.setItem('pwa_dismissed', Date.now())}} className="p-2 text-gray-400 hover:text-white bg-gray-800 dark:bg-gray-100 dark:hover:text-gray-900 rounded-full"><X size={16}/></button>
+                <button onClick={()=>{setShowBanner(false); localStorage.setItem('pwa_dismissed', Date.now())}} className="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-full"><X size={16}/></button>
                 <button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 transition">Pasang</button>
             </div>
         </div>
     );
 };
 
-const ImageWithRetry = ({ src, alt, className, fallbackText, onClick }) => {
+// --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
+// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
+// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
+const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
+    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
     const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
     const [status, setStatus] = useState(initialState);
     const [retryKey, setRetryKey] = useState(0);
+    const [attempts, setAttempts] = useState(0);
+
+    useEffect(() => {
+        if (globalImageCache.has(src)) {
+            setStatus('loaded');
+        } else {
+            setStatus('loading');
+            setRetryKey(0);
+            setAttempts(0);
+        }
+    }, [src]);
+
+    useEffect(() => {
+        let timeout;
+        if (status === 'error') {
+            // Retry otomatis setiap 4 detik jika gagal
+            timeout = setTimeout(() => {
+                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
+                if (globalImageCache.has(src)) {
+                    setStatus('loaded');
+                } else {
+                    setRetryKey(prev => prev + 1);
+                    setStatus('loading');
+                    setAttempts(prev => prev + 1);
+                }
+            }, 4000);
+        }
+        return () => clearTimeout(timeout);
+    }, [status, src]);
 
     const handleSuccess = () => {
-        globalImageCache.add(src); 
+        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
         setStatus('loaded');
+    };
+
+    const handleError = () => {
+        setStatus('error');
     };
 
     if (!src) {
         return (
-            <div className={`bg-gray-100 dark:bg-gray-800 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200 dark:border-gray-700`}>
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`}>
                  {fallbackText ? (
-                    <div className="w-full h-full flex items-center justify-center bg-sky-100 dark:bg-sky-900/30 text-sky-600 font-black text-2xl uppercase">
+                    <div className="w-full h-full flex items-center justify-center bg-sky-100 text-sky-600 font-black text-2xl uppercase">
                         {fallbackText[0]}
                     </div>
                 ) : <ImageOff size={24} className="opacity-30"/>}
@@ -329,10 +376,11 @@ const ImageWithRetry = ({ src, alt, className, fallbackText, onClick }) => {
     }
 
     return (
-        <div className={`relative ${className} overflow-hidden bg-gray-50 dark:bg-gray-800 cursor-pointer`} onClick={onClick}>
+        <div className={`relative ${className} overflow-hidden bg-gray-50`}>
             {status !== 'loaded' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 dark:bg-gray-800/80 backdrop-blur-sm transition-all duration-300">
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 backdrop-blur-sm transition-all duration-300">
                     <Loader2 className="animate-spin text-sky-500 mb-2" size={20}/>
+                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Mencoba lagi ({attempts})...</span>}
                 </div>
             )}
             
@@ -342,20 +390,11 @@ const ImageWithRetry = ({ src, alt, className, fallbackText, onClick }) => {
                 alt={alt} 
                 className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity duration-500`}
                 onLoad={handleSuccess}
-                onError={()=>setStatus('error')}
+                onError={handleError}
                 loading="lazy"
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
             />
-        </div>
-    );
-};
-
-// --- LIGHTBOX IMAGE VIEWER ---
-const FullScreenViewer = ({ src, onClose }) => {
-    if (!src) return null;
-    return (
-        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center animate-in fade-in duration-300">
-            <button onClick={onClose} className="absolute top-4 right-4 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition"><X size={24}/></button>
-            <img src={src} className="max-w-full max-h-screen object-contain p-2" />
         </div>
     );
 };
@@ -363,81 +402,182 @@ const FullScreenViewer = ({ src, onClose }) => {
 const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
-    
+    const [error, setError] = useState(false);
+
     const togglePlay = () => {
         if (audioRef.current) {
             if (isPlaying) audioRef.current.pause();
-            else audioRef.current.play();
+            else {
+                const playPromise = audioRef.current.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.error("Audio playback error:", error);
+                        setIsPlaying(false);
+                        setError(true);
+                    });
+                }
+            }
             setIsPlaying(!isPlaying);
+        }
+    };
+
+    const handleRetry = () => {
+        setError(false);
+        setIsPlaying(false);
+        if(audioRef.current) {
+            audioRef.current.load();
         }
     };
 
     return (
         <div className="bg-gradient-to-r from-gray-800 to-gray-900 rounded-xl p-3 flex items-center gap-3 mb-4 shadow-md border border-gray-700">
-            <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
-                {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
-            </button>
+            {error ? (
+                 <button onClick={handleRetry} className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition" title="Coba Lagi">
+                    <RefreshCw size={18} />
+                 </button>
+            ) : (
+                <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
+                    {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
+                </button>
+            )}
+            
             <div className="flex-1">
                 <div className="flex items-center gap-1 text-xs font-bold text-sky-400 mb-1">
-                    <Music size={12}/> Audio Clip
+                    <Music size={12}/> {error ? "Gagal memuat audio" : "Audio Clip"}
                 </div>
-                <audio ref={audioRef} src={src} className="w-full h-6 opacity-80" controls onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)}/>
+                {!error && (
+                    <audio 
+                        ref={audioRef} 
+                        src={src} 
+                        className="w-full h-6 opacity-80" 
+                        controls 
+                        onEnded={() => setIsPlaying(false)} 
+                        onPause={() => setIsPlaying(false)} 
+                        onPlay={() => setIsPlaying(true)}
+                        onError={() => setError(true)}
+                    />
+                )}
+                {error && <p className="text-[10px] text-red-400">Terjadi kesalahan jaringan.</p>}
             </div>
         </div>
     );
 };
 
 const SplashScreen = () => (
-    <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white dark:from-gray-900 dark:to-gray-800 z-[100] flex flex-col items-center justify-center">
+    <div className="fixed inset-0 bg-gradient-to-br from-sky-50 to-white z-[100] flex flex-col items-center justify-center">
         <div className="relative mb-8 animate-bounce-slow">
             <img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/>
             <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div>
         </div>
         <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest">{APP_NAME}</h1>
-        <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
+        <div className="w-48 h-1.5 bg-gray-200 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
         <p className="text-gray-400 text-xs font-medium animate-pulse">Memuat data terbaru...</p>
     </div>
 );
 
 const SkeletonPost = () => (
-    <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
-        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200 dark:bg-gray-700"></div><div className="flex-1"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 dark:bg-gray-600 rounded w-1/4"></div></div></div>
-        <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-4"></div>
+    <div className="bg-white rounded-[2rem] p-5 mb-6 border border-gray-100 shadow-sm animate-pulse">
+        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200"></div><div className="flex-1"><div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 rounded w-1/4"></div></div></div>
+        <div className="h-6 bg-gray-200 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 rounded-2xl mb-4"></div><div className="flex gap-4"><div className="h-8 w-16 bg-gray-100 rounded-full"></div><div className="h-8 w-16 bg-gray-100 rounded-full"></div></div>
     </div>
 );
 
 const renderMarkdown = (text) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">$1 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>');
     html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { if (match.includes('href="')) return match; return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; });
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-gray-700 px-1 rounded text-sm text-sky-700 dark:text-sky-300 font-mono border border-sky-100 dark:border-gray-600">$1</code>').replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>').replace(/\n/g, '<br>');
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 px-1 rounded text-sm text-sky-700 font-mono border border-sky-100">$1</code>').replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline">#$1</span>').replace(/\n/g, '<br>');
+    return <div className="text-gray-800 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
 // ==========================================
 // BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
 const DeveloperDashboard = ({ onClose }) => {
-    // (Kode Dashboard Developer dipertahankan 100% sama, hanya disesuaikan style untuk dark mode)
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
+    const [onlineUsers, setOnlineUsers] = useState([]);
+    const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [broadcastMsg, setBroadcastMsg] = useState('');
+    const [sendingBC, setSendingBC] = useState(false);
 
     useEffect(() => {
-        // Mock data fetch for simplicity in this snippet, assumes similar logic as before
-        setLoading(false);
+        const fetchData = async () => {
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('posts')), (snap) => { resolve(snap); unsub(); }); });
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const rawPosts = postsSnap.docs.map(d => d.data());
+            const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+            const tenMinAgo = Date.now() - 10 * 60 * 1000;
+            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
+            const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+            const last7Days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+                const dayEnd = dayStart + 86400000;
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
+                last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
+            }
+            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
+            setOnlineUsers(active);
+            setChartData(last7Days);
+            setLoading(false);
+        };
+        fetchData();
     }, []);
 
+    const handleBroadcast = async () => {
+        if(!broadcastMsg.trim()) return;
+        if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
+        setSendingBC(true);
+        try {
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
+            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), {
+                toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
+            }));
+            await Promise.all(promises);
+            alert("Pengumuman berhasil dikirim!"); setBroadcastMsg('');
+        } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
+    };
+
     return (
-        <div className="fixed inset-0 bg-gray-100 dark:bg-gray-900 z-[60] overflow-y-auto p-4 pb-20">
+        <div className="fixed inset-0 bg-gray-100 z-[60] overflow-y-auto p-4 pb-20">
             <div className="max-w-2xl mx-auto">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-black text-gray-800 dark:text-white flex items-center gap-2"><HardDrive className="text-sky-600"/> Developer Panel</h2>
-                    <button onClick={onClose} className="bg-white dark:bg-gray-800 p-2 rounded-full shadow hover:bg-gray-200"><X className="text-gray-800 dark:text-white"/></button>
-                </div>
+                <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white p-2 rounded-full shadow hover:bg-gray-200"><X/></button></div>
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
-                     <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm text-center">
-                        <p className="text-gray-600 dark:text-gray-300">Developer mode active. Logs are visible in console.</p>
-                     </div>
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-100 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold">{stats.users}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total User</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-orange-100">
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                            <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl text-sm border border-gray-200 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Radio size={18} className="text-blue-500"/> Push Notification Check</h3>
+                            <button onClick={async () => {
+                                if (!("Notification" in window)) { alert("Browser ini tidak support notifikasi."); return; }
+                                const permission = await Notification.requestPermission();
+                                if (permission === "granted") { 
+                                    new Notification("Tes Lokal", { body: "Ini tes notifikasi lokal dari tombol.", icon: APP_LOGO });
+                                } else { alert("Izin notifikasi ditolak oleh user."); }
+                            }} className="w-full bg-blue-50 text-blue-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-100 transition">Tes Izin & Notif Lokal</button>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart3 size={18}/> Aktivitas Minggu Ini</h3>
+                            <div className="flex items-end justify-between h-32 gap-2">{chartData.map((d, i) => ( <div key={i} className="flex flex-col items-center w-full group"><div className="text-xs font-bold text-sky-600 mb-1 opacity-0 group-hover:opacity-100 transition">{d.count}</div><div className="w-full bg-sky-100 rounded-t-lg hover:bg-sky-300 transition-all relative" style={{height: `${d.height}%`}}></div><div className="text-[10px] text-gray-400 mt-2 font-bold">{d.day}</div></div> ))}</div>
+                        </div>
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Globe size={18}/> Pengguna Online ({onlineUsers.length})</h3>
+                            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar">{onlineUsers.length === 0 ? <p className="text-gray-400 text-sm">Tidak ada user aktif saat ini.</p> : onlineUsers.map(u => ( <div key={u.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-xl"><div className="flex items-center gap-3"><div className="w-8 h-8 bg-sky-200 rounded-full flex items-center justify-center font-bold text-sky-700">{u.username?.[0]}</div><div><p className="text-sm font-bold text-gray-800">{u.username}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div><div className="flex items-center gap-1 text-xs text-emerald-600 font-bold bg-emerald-100 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online</div></div> ))}</div>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>
@@ -445,50 +585,79 @@ const DeveloperDashboard = ({ onClose }) => {
 };
 
 // ==========================================
-// BAGIAN 5: LAYAR OTENTIKASI BARU (GOOGLE ONLY)
+// BAGIAN 5: LAYAR OTENTIKASI & LANDING
 // ==========================================
 
 const AuthScreen = ({ onLoginSuccess }) => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [username, setUsername] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleGoogleLogin = async () => {
-        setIsLoading(true); setError('');
+    const handleAuth = async (e) => {
+        e.preventDefault(); setError(''); setIsLoading(true);
         try {
-            const provider = new GoogleAuthProvider();
-            await signInWithPopup(auth, provider);
-            // Sukses login, listener onAuthStateChanged di App akan menangani sisanya
-        } catch (err) {
-            setError("Gagal Login Google: " + err.message);
-            setIsLoading(false);
-        }
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                if (!username.trim()) throw new Error("Username wajib diisi");
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
+                    username: username.trim(), 
+                    email: email, 
+                    createdAt: serverTimestamp(), 
+                    uid: userCredential.user.uid, 
+                    photoURL: '', 
+                    following: [], 
+                    followers: [], 
+                    lastSeen: serverTimestamp(), 
+                    savedPosts: [], 
+                    mood: '' 
+                });
+            }
+            onLoginSuccess();
+        } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900 p-6 font-sans">
-            <div className="w-full max-w-sm bg-white dark:bg-gray-800 rounded-[2rem] shadow-2xl border border-white dark:border-gray-700 p-8 relative overflow-hidden text-center">
+        <div className="min-h-screen flex items-center justify-center bg-[#F0F4F8] p-6 font-sans">
+            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl border border-white p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400"></div>
-                <img src={APP_LOGO} className="w-20 h-20 mx-auto mb-4 object-contain"/>
-                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Masuk ke {APP_NAME}</h2>
-                <p className="text-gray-400 text-sm mb-8">Interaksi penuh, berbagi foto, dan berteman.</p>
-                
-                {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100 text-left"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
-                
-                <button 
-                    onClick={handleGoogleLogin} 
-                    disabled={isLoading}
-                    className="w-full bg-white border border-gray-300 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-gray-700 py-3.5 rounded-2xl font-bold text-sm shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 transition flex items-center justify-center gap-3"
-                >
-                    {isLoading ? <Loader2 className="animate-spin" size={20} /> : (
-                        <>
-                            <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                            Lanjutkan dengan Google
-                        </>
-                    )}
-                </button>
-                <div className="mt-6">
-                    <button onClick={() => window.location.reload()} className="text-xs text-gray-400 hover:text-sky-500">Kembali ke Mode Tamu</button>
+                <div className="text-center mb-8 mt-2"><h2 className="text-3xl font-black text-gray-800 tracking-tight mb-1">{isLogin ? 'Selamat Datang' : 'Buat Akun'}</h2><p className="text-gray-400 text-sm">Masuk ke dunia {APP_NAME}</p></div>
+                {error && <div className="bg-red-50 text-red-500 text-xs p-3 rounded-xl mb-4 flex items-center font-medium border border-red-100"><AlertTriangle size={14} className="mr-2 flex-shrink-0"/>{error}</div>}
+                <form onSubmit={handleAuth} className="space-y-4">
+                    {!isLogin && <div className="group relative"><User size={18} className="absolute left-4 top-3.5 text-gray-400"/><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username Unik" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>}
+                    <div className="group relative"><Mail size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Alamat Email" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <div className="group relative"><Lock size={18} className="absolute left-4 top-3.5 text-gray-400"/><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Kata Sandi" className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-12 text-sm font-medium focus:ring-2 focus:ring-sky-200 outline-none transition-all"/></div>
+                    <button disabled={isLoading} className="w-full bg-gray-900 text-white py-3.5 rounded-2xl font-bold text-sm hover:bg-gray-800 shadow-lg shadow-gray-200 transition transform active:scale-95 disabled:opacity-70">{isLoading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (isLogin ? 'Masuk Akun' : 'Daftar Gratis')}</button>
+                </form>
+                <div className="mt-6 text-center pt-6 border-t border-gray-100"><p className="text-xs text-gray-500 mb-4">{isLogin ? 'Belum punya akun?' : 'Sudah punya akun?'} <button onClick={() => {setIsLogin(!isLogin); setError('');}} className="font-bold text-sky-600 hover:underline ml-1">{isLogin ? 'Daftar' : 'Masuk'}</button></p>
+                {isLogin && <a href={PASSWORD_RESET_LINK} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center px-4 py-2 bg-sky-50 text-sky-600 rounded-xl text-xs font-bold hover:bg-sky-100 transition"><HelpCircle size={14} className="mr-2"/> Lupa Kata Sandi?</a>}</div>
+            </div>
+        </div>
+    );
+};
+
+const LandingPage = ({ onGetStarted }) => {
+    return (
+        <div className="min-h-screen bg-[#F0F4F8] flex flex-col items-center justify-center px-6 py-12 font-sans relative overflow-hidden">
+            <div className="relative z-10 text-center w-full max-w-md">
+                <div className="bg-white/60 backdrop-blur-2xl border border-white/50 shadow-2xl rounded-[2.5rem] p-8 transform hover:scale-[1.01] transition duration-500">
+                    <div className="relative inline-block mb-6"><img src={APP_LOGO} alt="Logo" className="w-28 h-28 mx-auto drop-shadow-md object-contain" /><div className="absolute -bottom-2 -right-2 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg border-2 border-white">V24.0 (Ultimate)</div></div>
+                    <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-3 tracking-tight">{APP_NAME}</h1>
+                    <p className="text-gray-600 font-medium mb-8 leading-relaxed">Jejaring sosial masa depan. Cepat, Ringan, dan Kaya Fitur! 🌍✨</p>
+                    <div className="grid grid-cols-2 gap-3 mb-8">
+                        <div className="bg-indigo-50 text-indigo-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-indigo-100 transition"><Gamepad2 size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Gamers</span></div>
+                        <div className="bg-emerald-50 text-emerald-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-emerald-100 transition"><BookOpen size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Edukasi</span></div>
+                        <div className="bg-rose-50 text-rose-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-rose-100 transition"><Users size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Sosial</span></div>
+                        <div className="bg-amber-50 text-amber-600 p-3 rounded-2xl flex flex-col items-center justify-center shadow-sm border border-white/50 hover:bg-amber-100 transition"><Globe size={24} className="mb-1"/><span className="text-[10px] font-bold uppercase tracking-wide">Global</span></div>
+                    </div>
+                    <button onClick={onGetStarted} className="w-full py-4 bg-gradient-to-r from-sky-500 to-purple-600 text-white font-bold rounded-2xl shadow-lg shadow-sky-200 hover:shadow-xl transform active:scale-95 transition-all flex items-center justify-center group">Mulai Sekarang <ChevronRight className="ml-2 group-hover:translate-x-1 transition"/></button>
                 </div>
+                <div className="mt-8 bg-white/40 backdrop-blur-md border border-white/40 p-4 rounded-3xl flex items-center gap-4 hover:bg-white/60 transition shadow-sm cursor-default"><div className="relative"><img src={DEV_PHOTO} className="w-14 h-14 rounded-full border-2 border-white shadow-md object-cover" alt="Developer"/><div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"><Check size={10} className="text-white absolute top-0.5 left-0.5"/></div></div><div className="text-left"><p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Developed By</p><h3 className="font-bold text-gray-800 text-sm flex items-center gap-1">M. Irham Andika Putra <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/></h3><p className="text-xs text-gray-500">Siswa SMP Negeri 3 Mentok • 14 Tahun</p></div></div>
             </div>
         </div>
     );
@@ -498,36 +667,40 @@ const AuthScreen = ({ onLoginSuccess }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
+// --- POST ITEM (LENGKAP) ---
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper }) => {
     const [liked, setLiked] = useState(post.likes?.includes(currentUserId));
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
     const [showComments, setShowComments] = useState(false);
     const [comments, setComments] = useState([]);
     const [newComment, setNewComment] = useState('');
-    const [viewerOpen, setViewerOpen] = useState(false);
-    const [selectedImage, setSelectedImage] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedTitle, setEditedTitle] = useState(post.title || '');
+    const [editedContent, setEditedContent] = useState(post.content || '');
     
-    const [isSaved, setIsSaved] = useState(profile?.savedPosts?.includes(post.id));
+    const [isSaved, setIsSaved] = useState(profile.savedPosts?.includes(post.id));
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
 
-    const isOwner = currentUserId && post.userId === currentUserId;
+    const isOwner = post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
-    
-    // Safety check for profile (Guest mode)
-    const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
-    const isFriend = profile ? ((profile.followers || []).includes(post.userId) && isFollowing) : false;
+    const isMeme = post.category === 'meme';
+
+    const isFollowing = (profile.following || []).includes(post.userId);
+    const isFollowedByTarget = (profile.followers || []).includes(post.userId);
+    const isFriend = isFollowing && isFollowedByTarget;
 
     const MAX_CHARS = 250;
     const isLongText = post.content && post.content.length > MAX_CHARS;
     const displayText = isExpanded || !isLongText ? post.content : post.content.substring(0, MAX_CHARS) + "...";
 
-    // Media Logic (Grid System)
-    const images = post.images || (post.mediaUrl && post.mediaType === 'image' ? [post.mediaUrl] : []);
-    const hasMultipleImages = images.length > 1;
+    useEffect(() => {
+        setLiked(post.likes?.includes(currentUserId));
+        setLikeCount(post.likes?.length || 0);
+        setIsSaved(profile.savedPosts?.includes(post.id));
+    }, [post, currentUserId, profile.savedPosts]);
 
     const handleLike = async () => {
-        if (!currentUserId) return alert("Silakan login untuk menyukai.");
         const newLiked = !liked;
         setLiked(newLiked);
         setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
@@ -542,10 +715,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
-    const handleDoubleTap = () => { if (!currentUserId) return; setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
+    const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
 
     const handleSave = async () => {
-        if (!currentUserId) return alert("Login untuk menyimpan.");
         const newSaved = !isSaved;
         setIsSaved(newSaved);
         const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId);
@@ -553,7 +725,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
 
     const handleComment = async (e) => {
-        e.preventDefault(); if (!currentUserId) return alert("Login dulu."); if (!newComment.trim()) return;
+        e.preventDefault(); if (!newComment.trim()) return;
         try {
             await addDoc(collection(db, getPublicCollection('comments')), { postId: post.id, userId: currentUserId, text: newComment, username: profile.username, timestamp: serverTimestamp() });
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
@@ -562,346 +734,600 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { console.error(error); }
     };
 
-    const handleDelete = async () => { if (confirm("Hapus postingan ini?")) { await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); } };
+    const handleDelete = async () => { if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) { await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); } };
+    const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
+    const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
+    const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin!'); } catch (e) { alert('Gagal menyalin link'); } };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
 
+    const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
+    const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
+    const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
+    const isImage = (post.mediaUrl && (/\.(jpg|png|webp|jpeg)$/i.test(post.mediaUrl) || post.mediaType === 'image')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 shadow-xl shadow-sky-100/70 dark:shadow-none border border-white dark:border-gray-700 relative overflow-hidden group transition-all duration-300">
-            {viewerOpen && <FullScreenViewer src={selectedImage} onClose={()=>setViewerOpen(false)} />}
-            
+        <div className="bg-white rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 relative overflow-hidden group transition hover:shadow-lg">
+            {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
+            {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 text-orange-600 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
+            {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 text-yellow-700 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
+
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
                     <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
-                        <div className="w-full h-full rounded-full bg-white dark:bg-gray-900 flex items-center justify-center overflow-hidden">
+                        <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
                             <ImageWithRetry src={post.user?.photoURL} alt="User" className="w-full h-full object-cover" fallbackText={post.user?.username}/>
                         </div>
                     </div>
-                    <div><h4 className="font-bold text-gray-800 dark:text-gray-100 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span></div></div>
+                    <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
-                {currentUserId && (
                 <div className="flex gap-2">
                     {!isOwner && post.userId !== currentUserId && ( <button onClick={() => handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
-                    {(isOwner || isMeDeveloper) && ( <button onClick={handleDelete} className="p-2 rounded-full text-gray-400 hover:text-red-600"><Trash2 size={16}/></button> )}
+                    {(isOwner || isMeDeveloper) && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
                 </div>
-                )}
             </div>
 
-            {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{post.title}</h3>}
-            <div className="text-sm text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
-            
-            {/* GRID IMAGE DISPLAY - SMART LAYOUT */}
-            {images.length > 0 && (
-                <div className={`mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 relative select-none cursor-pointer grid gap-1 ${
-                    images.length === 1 ? 'grid-cols-1' : 
-                    images.length === 2 ? 'grid-cols-2' : 
-                    images.length === 3 ? 'grid-cols-2 grid-rows-2' : 'grid-cols-2 grid-rows-2'
-                }`} onDoubleClick={handleDoubleTap}>
+            {isEditing ? (
+                <div className="mb-4 p-4 bg-gray-50 rounded-2xl border border-gray-200 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white border rounded-lg font-bold text-sm"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white border rounded-lg text-sm resize-none" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
+            ) : (
+                <>
+                    {post.title && <h3 className="font-bold text-gray-900 mb-2 text-lg">{post.title}</h3>}
+                    <div className="text-sm text-gray-600 mb-4 leading-relaxed">{renderMarkdown(displayText)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
-                    {images.slice(0, 4).map((img, idx) => (
-                        <div key={idx} className={`relative overflow-hidden ${
-                            images.length === 3 && idx === 0 ? 'row-span-2' : ''
-                        }`} onClick={() => { setSelectedImage(img); setViewerOpen(true); }}>
-                            <ImageWithRetry src={img} className="w-full h-full object-cover min-h-[150px] max-h-[500px]" />
-                            {images.length > 4 && idx === 3 && (
-                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-bold text-xl">
-                                    +{images.length - 4}
-                                </div>
-                            )}
+                    {(isImage || isVideo || isAudio || embed) && (
+                        <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
+                            {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
+                            {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
+                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer" />}
+                            {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
+                            {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
+                            {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
                         </div>
-                    ))}
-                    {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white animate-ping" /></div>}
-                </div>
+                    )}
+                </>
             )}
 
-            <div className="flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
-                <button 
-                    onClick={handleLike} 
-                    className={`flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all duration-300 ${liked ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 border border-rose-100 dark:border-rose-900' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:bg-gray-100'}`}
-                >
-                    <Heart size={16} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}
-                </button>
-                <button 
-                    onClick={() => setShowComments(!showComments)} 
-                    className="flex items-center gap-2 text-xs px-4 py-2 rounded-full font-bold transition-all bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-300 hover:bg-gray-100"
-                >
-                    <MessageSquare size={16}/> {post.commentsCount || 0}
-                </button>
-                <button 
-                    onClick={handleSave} 
-                    className={`ml-auto p-2 rounded-full transition-all ${isSaved ? 'bg-sky-50 text-sky-500' : 'bg-gray-50 dark:bg-gray-700 text-gray-500 hover:bg-gray-100'}`}
-                >
-                    <Bookmark size={18} fill={isSaved ? 'currentColor' : 'none'} />
-                </button>
+            <div className="flex items-center gap-6 pt-2 border-t border-gray-50">
+                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600'}`}><Heart size={22} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
+                <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={22}/> {post.commentsCount || 0}</button>
+                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={22}/></button>
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600'}`}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button>
             </div>
 
             {showComments && (
-                <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
-                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( <div key={c.id} className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl text-xs flex justify-between items-start group"><div><span className="font-bold text-gray-800 dark:text-gray-200 mr-1">{c.username}</span><span className="text-gray-600 dark:text-gray-400">{c.text}</span></div>{(currentUserId === c.userId || isMeDeveloper) && <button className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash size={12}/></button>}</div> ))}</div>
-                    {currentUserId ? (
-                        <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
-                    ) : (
-                        <p className="text-center text-xs text-sky-600 font-bold cursor-pointer">Login untuk berkomentar</p>
-                    )}
+                <div className="mt-5 pt-4 border-t border-gray-100 animate-in fade-in">
+                    <div className="max-h-48 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( <div key={c.id} className="bg-gray-50 p-3 rounded-xl text-xs flex justify-between items-start group"><div><span className="font-bold text-gray-800 mr-1">{c.username}</span><span className="text-gray-600">{c.text}</span></div>{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div> ))}</div>
+                    <form onSubmit={handleComment} className="flex gap-2 relative"><input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Tulis komentar..." className="flex-1 bg-gray-100 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200"/><button type="submit" disabled={!newComment.trim()} className="absolute right-1.5 top-1.5 bottom-1.5 p-1.5 bg-sky-500 text-white rounded-lg shadow-md hover:bg-sky-600 disabled:opacity-50"><Send size={14}/></button></form>
                 </div>
             )}
         </div>
     );
 };
 
+// --- CREATE POST (DENGAN KOMPRESI & AUDIO) ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
-    const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false });
-    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
+    const [form, setForm] = useState({ title: '', content: '', file: null, url: '', isShort: false, isAudio: false });
+    const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0); const [isLarge, setIsLarge] = useState(false);
 
-    const handleFileSelect = async (e) => {
-        const selected = Array.from(e.target.files);
-        // Validasi dan set
-        if (selected.length > 5) return alert("Maksimal 5 foto sekaligus.");
-        setForm({...form, files: selected});
-    };
-
+    const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
     const submit = async (e) => {
-        e.preventDefault(); setLoading(true); setProg(10);
+        e.preventDefault(); setLoading(true); setProg(0);
         try {
-            let mediaUrls = [];
-            // Proses Upload Gambar dengan Kompresi Cerdas Base64
-            if (form.files.length > 0) {
-                for (let i = 0; i < form.files.length; i++) {
-                    const compressedBase64 = await compressImageSmart(form.files[i]);
-                    mediaUrls.push(compressedBase64);
-                    setProg(prev => prev + (80 / form.files.length));
-                }
+            let finalUrl = form.url, type = 'text';
+            let fileToUpload = form.file;
+
+            // PROSES KOMPRESI GAMBAR SEBELUM UPLOAD
+            if (fileToUpload && fileToUpload.type.startsWith('image')) {
+                console.log("Mengompres gambar...");
+                fileToUpload = await compressImage(fileToUpload);
+                console.log("Gambar dikompres. Ukuran baru:", fileToUpload.size);
             }
+
+            if(fileToUpload) { 
+                finalUrl = await uploadToFaaAPI(fileToUpload, setProg); 
+                if (fileToUpload.type.startsWith('image')) type = 'image';
+                else if (fileToUpload.type.startsWith('video')) type = 'video';
+                else if (fileToUpload.type.startsWith('audio')) type = 'audio';
+            }
+            else if(form.url) { type='link'; }
             
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
-            
-            await addDoc(collection(db, getPublicCollection('posts')), {
-                userId, title: form.title, content: form.content, 
-                mediaUrl: mediaUrls[0] || '', // Backward compatibility
-                images: mediaUrls, // Array foto baru
-                mediaType: mediaUrls.length > 0 ? 'image' : 'text', 
-                timestamp: serverTimestamp(), likes: [], commentsCount: 0, 
-                isShort: false, category: category, user: {username, uid: userId}
+            const ref = await addDoc(collection(db, getPublicCollection('posts')), {
+                userId, title: form.title, content: form.content, mediaUrl: finalUrl, mediaType: type, 
+                timestamp: serverTimestamp(), likes: [], commentsCount: 0, isShort: form.isShort, category: category, user: {username, uid: userId}
             });
-            setProg(100); setTimeout(()=>onSuccess(null, false), 500);
+            setProg(100); setTimeout(()=>onSuccess(ref.id, form.isShort), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
 
     return (
         <div className="max-w-xl mx-auto p-4 pb-24">
-            <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
+            <div className="bg-white rounded-[2rem] p-6 shadow-xl border border-sky-50 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div>
-                <h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
+                <h2 className="text-xl font-black text-gray-800 mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
                     {loading && <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden mb-2"><div className="bg-sky-500 h-full transition-all duration-300" style={{width:`${prog}%`}}/></div>}
-                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu..." rows="4" className="w-full p-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
+                    <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul Menarik..." className="w-full p-3 bg-gray-50 rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-sky-200 transition"/>
+                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Ceritakan sesuatu... (Gunakan #meme untuk kategori meme)" rows="4" className="w-full p-3 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-sky-200 transition resize-none"/>
+                    <div className="flex gap-2 text-xs"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">I</button><button type="button" onClick={insertLink} className="bg-sky-100 text-sky-600 px-2 py-1 rounded hover:bg-sky-200 flex items-center gap-1"><LinkIcon size={10}/> Link</button></div>
                     
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.files.length>0 ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 dark:border-gray-600 text-gray-500'}`}>
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.file && !form.isAudio ?'bg-sky-50 border-sky-200 text-sky-600':'border-gray-200 text-gray-500'}`}>
                             <ImageIcon size={18} className="mr-2"/>
-                            <span className="text-xs font-bold">{form.files.length > 0 ? `${form.files.length} Foto` : 'Pilih Foto (Bisa Banyak)'}</span>
-                            <input type="file" className="hidden" multiple accept="image/*" onChange={handleFileSelect} disabled={loading}/>
+                            <span className="text-xs font-bold">{form.file && !form.isAudio ?'File Dipilih':'Foto/Video'}</span>
+                            <input type="file" className="hidden" accept="image/*,video/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: f.type.startsWith('video'), isAudio: false}); setIsLarge(f.size > 25*1024*1024);}}} disabled={loading}/>
                         </label>
+                        
+                        <label className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer flex-1 whitespace-nowrap transition ${form.isAudio ?'bg-pink-50 border-pink-200 text-pink-600':'border-gray-200 text-gray-500'}`}>
+                            <Music size={18} className="mr-2"/>
+                            <span className="text-xs font-bold">{form.isAudio ? 'Audio Siap' : 'Audio'}</span>
+                            <input type="file" className="hidden" accept="audio/*" onChange={e=>{const f=e.target.files[0]; if(f) {setForm({...form, file:f, isShort: false, isAudio: true});}}} disabled={loading}/>
+                        </label>
+
+                        <div onClick={()=>setForm({...form, isShort:!form.isShort})} className={`flex items-center px-4 py-3 rounded-xl border cursor-pointer whitespace-nowrap transition ${form.isShort?'bg-black text-white border-black':'border-gray-200 text-gray-500'}`}><Zap size={18} className="mr-2"/><span className="text-xs font-bold">Shorts</span></div>
                     </div>
-                    {form.files.length > 0 && (
-                        <div className="flex gap-2 overflow-x-auto py-2">
-                            {Array.from(form.files).map((f, i) => (
-                                <div key={i} className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 relative">
-                                    <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" />
-                                </div>
-                            ))}
-                        </div>
-                    )}
                     
-                    <button disabled={loading || (!form.content && form.files.length === 0)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 dark:shadow-none hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Mengompres & Upload...' : 'Posting Sekarang'}</button>
+                    <div className="relative"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, file:null, isShort: e.target.value.includes('shorts')})} placeholder="Atau Link Video (YouTube)..." className="w-full pl-10 py-3 bg-gray-50 rounded-xl text-xs outline-none"/></div>
+                    <button disabled={loading || (!form.content && !form.file && !form.url)} className="w-full py-4 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-95 transition disabled:opacity-50">{loading ? 'Sedang Mengunggah...' : 'Posting Sekarang'}</button>
                 </form>
             </div>
         </div>
     );
 };
 
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, setPage }) => {
-    // Profil logic (Guest handle)
-    const isSelf = viewerProfile && viewerProfile.uid === profileData.uid; 
+// --- PROFILE SCREEN ---
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) => {
+    const [edit, setEdit] = useState(false); 
+    const [name, setName] = useState(profileData.username); 
+    const [file, setFile] = useState(null); 
+    const [load, setLoad] = useState(false);
+    const [showDev, setShowDev] = useState(false);
+    const [activeTab, setActiveTab] = useState('posts'); 
+    const [mood, setMood] = useState(profileData.mood || '');
+    const [isEditingMood, setIsEditingMood] = useState(false);
+
+    const isSelf = viewerProfile.uid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
     const userPosts = allPosts.filter(p=>p.userId===profileData.uid).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
     const followersCount = (profileData.followers || []).length;
     const followingCount = (profileData.following || []).length;
-    const isOnline = isUserOnline(profileData.lastSeen);
+    const targetFollowers = profileData.followers || [];
+    const targetFollowing = profileData.following || [];
+    const friendsCount = targetFollowing.filter(id => targetFollowers.includes(id)).length;
 
+    const save = async () => { 
+        setLoad(true); 
+        try { 
+            let url = profileData.photoURL;
+            if (file) {
+                // Kompresi dulu foto profil agar cepat
+                const compressedFile = await compressImage(file);
+                url = await uploadToFaaAPI(compressedFile, ()=>{});
+            }
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
+            setEdit(false); 
+        } catch(e){alert(e.message)} finally{setLoad(false)}; 
+    };
+
+    const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
     const badge = getReputationBadge(totalLikes, isDev);
-    
-    const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
+    const isFollowing = (viewerProfile.following || []).includes(profileData.uid); 
+    const isFollowedByTarget = (viewerProfile.followers || []).includes(profileData.uid);
+    const isFriend = isFollowing && isFollowedByTarget; 
+    const isOnline = isUserOnline(profileData.lastSeen);
+    const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            <div className="bg-white dark:bg-gray-800 p-6 md:p-8 rounded-[2rem] shadow-xl shadow-sky-100/70 dark:shadow-none border border-white dark:border-gray-700 mb-8 mx-4 text-center relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
+            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-sky-50 mb-8 mx-4 text-center relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
-                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>
+                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
+                        {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
                         <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover" fallbackText={profileData.username}/>
                     </div>
+                    <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    {isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
                 </div>
 
-                <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1>
-                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
-                
-                {!isSelf && viewerProfile && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
-                
-                <div className="grid grid-cols-2 gap-3 mt-6 border-t border-gray-100 dark:border-gray-700 pt-6">
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-3">
-                        <span className="font-bold text-xl block text-gray-800 dark:text-white">{followersCount}</span>
-                        <span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-2xl p-3">
-                        <span className="font-bold text-xl block text-gray-800 dark:text-white">{followingCount}</span>
-                        <span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span>
-                    </div>
-                </div>
+                {edit ? ( <div className="space-y-3 bg-gray-50 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
+                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
+                {!isSelf && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
+                <div className="flex justify-center gap-6 mt-6 border-t pt-6"><div><span className="font-bold text-xl block">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
-            <div className="px-4 space-y-6">{userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile?.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}</div>
+            {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white text-gray-500'}`}>Disimpan</button></div> )}
+            <div className="px-4 space-y-6">{activeTab === 'posts' ? (userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)) : ( savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerProfile.uid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>)}</div>
+            {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
         </div>
     );
 };
 
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, isMeDeveloper }) => {
-    // Mode tamu: currentUserId bisa null
+// --- TRENDING TAGS ---
+const TrendingTags = ({ posts }) => {
+    const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
+    if (tags.length === 0) return null;
+    return (
+        <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} className="px-3 py-1 bg-white border border-sky-100 rounded-full text-[10px] font-bold text-gray-600 shadow-sm whitespace-nowrap flex items-center gap-1">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div>
+    );
+};
+
+// --- HOME SCREEN ---
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper }) => {
+    const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
+    const [isFirstLoad, setIsFirstLoad] = useState(true);
+    const [loadingFeed, setLoadingFeed] = useState(true);
+    const [displayCount, setDisplayCount] = useState(5);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const bottomRef = useRef(null);
 
     useEffect(() => {
-        if (allPosts.length === 0) return;
-        setStableFeed(shuffleArray([...allPosts]));
-    }, [allPosts]); 
+        if (allPosts.length === 0) { setLoadingFeed(false); return; }
+        let basePosts = allPosts.filter(p => !p.isShort);
+        let pinnedPost = null;
+        if (newPostId) {
+            const idx = basePosts.findIndex(p => p.id === newPostId);
+            if (idx > -1) { pinnedPost = basePosts[idx]; basePosts.splice(idx, 1); }
+        }
+
+        let processedPosts = [];
+        if (sortType === 'latest') processedPosts = basePosts.sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
+        else if (sortType === 'popular') processedPosts = basePosts.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+        else if (sortType === 'meme') processedPosts = basePosts.filter(p => p.category === 'meme').sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
+        else {
+            if (isFirstLoad || stableFeed.length === 0) processedPosts = shuffleArray([...basePosts]);
+            else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined);
+        }
+
+        if (pinnedPost) processedPosts.unshift(pinnedPost);
+        setStableFeed(processedPosts);
+        setIsFirstLoad(false);
+        setLoadingFeed(false);
+    }, [allPosts, sortType, newPostId]); 
+
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
+            const first = entries[0];
+            if (first.isIntersecting && !loadingMore && stableFeed.length > displayCount) {
+                setLoadingMore(true);
+                setTimeout(() => { setDisplayCount(prev => prev + 5); setLoadingMore(false); }, 800);
+            }
+        }, { threshold: 0.5 });
+        const currentBottom = bottomRef.current;
+        if (currentBottom) observer.observe(currentBottom);
+        return () => { if (currentBottom) observer.unobserve(currentBottom); };
+    }, [stableFeed, displayCount, loadingMore]);
+
+    const manualRefresh = () => { setLoadingFeed(true); setStableFeed([]); setIsFirstLoad(true); setSortType('random'); setDisplayCount(5); clearNewPost(); setTimeout(() => setLoadingFeed(false), 800); };
+    const visiblePosts = stableFeed.slice(0, displayCount);
 
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
-            {!currentUserId && (
-                <div className="bg-sky-500 text-white p-4 rounded-2xl mb-6 shadow-lg flex items-center justify-between">
-                    <div>
-                        <h3 className="font-bold text-sm">Mode Tamu</h3>
-                        <p className="text-xs opacity-90">Login untuk like, komen & posting.</p>
-                    </div>
+            <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 backdrop-blur-md py-2 -mx-4 px-4">
+                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white text-gray-500'}`}>Terbaru</button>
+                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white text-gray-500'}`}>Populer</button>
+                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white text-gray-500'}`}>😂 Meme</button>
                 </div>
+                <button onClick={manualRefresh} className="p-2 bg-white text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
+            </div>
+
+            <TrendingTags posts={allPosts} />
+
+            {loadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 ? (
+                <div className="text-center py-10 bg-white rounded-3xl shadow-sm border border-dashed border-gray-200"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
+            ) : (
+                <>
+                    {visiblePosts.map(p => (
+                        <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
+                            {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper}/>
+                        </div>
+                    ))}
+                    <div ref={bottomRef} className="h-10 w-full flex items-center justify-center">
+                        {loadingMore && <Loader2 className="animate-spin text-sky-500"/>}
+                        {!loadingMore && stableFeed.length <= displayCount && stableFeed.length > 0 && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
+                    </div>
+                </>
             )}
-            {stableFeed.length === 0 ? <SkeletonPost/> : stableFeed.map(p => (
-                <PostItem key={p.id} post={p} currentUserId={currentUserId} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper}/>
-            ))}
         </div>
     );
 };
 
-// ======================================================
-// BAGIAN 10: LAYAR LEGAL & ONBOARDING (DIPERBARUI)
-// ======================================================
-
-const OnboardingComponent = ({ profile, onComplete }) => {
-    const [username, setUsername] = useState(profile.username || '');
-    const [loading, setLoading] = useState(false);
-
-    const handleSubmit = async () => {
-        if (!username.trim()) return alert("Username wajib diisi");
-        setLoading(true);
-        try {
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), profile.uid), {
-                username: username,
-                hasCompletedOnboarding: true,
-                createdAt: serverTimestamp()
-            });
-            onComplete();
-        } catch (e) {
-            alert("Gagal menyimpan: " + e.message);
-        } finally {
-            setLoading(false);
-        }
+// --- SHORTS SCREEN (INFINITE LOOP) ---
+const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
+    const [feed, setFeed] = useState([]);
+    useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
+    const handleScroll = (e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+        if (scrollHeight - scrollTop <= clientHeight + 200) { setFeed(prev => [...prev, ...prev]); }
     };
-
     return (
-        <div className="fixed inset-0 bg-white dark:bg-gray-900 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-500">
-            <div className="w-full max-w-sm text-center">
-                <div className="w-24 h-24 bg-gradient-to-br from-sky-400 to-purple-500 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg">
-                    <SparklesIcon size={40} className="text-white animate-pulse"/>
-                </div>
-                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Selamat Datang!</h2>
-                <p className="text-gray-500 mb-8">Satu langkah lagi untuk melengkapi profilmu.</p>
-                
-                <input 
-                    value={username} 
-                    onChange={e => setUsername(e.target.value)}
-                    placeholder="Pilih Username Unik"
-                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 rounded-2xl text-center font-bold mb-4 focus:ring-2 focus:ring-sky-500 outline-none"
-                />
-                
-                <button 
-                    onClick={handleSubmit} 
-                    disabled={loading}
-                    className="w-full py-4 bg-sky-500 text-white font-bold rounded-2xl shadow-lg hover:bg-sky-600 transition"
-                >
-                    {loading ? <Loader2 className="animate-spin mx-auto"/> : 'Mulai Jelajahi'}
-                </button>
+        <div className="fixed inset-0 bg-black z-50 flex justify-center">
+             <div className="w-full max-w-md h-[100dvh] overflow-y-scroll snap-y snap-mandatory snap-always no-scrollbar bg-black" onScroll={handleScroll}>
+                {feed.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-500 font-bold"><Film size={48} className="mb-4 opacity-50"/> <p>Belum ada video Shorts</p></div>
+                ) : (
+                    feed.map((p, i) => <ShortItem key={`${p.id}-${i}`} post={p} currentUserId={currentUserId} handleFollow={handleFollow} profile={profile}/>)
+                )}
             </div>
         </div>
     );
 };
 
-// ==========================================
-// BAGIAN 12: APP UTAMA (CORE LOGIC - FIXED)
-// ==========================================
+const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
+    const ref = useRef(); const vidRef = useRef();
+    const [playing, setPlaying] = useState(false); const [muted, setMuted] = useState(false);
+    const [showCom, setShowCom] = useState(false); const [comments, setComments] = useState([]); const [txt, setTxt] = useState('');
+    const isLiked = post.likes?.includes(currentUserId); const embed = useMemo(()=>getMediaEmbed(post.mediaUrl),[post.mediaUrl]);
+
+    useEffect(() => {
+        const obs = new IntersectionObserver(e => { e.forEach(en => { setPlaying(en.isIntersecting); if(vidRef.current) { if(en.isIntersecting) vidRef.current.play().catch(()=>{}); else { vidRef.current.pause(); vidRef.current.currentTime = 0; } } }); }, {threshold: 0.6});
+        if(ref.current) obs.observe(ref.current); return () => ref.current && obs.unobserve(ref.current);
+    }, []);
+
+    const toggleLike = async () => {
+        const r = doc(db, getPublicCollection('posts'), post.id);
+        if(isLiked) updateDoc(r, {likes:arrayRemove(currentUserId)});
+        else { updateDoc(r, {likes:arrayUnion(currentUserId)}); if(post.userId!==currentUserId) sendNotification(post.userId, 'like', 'menyukai shorts Anda', profile, post.id); }
+    };
+
+    useEffect(()=>{if(showCom) return onSnapshot(query(collection(db,getPublicCollection('comments')), where('postId','==',post.id)),s=>setComments(s.docs.map(d=>d.data())))},[showCom,post.id]);
+
+    return (
+        <div ref={ref} className="snap-start w-full h-[100dvh] relative bg-gray-900 flex items-center justify-center overflow-hidden border-b border-gray-800">
+             {embed?.type==='youtube' ? <div className="w-full h-full relative pointer-events-auto">{playing?<iframe src={`${embed.embedUrl}&autoplay=1&controls=0&loop=1`} className="w-full h-full"/>:<div className="w-full h-full bg-black"/>}<div className="absolute inset-0 bg-transparent pointer-events-none"/></div> : <video ref={vidRef} src={post.mediaUrl} className="w-full h-full object-cover" loop muted={muted} playsInline onClick={()=>setMuted(!muted)}/>}
+             <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/80 pointer-events-none flex flex-col justify-end p-5 pb-24">
+                <div className="pointer-events-auto flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full border-2 border-white/50 p-0.5"><img src={post.user?.photoURL||APP_LOGO} className="w-full h-full rounded-full object-cover"/></div>
+                    <div><p className="text-white font-bold text-sm drop-shadow-md">@{post.user?.username}</p><button onClick={()=>handleFollow(post.userId, false)} className="bg-white/20 backdrop-blur-md text-white text-[10px] px-3 py-0.5 rounded-full mt-1 hover:bg-white/40 transition">Ikuti</button></div>
+                </div>
+                <p className="text-white text-sm drop-shadow-md line-clamp-3 mb-2">{post.content}</p>
+             </div>
+             <div className="absolute right-3 bottom-28 flex flex-col gap-6 pointer-events-auto z-20">
+                <button onClick={toggleLike} className="flex flex-col items-center group"><div className={`p-3 rounded-full backdrop-blur-md transition ${isLiked?'bg-rose-500/80 text-white':'bg-black/30 text-white border border-white/20'}`}><Heart size={24} fill={isLiked?'currentColor':'none'}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">{post.likes?.length||0}</span></button>
+                <button onClick={()=>setShowCom(true)} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><MessageSquare size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">{post.commentsCount||0}</span></button>
+                <button onClick={()=>{navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin')}} className="flex flex-col items-center"><div className="p-3 rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20"><Share2 size={24}/></div><span className="text-white text-xs font-bold mt-1 drop-shadow-md">Share</span></button>
+             </div>
+             {showCom && <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-end pointer-events-auto"><div className="w-full h-[60%] bg-white rounded-t-3xl p-5 flex flex-col animate-in slide-in-from-bottom duration-300"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-gray-800">Komentar</h3><button onClick={()=>setShowCom(false)} className="bg-gray-100 p-1 rounded-full"><X size={20}/></button></div><div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">{comments.map((c,i)=><div key={i} className="text-xs text-gray-800 border-b border-gray-50 pb-2"><span className="font-bold text-sky-600 mr-2">{c.username}</span>{c.text}</div>)}</div><div className="flex gap-2 mt-2 pt-2 border-t"><input value={txt} onChange={e=>setTxt(e.target.value)} className="flex-1 bg-gray-100 rounded-xl px-3 py-2 text-xs outline-none" placeholder="Ketik..."/><button onClick={async()=>{if(!txt.trim())return;await addDoc(collection(db,getPublicCollection('comments')),{postId:post.id,userId:currentUserId,text:txt,username:profile.username});await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });setTxt('')}} className="text-sky-600 font-bold text-xs px-2">Kirim</button></div></div></div>}
+        </div>
+    );
+};
+
+// --- NOTIFICATION SCREEN ---
+const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
+    const [notifs, setNotifs] = useState([]);
+    useEffect(() => {
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50));
+        return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead)));
+    }, [userId]);
+    const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
+    return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
+};
+
+// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
+const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
+    const [queryText, setQueryText] = useState('');
+    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
+    const [tab, setTab] = useState('users');
+
+    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
+    // Ini mencegah render berlebihan saat mengetik cepat
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            setSearchTerm(queryText);
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [queryText]);
+
+    const filteredUsers = useMemo(() => {
+        if (!searchTerm || !allUsers) return [];
+        const term = searchTerm.toLowerCase();
+        
+        return allUsers.filter(u => {
+            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
+            if (!u || !u.username) return false;
+            return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
+        });
+    }, [allUsers, searchTerm, profile?.uid]);
+
+    const filteredPosts = useMemo(() => {
+        if (!searchTerm || !allPosts) return [];
+        const term = searchTerm.toLowerCase();
+
+        return allPosts.filter(p => {
+            // SAFE CHECK: Pastikan p dan kontennya ada
+            const contentMatch = p.content && p.content.toLowerCase().includes(term);
+            const titleMatch = p.title && p.title.toLowerCase().includes(term);
+            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
+            
+            return contentMatch || titleMatch || tagMatch;
+        });
+    }, [allPosts, searchTerm]);
+
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-24">
+            <h1 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-2">
+                <Search className="text-sky-500" size={28}/> Pencarian
+            </h1>
+            
+            <div className="relative mb-8 group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Search className="text-gray-400 group-focus-within:text-sky-500 transition duration-300" size={20}/>
+                </div>
+                <input 
+                    value={queryText} 
+                    onChange={e => setQueryText(e.target.value)} 
+                    placeholder={tab === 'users' ? "Cari teman..." : "Cari postingan..."}
+                    className="w-full pl-12 pr-12 py-4 bg-white rounded-2xl shadow-sm border-2 border-transparent focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none transition-all duration-300 font-medium text-gray-700"
+                    autoFocus
+                />
+                {queryText && (
+                    <button onClick={() => setQueryText('')} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 transition">
+                        <X size={18} className="bg-gray-200 rounded-full p-0.5"/>
+                    </button>
+                )}
+            </div>
+
+            <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 shadow-inner">
+                <button onClick={() => setTab('users')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'users' ? 'bg-white text-sky-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <Users size={16}/> Pengguna
+                </button>
+                <button onClick={() => setTab('posts')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'posts' ? 'bg-white text-purple-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
+                    <ImageOff size={16}/> Postingan
+                </button>
+            </div>
+
+            {searchTerm ? (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    {tab === 'users' ? (
+                        <div className="space-y-4">
+                            {filteredUsers.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><UserPlus size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Pengguna tidak ditemukan.</p>
+                                </div>
+                            ) : (
+                                filteredUsers.map(u => {
+                                    const isFollowing = (profile.following || []).includes(u.uid);
+                                    return (
+                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:shadow-md transition duration-300">
+                                            <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}>
+                                                <div className="relative">
+                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
+                                                        <div className="w-full h-full rounded-full bg-white overflow-hidden">
+                                                             <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover" fallbackText={u.username}/>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-gray-800">{u.username}</h4>
+                                                    <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">{u.followers?.length || 0} Pengikut</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleFollow(u.uid, isFollowing)} 
+                                                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all duration-300 transform active:scale-95 ${isFollowing ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-200 hover:shadow-xl'}`}
+                                            >
+                                                {isFollowing ? 'Mengikuti' : 'Ikuti'}
+                                            </button>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    ) : (
+                        <div className="columns-1 gap-4 space-y-4">
+                            {filteredPosts.length === 0 ? (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><Search size={32} className="text-gray-300"/></div>
+                                    <p className="text-gray-500 font-medium">Tidak ada postingan yang cocok.</p>
+                                </div>
+                            ) : (
+                                filteredPosts.map(p => (
+                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
+                                                <ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/>
+                                            </div>
+                                            <span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span>
+                                            <span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span>
+                                        </div>
+                                        <h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{p.title || p.content}</h4>
+                                        {p.mediaUrl && p.mediaType === 'image' && (
+                                            <div className="mt-2 rounded-xl overflow-hidden h-32 relative">
+                                                <ImageWithRetry src={p.mediaUrl} className="w-full h-full object-cover"/>
+                                            </div>
+                                        )}
+                                        <div className="mt-3 flex items-center gap-4 text-gray-400 text-xs font-bold">
+                                            <span className="flex items-center gap-1"><Heart size={12}/> {p.likes?.length || 0}</span>
+                                            <span className="flex items-center gap-1"><MessageSquare size={12}/> {p.commentsCount || 0}</span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div className="text-center py-10 opacity-60">
+                    <div className="w-24 h-24 bg-gradient-to-tr from-sky-50 to-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                        <Search size={40} className="text-sky-200"/>
+                    </div>
+                    <p className="text-gray-400 font-medium">Ketik nama teman atau topik menarik...</p>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- SINGLE POST VIEW ---
+const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
+    const post = allPosts.find(p => p.id === postId);
+    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
+    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan hilang.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
+    return (
+        <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
+            <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
+            <PostItem post={post} {...props}/>
+            <div className="mt-8 text-center p-6 bg-gray-50 rounded-2xl border border-gray-200 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
+        </div>
+    );
+};
+
+// --- 11. APP UTAMA (CORE LOGIC - FIXED) ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
-    const [page, setPage] = useState('home'); // Default langsung ke HOME (Mode Tamu)
+    const [page, setPage] = useState('landing'); 
     const [posts, setPosts] = useState([]); 
     const [users, setUsers] = useState([]); 
     const [targetUid, setTargetUid] = useState(null); 
-    const [showOnboarding, setShowOnboarding] = useState(false);
-    const [darkMode, setDarkMode] = useState(false);
-    
-    // PWA Prompt
-    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const [targetPid, setTargetPid] = useState(null); 
+    const [notifCount, setNotifCount] = useState(0); 
+    const [newPostId, setNewPostId] = useState(null);
+    const [showSplash, setShowSplash] = useState(true);
 
-    // Dark Mode Effect
-    useEffect(() => {
-        if (darkMode) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    }, [darkMode]);
+    useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
+    useEffect(() => { window.scrollTo(0, 0); }, [page]);
+    useEffect(() => { document.documentElement.classList.remove('dark'); localStorage.removeItem('theme'); }, []);
+    useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) setTargetPid(p); return () => clearTimeout(timer); }, []);
 
     useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
-            if(u) {
-                // User Login
-                setUser(u);
-                const userRef = doc(db, getPublicCollection('userProfiles'), u.uid);
-                const snap = await getDoc(userRef);
-                
-                if (!snap.exists()) {
-                    // Buat dokumen profil awal jika login pertama kali
-                    await setDoc(userRef, {
-                        email: u.email,
-                        photoURL: u.photoURL,
-                        username: u.displayName || 'User',
-                        uid: u.uid,
-                        followers: [],
-                        following: [],
-                        savedPosts: [],
-                        hasCompletedOnboarding: false,
-                        lastSeen: serverTimestamp()
-                    });
-                    setShowOnboarding(true);
-                } else {
-                    const data = snap.data();
-                    if (data.hasCompletedOnboarding === false) setShowOnboarding(true);
-                    updateDoc(userRef, { lastSeen: serverTimestamp() });
+        if (!user) return;
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setNotifCount(snapshot.size);
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const data = change.doc.data();
+                    const now = Date.now();
+                    const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
+                    if (now - notifTime < 10000) { 
+                        if (Notification.permission === "granted") {
+                            new Notification(APP_NAME, { body: `${data.fromUsername} ${data.message}`, icon: APP_LOGO, tag: 'bgune-notif' });
+                        }
+                    }
                 }
+            });
+        });
+        return () => unsubscribe();
+    }, [user]);
+
+    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
+    useEffect(() => {
+        const unsubscribeAuth = onAuthStateChanged(auth, u => {
+            if(u) {
+                setUser(u);
+                // Update lastSeen saja, JANGAN buat profile baru di sini
+                updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                requestNotificationPermission(u.uid);
             } else {
-                // User Logout / Belum Login (Mode Tamu)
                 setUser(null);
                 setProfile(null);
             }
@@ -909,21 +1335,25 @@ const App = () => {
         return () => unsubscribeAuth();
     }, []);
 
-    // Fetch Data Realtime
     useEffect(() => {
-        // Fetch Profil Sendiri
-        let unsubP = () => {};
-        if (user) {
-            unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
-                if(s.exists()) setProfile({...s.data(), uid: user.uid});
-            });
-        }
+        if(!user) return;
+        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
+        
+        // HANYA BACA PROFILE, JANGAN MENULIS (setDoc) DI SINI
+        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
+            if (s.exists()) {
+                setProfile({...s.data(), uid:user.uid, email:user.email});
+            } else {
+                // Jika profile tidak ditemukan (kasus langka), biarkan null atau handle manual
+                // Jangan otomatis setDoc agar tidak menimpa data yg mungkin sedang loading
+                console.warn("Profile belum siap atau tidak ditemukan.");
+            }
+        });
 
-        // Fetch Posts & Users (Untuk semua, termasuk tamu)
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-            // Populate user data manual untuk performa
             const uids = [...new Set(raw.map(r=>r.userId))];
+            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
             const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
             const map = {};
             snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
@@ -931,93 +1361,43 @@ const App = () => {
         });
 
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
+        const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
         
-        return () => { unsubP(); unsubPosts(); unsubUsers(); };
+        return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); };
     }, [user]);
 
-    const handleFollow = async (uid, isFollowing) => { 
-        if (!user) return alert("Login dulu bos!");
-        // Logic follow existing...
-        const meRef = doc(db, getPublicCollection('userProfiles'), user.uid); 
-        const targetRef = doc(db, getPublicCollection('userProfiles'), uid); 
-        try { 
-            if(isFollowing) { 
-                await updateDoc(meRef, {following: arrayRemove(uid)}); 
-                await updateDoc(targetRef, {followers: arrayRemove(user.uid)}); 
-            } else { 
-                await updateDoc(meRef, {following: arrayUnion(uid)}); 
-                await updateDoc(targetRef, {followers: arrayUnion(user.uid)}); 
-            } 
-        } catch (e) { console.error(e); } 
-    };
+    const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
+    const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
-    if (showOnboarding && profile) return <OnboardingComponent profile={profile} onComplete={()=>setShowOnboarding(false)} />;
-    
-    // Jika user === undefined (masih loading auth state awal), tampilkan loader
-    if (user === undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
+    if (showSplash) return <SplashScreen />;
+    if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
+    if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
+    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] flex-col"><Loader2 className="animate-spin text-sky-500 mb-2"/><p className="text-xs text-gray-400">Memuat profil...</p></div>;
 
-    // Jika page === 'auth' tapi user sudah login, lempar ke home
-    if (page === 'auth' && user) setPage('home');
-
-    // Cek Developer
-    const isMeDeveloper = user?.email === DEVELOPER_EMAIL;
+    const isMeDeveloper = user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
 
     return (
-        <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300">
-            {page === 'auth' ? (
-                <AuthScreen />
-            ) : (
-                <>
-                    <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100/80 dark:border-gray-800 shadow-lg shadow-sky-100/30 dark:shadow-none transition-colors duration-300">
-                        <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
-                            <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
-                            <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600 hidden md:block">{APP_NAME}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            {/* Toggle Dark Mode */}
-                            <button onClick={()=>setDarkMode(!darkMode)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-yellow-400">
-                                {darkMode ? <Sun size={20}/> : <Moon size={20}/>}
-                            </button>
-
-                            {user ? (
-                                <>
-                                    <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative">
-                                        <Bell size={20}/>
-                                    </button>
-                                    <button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition">
-                                        <LogOut size={20}/>
-                                    </button>
-                                </>
-                            ) : (
-                                <button onClick={()=>setPage('auth')} className="px-4 py-2 bg-sky-500 text-white rounded-xl font-bold text-xs shadow hover:bg-sky-600">
-                                    Login
-                                </button>
-                            )}
-                        </div>
-                    </header> 
-
-                    <main className="pt-16">
-                        {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
-                        {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={()=>{setPage('home')}}/>}
-                        {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
-                        {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} setPage={setPage} />}
-                    </main>
-
-                    {/* Navigasi Bawah (Hanya muncul jika bukan halaman auth) */}
-                    <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-t from-white/95 to-white/90 dark:from-gray-800/95 dark:to-gray-800/90 backdrop-blur-2xl border-t border-white dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-200/60 dark:shadow-black/50 flex items-center gap-6 z-40">
-                        <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
-                        <button onClick={()=>{ if(!user) return alert("Login dulu!"); setPage('create'); }} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button>
-                        <NavBtn icon={User} active={page==='profile'} onClick={()=>{ if(!user) return setPage('auth'); setPage('profile'); }}/>
-                    </nav>
-
-                    <PWAInstallPrompt deferredPrompt={deferredPrompt} setDeferredPrompt={setDeferredPrompt} />
-                </>
-            )}
+        <div>
+            <div className="min-h-screen bg-[#F0F4F8] font-sans text-gray-800 transition-colors duration-300">
+                {page!=='shorts' && ( <header className="fixed top-0 w-full bg-white/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 shadow-sm transition-colors duration-300"><div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div><div className="flex gap-3"><a href={WHATSAPP_CHANNEL} target="_blank" className="p-2 bg-emerald-50 text-emerald-600 rounded-full shadow-sm hover:bg-emerald-100 transition" title="Dukung Kami"><Gift size={20}/></a><button onClick={()=>setPage('notifications')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={20}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('landing')}} className="p-2 bg-white rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={20}/></button></div></header> )}
+                <main className={page!=='shorts'?'pt-16':''}>
+                    {page==='home' && <HomeScreen currentUserId={user.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper}/>}
+                    {page==='shorts' && <><button onClick={()=>setPage('home')} className="fixed top-6 left-6 z-[60] bg-white/20 backdrop-blur-md p-3 rounded-full text-white hover:bg-white/30 transition"><ArrowLeft/></button><ShortsScreen allPosts={posts} currentUserId={user.uid} handleFollow={handleFollow} profile={profile}/></>}
+                    {page==='create' && <CreatePost setPage={setPage} userId={user.uid} username={profile.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage(short?'shorts':'home')}}/>}
+                    {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='notifications' && <NotificationScreen userId={user.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} />}
+                    {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper}/>}
+                </main>
+                {page!=='shorts' && <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/50 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 flex items-center gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=>setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button><NavBtn icon={Film} active={page==='shorts'} onClick={()=>setPage('shorts')}/><NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/></nav>}
+                <PWAInstallPrompt />
+            </div>
         </div>
     );
 };
 
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-gray-700 dark:text-sky-400' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
+const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50' : 'text-gray-400 hover:text-gray-600'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
