@@ -39,7 +39,6 @@ import {
 // IMPORT KHUSUS NOTIFIKASI
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
-// IMPORT ICON DARI LUCIDE REACT
 import { 
     LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
     ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
@@ -52,7 +51,6 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2
 } from 'lucide-react';
 
-// SET LOG LEVEL FIRESTORE AGAR TIDAK SPAM CONSOLE
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
@@ -63,11 +61,7 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const PASSWORD_RESET_LINK = "https://forms.gle/cAWaoPMDkffg6fa89";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-// --- GLOBAL IMAGE CACHE (SOLUSI AGAR GAMBAR SAMA TIDAK DILIMUAT ULANG) ---
-// Set ini menyimpan URL gambar yang SUDAH berhasil dimuat.
-const globalImageCache = new Set();
-
-// --- KUNCI VAPID BARU ---
+// --- KUNCI VAPID BARU (FIX) ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
 // --- KONFIGURASI FIREBASE ---
@@ -101,6 +95,7 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
+// 1. Request Izin Notifikasi
 const requestNotificationPermission = async (userId) => {
     if (!messaging || !userId) return;
     try {
@@ -115,8 +110,9 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
+// 2. Kompresi Gambar (FITUR BARU: SOLUSI UPLOAD CEPAT)
 const compressImage = (file) => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = (event) => {
@@ -124,39 +120,29 @@ const compressImage = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 1080; 
-                let width = img.width;
-                let height = img.height;
-
-                if (width > MAX_WIDTH) {
-                    height *= MAX_WIDTH / width;
-                    width = MAX_WIDTH;
-                }
-
-                canvas.width = width;
-                canvas.height = height;
+                // Maksimal lebar 1080px (HD), tinggi menyesuaikan
+                const MAX_WIDTH = 1080;
+                const scaleSize = MAX_WIDTH / img.width;
+                canvas.width = MAX_WIDTH;
+                canvas.height = img.height * scaleSize;
                 
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 
+                // Ubah ke JPEG dengan kualitas 70%
                 ctx.canvas.toBlob((blob) => {
-                    if (!blob) {
-                        reject(new Error("Gagal kompresi gambar"));
-                        return;
-                    }
                     const newFile = new File([blob], file.name, {
                         type: 'image/jpeg',
                         lastModified: Date.now(),
                     });
                     resolve(newFile);
-                }, 'image/jpeg', 0.8); 
+                }, 'image/jpeg', 0.7); 
             };
-            img.onerror = (error) => reject(error);
         };
-        reader.onerror = (error) => reject(error);
     });
 };
 
+// 3. Algoritma Acak
 const shuffleArray = (array) => {
     const newArray = [...array]; 
     let currentIndex = newArray.length, randomIndex;
@@ -168,6 +154,7 @@ const shuffleArray = (array) => {
     return newArray;
 };
 
+// 4. Sistem Notifikasi
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
     if (!toUserId || !fromUser || toUserId === fromUser.uid) return; 
     try {
@@ -178,53 +165,33 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
+// 5. Upload API (Faa API) - Dengan Auto HTTPS
 const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
-    if(onProgress) onProgress(10);
+    onProgress(0);
     formData.append('file', file, file.name);
 
-    const delay = ms => new Promise(res => setTimeout(res, ms));
-
     try {
-        for (let i = 10; i <= 50; i += 10) { 
-            if(onProgress) onProgress(i); 
-            await delay(100); 
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-        const response = await fetch(apiUrl, { 
-            method: 'POST', 
-            body: formData,
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if(onProgress) onProgress(80);
-        
+        for (let i = 0; i <= 60; i += 10) { onProgress(i); await new Promise(resolve => setTimeout(resolve, 50)); }
+        const response = await fetch(apiUrl, { method: 'POST', body: formData });
+        onProgress(80);
         if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
-        
         const data = await response.json();
-        if(onProgress) onProgress(100);
+        onProgress(100);
         
         if (data && data.url) {
             let secureUrl = data.url;
             if (secureUrl.startsWith('http://')) { secureUrl = secureUrl.replace('http://', 'https://'); }
             return secureUrl;
-        } else if (data && data.result && data.result.url) { 
-            return data.result.url;
-        } else { 
-            throw new Error('Format respon API tidak dikenali.'); 
-        }
+        } else if (data && data.result && data.result.url) { return data.result.url;
+        } else { throw new Error('Format respon API tidak dikenali.'); }
     } catch (error) {
-        if(onProgress) onProgress(0); 
-        console.error("Upload Error:", error);
-        throw new Error('Gagal upload. Koneksi server gambar sedang sibuk.');
+        onProgress(0); throw new Error('Gagal upload. Coba lagi atau cek koneksi.');
     }
 };
 
+// 6. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -239,6 +206,7 @@ const formatTimeAgo = (timestamp) => {
     return { relative: `${hours} jam lalu`, full: fullDate };
 };
 
+// 7. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
@@ -248,6 +216,7 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
+// 8. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
@@ -256,12 +225,14 @@ const getReputationBadge = (reputation, isDev) => {
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600" };
 };
 
+// 9. Ekstraktor Hashtag
 const extractHashtags = (text) => {
     if (!text) return [];
     const matches = text.match(/#[\w]+/g);
     return matches ? matches : [];
 };
 
+// 10. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
     const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
@@ -270,9 +241,10 @@ const isUserOnline = (lastSeen) => {
 };
 
 // ==========================================
-// BAGIAN 3: KOMPONEN UI KECIL & HELPER
+// BAGIAN 3: KOMPONEN UI KECIL
 // ==========================================
 
+// --- PWA INSTALL PROMPT ---
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
@@ -316,81 +288,49 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- IMAGE WITH SMART CACHE (SOLUSI FINAL) ---
-// Menggunakan globalImageCache agar gambar yang sudah diload tidak di-reload
-// Tetap menggunakan retry key untuk gambar yang ERROR, tapi tidak mengganggu gambar yang sukses
-const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
-    // Cek dulu di Global Cache. Kalau ada, langsung 'loaded'.
-    const initialState = globalImageCache.has(src) ? 'loaded' : 'loading';
-    const [status, setStatus] = useState(initialState);
-    const [retryKey, setRetryKey] = useState(0);
-    const [attempts, setAttempts] = useState(0);
-
+// --- IMAGE WITH RETRY (SOLUSI STUCK LOADING) ---
+const ImageWithRetry = ({ src, alt, className }) => {
+    const [error, setError] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [retryCount, setRetryCount] = useState(0);
+    
     useEffect(() => {
-        if (globalImageCache.has(src)) {
-            setStatus('loaded');
-        } else {
-            setStatus('loading');
-            setRetryKey(0);
-            setAttempts(0);
+        let timer;
+        if (loading) {
+            timer = setTimeout(() => {
+                if (loading) { setLoading(false); setError(true); }
+            }, 10000); 
         }
-    }, [src]);
+        return () => clearTimeout(timer);
+    }, [loading, src]);
 
-    useEffect(() => {
-        let timeout;
-        if (status === 'error') {
-            // Retry otomatis setiap 4 detik jika gagal
-            timeout = setTimeout(() => {
-                // Jangan retry jika di tempat lain sudah berhasil (cek cache lagi)
-                if (globalImageCache.has(src)) {
-                    setStatus('loaded');
-                } else {
-                    setRetryKey(prev => prev + 1);
-                    setStatus('loading');
-                    setAttempts(prev => prev + 1);
-                }
-            }, 4000);
-        }
-        return () => clearTimeout(timeout);
-    }, [status, src]);
-
-    const handleSuccess = () => {
-        globalImageCache.add(src); // Tandai URL ini berhasil dimuat
-        setStatus('loaded');
+    const handleRetry = (e) => {
+        e.stopPropagation(); setError(false); setLoading(true); setRetryCount(prev => prev + 1);
     };
 
-    const handleError = () => {
-        setStatus('error');
-    };
+    const displaySrc = retryCount > 0 ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryCount}-${Date.now()}` : src;
 
-    if (!src) {
+    if (error) {
         return (
-            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className} border border-gray-200`}>
-                 {fallbackText ? (
-                    <div className="w-full h-full flex items-center justify-center bg-sky-100 text-sky-600 font-black text-2xl uppercase">
-                        {fallbackText[0]}
-                    </div>
-                ) : <ImageOff size={24} className="opacity-30"/>}
+            <div className={`bg-gray-100 flex flex-col items-center justify-center text-gray-400 ${className}`} style={{minHeight: '200px'}}>
+                <ImageOff size={24} className="mb-2 opacity-50"/>
+                <p className="text-[10px] mb-2 text-center px-2">Gambar tidak dapat dimuat</p>
+                <button onClick={handleRetry} className="bg-white border px-3 py-1.5 rounded-full text-[10px] font-bold shadow-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1"><RefreshCw size={10}/> Refresh</button>
             </div>
         );
     }
 
     return (
-        <div className={`relative ${className} overflow-hidden bg-gray-50`}>
-            {status !== 'loaded' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-100/80 backdrop-blur-sm transition-all duration-300">
-                    <Loader2 className="animate-spin text-sky-500 mb-2" size={20}/>
-                    {attempts > 0 && <span className="text-[9px] font-bold text-gray-500 animate-pulse">Mencoba lagi ({attempts})...</span>}
-                </div>
+        <div className={`relative ${className} overflow-hidden bg-gray-100`}>
+            {loading && (
+                <div className="absolute inset-0 flex items-center justify-center z-10"><Loader2 className="animate-spin text-gray-400" size={24}/></div>
             )}
-            
             <img 
-                key={retryKey} 
-                src={src} 
+                src={displaySrc} 
                 alt={alt} 
-                className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity duration-500`}
-                onLoad={handleSuccess}
-                onError={handleError}
+                className={`${className} ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}
+                onLoad={() => setLoading(false)}
+                onError={() => { setLoading(false); setError(true); }}
                 loading="lazy"
                 referrerPolicy="no-referrer"
                 crossOrigin="anonymous"
@@ -399,65 +339,27 @@ const ImageWithRetry = ({ src, alt, className, fallbackText }) => {
     );
 };
 
+// --- AUDIO PLAYER ---
 const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
-    const [error, setError] = useState(false);
 
     const togglePlay = () => {
         if (audioRef.current) {
             if (isPlaying) audioRef.current.pause();
-            else {
-                const playPromise = audioRef.current.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.error("Audio playback error:", error);
-                        setIsPlaying(false);
-                        setError(true);
-                    });
-                }
-            }
+            else audioRef.current.play();
             setIsPlaying(!isPlaying);
-        }
-    };
-
-    const handleRetry = () => {
-        setError(false);
-        setIsPlaying(false);
-        if(audioRef.current) {
-            audioRef.current.load();
         }
     };
 
     return (
         <div className="bg-gradient-to-r from-gray-800 to-gray-900 rounded-xl p-3 flex items-center gap-3 mb-4 shadow-md border border-gray-700">
-            {error ? (
-                 <button onClick={handleRetry} className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition" title="Coba Lagi">
-                    <RefreshCw size={18} />
-                 </button>
-            ) : (
-                <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
-                    {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
-                </button>
-            )}
-            
+            <button onClick={togglePlay} className="w-10 h-10 bg-sky-500 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition">
+                {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
+            </button>
             <div className="flex-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-sky-400 mb-1">
-                    <Music size={12}/> {error ? "Gagal memuat audio" : "Audio Clip"}
-                </div>
-                {!error && (
-                    <audio 
-                        ref={audioRef} 
-                        src={src} 
-                        className="w-full h-6 opacity-80" 
-                        controls 
-                        onEnded={() => setIsPlaying(false)} 
-                        onPause={() => setIsPlaying(false)} 
-                        onPlay={() => setIsPlaying(true)}
-                        onError={() => setError(true)}
-                    />
-                )}
-                {error && <p className="text-[10px] text-red-400">Terjadi kesalahan jaringan.</p>}
+                <div className="flex items-center gap-1 text-xs font-bold text-sky-400 mb-1"><Music size={12}/> Audio Clip</div>
+                <audio ref={audioRef} src={src} className="w-full h-6 opacity-80" controls onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)}/>
             </div>
         </div>
     );
@@ -600,26 +502,21 @@ const AuthScreen = ({ onLoginSuccess }) => {
         e.preventDefault(); setError(''); setIsLoading(true);
         try {
             if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const ref = doc(db, getPublicCollection('userProfiles'), userCredential.user.uid);
+                const snap = await getDoc(ref);
+                if(!snap.exists()) {
+                    await setDoc(ref, { username: email.split('@')[0], email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp() });
+                } else {
+                    await updateDoc(ref, { lastSeen: serverTimestamp() });
+                }
             } else {
                 if (!username.trim()) throw new Error("Username wajib diisi");
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                
-                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { 
-                    username: username.trim(), 
-                    email: email, 
-                    createdAt: serverTimestamp(), 
-                    uid: userCredential.user.uid, 
-                    photoURL: '', 
-                    following: [], 
-                    followers: [], 
-                    lastSeen: serverTimestamp(), 
-                    savedPosts: [], 
-                    mood: '' 
-                });
+                await setDoc(doc(db, getPublicCollection('userProfiles'), userCredential.user.uid), { username: username.trim(), email: email, createdAt: serverTimestamp(), uid: userCredential.user.uid, photoURL: '', following: [], followers: [], lastSeen: serverTimestamp(), savedPosts: [], mood: '' });
             }
             onLoginSuccess();
-        } catch (err) { setError("Login/Daftar gagal. " + err.message); } finally { setIsLoading(false); }
+        } catch (err) { setError("Login/Daftar gagal. Periksa data atau koneksi."); } finally { setIsLoading(false); }
     };
 
     return (
@@ -755,11 +652,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
-                        <div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">
-                            <ImageWithRetry src={post.user?.photoURL} alt="User" className="w-full h-full object-cover" fallbackText={post.user?.username}/>
-                        </div>
-                    </div>
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}</div></div>
                     <div><h4 className="font-bold text-gray-800 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
                 <div className="flex gap-2">
@@ -779,7 +672,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 border border-gray-100 relative select-none" onDoubleClick={handleDoubleTap}>
                             {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                             {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
-                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer" />}
+                            {isImage && <ImageWithRetry src={post.mediaUrl} className="w-full max-h-[500px] object-cover cursor-pointer"/>}
                             {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black"/>}
                             {embed?.type === 'youtube' && <div className="aspect-video"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                             {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-6 text-center bg-sky-50 text-sky-600 font-bold text-sm hover:underline">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
@@ -902,7 +795,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // Kompresi dulu foto profil agar cepat
+                // Kompresi dulu foto profil
                 const compressedFile = await compressImage(file);
                 url = await uploadToFaaAPI(compressedFile, ()=>{});
             }
@@ -927,7 +820,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow }) =
                 <div className="relative inline-block mb-4 mt-8">
                     <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 ${isOnline ? 'border-emerald-400' : 'border-white'} relative`}>
                         {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
-                        <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover" fallbackText={profileData.username}/>
+                        {profileData.photoURL ? <ImageWithRetry src={profileData.photoURL} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-sky-500 text-3xl font-bold">{profileData.username?.[0]}</div>}
                     </div>
                     <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
                     {isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}
@@ -1038,7 +931,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     );
 };
 
-// --- SHORTS SCREEN (INFINITE LOOP) ---
+// --- 8. SHORTS SCREEN (INFINITE LOOP) ---
 const ShortsScreen = ({ allPosts, currentUserId, handleFollow, profile }) => {
     const [feed, setFeed] = useState([]);
     useEffect(() => { const shorts = allPosts.filter(p => p.isShort && p.mediaUrl); setFeed(shuffleArray(shorts)); }, [allPosts]);
@@ -1098,7 +991,6 @@ const ShortItem = ({ post, currentUserId, handleFollow, profile }) => {
     );
 };
 
-// --- NOTIFICATION SCREEN ---
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     useEffect(() => {
@@ -1109,164 +1001,6 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold">{n.fromUsername}</p><p className="text-xs text-gray-600">{n.message}</p></div></div>)}</div>}</div>;
 };
 
-// --- SEARCH SCREEN (FIX: ANTI CRASH & DESAIN BARU) ---
-const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile }) => {
-    const [queryText, setQueryText] = useState('');
-    const [searchTerm, setSearchTerm] = useState(''); // State untuk debounce
-    const [tab, setTab] = useState('users');
-
-    // Debounce effect: Menunggu 300ms setelah mengetik baru update hasil
-    // Ini mencegah render berlebihan saat mengetik cepat
-    useEffect(() => {
-        const delayDebounceFn = setTimeout(() => {
-            setSearchTerm(queryText);
-        }, 300);
-
-        return () => clearTimeout(delayDebounceFn);
-    }, [queryText]);
-
-    const filteredUsers = useMemo(() => {
-        if (!searchTerm || !allUsers) return [];
-        const term = searchTerm.toLowerCase();
-        
-        return allUsers.filter(u => {
-            // SAFE CHECK: Pastikan u dan u.username ada sebelum akses toLowerCase
-            if (!u || !u.username) return false;
-            return u.username.toLowerCase().includes(term) && u.uid !== profile.uid;
-        });
-    }, [allUsers, searchTerm, profile?.uid]);
-
-    const filteredPosts = useMemo(() => {
-        if (!searchTerm || !allPosts) return [];
-        const term = searchTerm.toLowerCase();
-
-        return allPosts.filter(p => {
-            // SAFE CHECK: Pastikan p dan kontennya ada
-            const contentMatch = p.content && p.content.toLowerCase().includes(term);
-            const titleMatch = p.title && p.title.toLowerCase().includes(term);
-            const tagMatch = p.category && p.category.toLowerCase().includes(term); // Tambahan cari tag/kategori
-            
-            return contentMatch || titleMatch || tagMatch;
-        });
-    }, [allPosts, searchTerm]);
-
-    return (
-        <div className="max-w-lg mx-auto p-4 pb-24">
-            <h1 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-2">
-                <Search className="text-sky-500" size={28}/> Pencarian
-            </h1>
-            
-            <div className="relative mb-8 group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Search className="text-gray-400 group-focus-within:text-sky-500 transition duration-300" size={20}/>
-                </div>
-                <input 
-                    value={queryText} 
-                    onChange={e => setQueryText(e.target.value)} 
-                    placeholder={tab === 'users' ? "Cari teman..." : "Cari postingan..."}
-                    className="w-full pl-12 pr-12 py-4 bg-white rounded-2xl shadow-sm border-2 border-transparent focus:border-sky-500 focus:ring-4 focus:ring-sky-100 outline-none transition-all duration-300 font-medium text-gray-700"
-                    autoFocus
-                />
-                {queryText && (
-                    <button onClick={() => setQueryText('')} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 transition">
-                        <X size={18} className="bg-gray-200 rounded-full p-0.5"/>
-                    </button>
-                )}
-            </div>
-
-            <div className="flex p-1 bg-gray-100 rounded-2xl mb-6 shadow-inner">
-                <button onClick={() => setTab('users')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'users' ? 'bg-white text-sky-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
-                    <Users size={16}/> Pengguna
-                </button>
-                <button onClick={() => setTab('posts')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2 ${tab === 'posts' ? 'bg-white text-purple-600 shadow-md transform scale-105' : 'text-gray-500 hover:text-gray-700'}`}>
-                    <ImageOff size={16}/> Postingan
-                </button>
-            </div>
-
-            {searchTerm ? (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    {tab === 'users' ? (
-                        <div className="space-y-4">
-                            {filteredUsers.length === 0 ? (
-                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
-                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><UserPlus size={32} className="text-gray-300"/></div>
-                                    <p className="text-gray-500 font-medium">Pengguna tidak ditemukan.</p>
-                                </div>
-                            ) : (
-                                filteredUsers.map(u => {
-                                    const isFollowing = (profile.following || []).includes(u.uid);
-                                    return (
-                                        <div key={u.uid} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:shadow-md transition duration-300">
-                                            <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => goToProfile(u.uid)}>
-                                                <div className="relative">
-                                                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-sky-100 to-purple-100 p-0.5">
-                                                        <div className="w-full h-full rounded-full bg-white overflow-hidden">
-                                                             <ImageWithRetry src={u.photoURL} className="w-full h-full object-cover" fallbackText={u.username}/>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <h4 className="font-bold text-gray-800">{u.username}</h4>
-                                                    <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">{u.followers?.length || 0} Pengikut</p>
-                                                </div>
-                                            </div>
-                                            <button 
-                                                onClick={() => handleFollow(u.uid, isFollowing)} 
-                                                className={`px-5 py-2 rounded-xl text-xs font-bold transition-all duration-300 transform active:scale-95 ${isFollowing ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-200 hover:shadow-xl'}`}
-                                            >
-                                                {isFollowing ? 'Mengikuti' : 'Ikuti'}
-                                            </button>
-                                        </div>
-                                    )
-                                })
-                            )}
-                        </div>
-                    ) : (
-                        <div className="columns-1 gap-4 space-y-4">
-                            {filteredPosts.length === 0 ? (
-                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
-                                    <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><Search size={32} className="text-gray-300"/></div>
-                                    <p className="text-gray-500 font-medium">Tidak ada postingan yang cocok.</p>
-                                </div>
-                            ) : (
-                                filteredPosts.map(p => (
-                                    <div key={p.id} className="break-inside-avoid bg-white p-4 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition cursor-pointer group" onClick={() => goToProfile(p.userId)}>
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
-                                                <ImageWithRetry src={p.user?.photoURL} className="w-full h-full object-cover" fallbackText={p.user?.username}/>
-                                            </div>
-                                            <span className="font-bold text-xs text-gray-700 group-hover:text-sky-600 transition">{p.user?.username}</span>
-                                            <span className="text-[10px] text-gray-400 ml-auto">{formatTimeAgo(p.timestamp).relative}</span>
-                                        </div>
-                                        <h4 className="font-bold text-sm text-gray-900 mb-1 line-clamp-2">{p.title || p.content}</h4>
-                                        {p.mediaUrl && p.mediaType === 'image' && (
-                                            <div className="mt-2 rounded-xl overflow-hidden h-32 relative">
-                                                <ImageWithRetry src={p.mediaUrl} className="w-full h-full object-cover"/>
-                                            </div>
-                                        )}
-                                        <div className="mt-3 flex items-center gap-4 text-gray-400 text-xs font-bold">
-                                            <span className="flex items-center gap-1"><Heart size={12}/> {p.likes?.length || 0}</span>
-                                            <span className="flex items-center gap-1"><MessageSquare size={12}/> {p.commentsCount || 0}</span>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <div className="text-center py-10 opacity-60">
-                    <div className="w-24 h-24 bg-gradient-to-tr from-sky-50 to-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                        <Search size={40} className="text-sky-200"/>
-                    </div>
-                    <p className="text-gray-400 font-medium">Ketik nama teman atau topik menarik...</p>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// --- SINGLE POST VIEW ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const post = allPosts.find(p => p.id === postId);
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
@@ -1280,7 +1014,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- 11. APP UTAMA (CORE LOGIC - FIXED) ---
+// --- 11. APP UTAMA ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1319,52 +1053,8 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    // --- BAGIAN INI SANGAT PENTING (FIX PROFILE RESET) ---
-    useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, u => {
-            if(u) {
-                setUser(u);
-                // Update lastSeen saja, JANGAN buat profile baru di sini
-                updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                requestNotificationPermission(u.uid);
-            } else {
-                setUser(null);
-                setProfile(null);
-            }
-        });
-        return () => unsubscribeAuth();
-    }, []);
-
-    useEffect(() => {
-        if(!user) return;
-        if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home');
-        
-        // HANYA BACA PROFILE, JANGAN MENULIS (setDoc) DI SINI
-        const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => {
-            if (s.exists()) {
-                setProfile({...s.data(), uid:user.uid, email:user.email});
-            } else {
-                // Jika profile tidak ditemukan (kasus langka), biarkan null atau handle manual
-                // Jangan otomatis setDoc agar tidak menimpa data yg mungkin sedang loading
-                console.warn("Profile belum siap atau tidak ditemukan.");
-            }
-        });
-
-        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
-            const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-            const uids = [...new Set(raw.map(r=>r.userId))];
-            // Optimasi: Cache user data jika memungkinkan, atau batch fetch
-            const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
-            const map = {};
-            snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
-            setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user})));
-        });
-
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
-        const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size));
-        
-        return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); };
-    }, [user]);
+    useEffect(() => onAuthStateChanged(auth, u => { if(u) { setUser(u); updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); requestNotificationPermission(u.uid); } else { setUser(null); setProfile(null); } }), []);
+    useEffect(() => { if(!user) return; if(page==='landing' || page==='auth') setPage(targetPid ? 'view_post' : 'home'); const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), s => s.exists() ? setProfile({...s.data(), uid:user.uid, email:user.email}) : setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {username:user.email.split('@')[0], email:user.email, uid:user.uid, following:[], followers:[], photoURL:'', lastSeen: serverTimestamp(), savedPosts: []})); const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); const uids = [...new Set(raw.map(r=>r.userId))]; const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u)))); const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()}); setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user}))); }); const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})))); const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); return () => { unsubP(); unsubPosts(); unsubUsers(); unsubNotif(); }; }, [user]);
 
     const handleFollow = async (uid, isFollowing) => { if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
@@ -1372,7 +1062,7 @@ const App = () => {
     if (showSplash) return <SplashScreen />;
     if(user===undefined) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
     if(!user) { if(page==='auth') return <AuthScreen onLoginSuccess={()=>{}}/>; return <LandingPage onGetStarted={()=>setPage('auth')}/>; }
-    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] flex-col"><Loader2 className="animate-spin text-sky-500 mb-2"/><p className="text-xs text-gray-400">Memuat profil...</p></div>;
+    if(!profile) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8]"><Loader2 className="animate-spin text-sky-500"/></div>;
 
     const isMeDeveloper = user.email === DEVELOPER_EMAIL;
     const targetUser = users.find(u => u.uid === targetUid);
