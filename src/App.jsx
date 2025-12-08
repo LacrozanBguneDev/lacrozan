@@ -637,7 +637,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isG
                     <Heart size={20} fill={liked ? 'currentColor' : 'none'}/> {likeCount}
                 </button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400">
-                    <MessageSquareText size={20}/> {post.commentsCount || 0}
+                    <MessageSquare size={20}/> {post.commentsCount || 0}
                 </button>
                 <button onClick={sharePost} className="flex items-center gap-2 text-sm font-bold text-gray-400 ml-auto">
                     <Share2 size={20}/> Bagikan
