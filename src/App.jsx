@@ -64,15 +64,17 @@ const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744"
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
 // --- KONFIGURASI FIREBASE ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-‎  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
-‎  authDomain: "eduku-web.firebaseapp.com",
-‎  projectId: "eduku-web",
-‎  storageBucket: "eduku-web.firebasestorage.com",
-‎  messagingSenderId: "662463693471",
-‎  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-‎  measurementId: "G-G0VWNHHVB8"
-‎};
+const firebaseConfig = typeof __firebase_config !== 'undefined'
+  ? JSON.parse(__firebase_config)
+  : {
+      apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
+      authDomain: "eduku-web.firebaseapp.com",
+      projectId: "eduku-web",
+      storageBucket: "eduku-web.firebasestorage.com",
+      messagingSenderId: "662463693471",
+      appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+      measurementId: "G-G0VWNHHVB8"
+    };
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
