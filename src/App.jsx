@@ -65,13 +65,13 @@ const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0
 
 // --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
-  authDomain: "eduku-web.firebaseapp.com",
-  projectId: "eduku-web",
-  storageBucket: "eduku-web.firebasestorage.com",
-  messagingSenderId: "662463693471",
-  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-  measurementId: "G-G0VWNHHVB8"
+  apiKey: "AIzaSyCK9UJfQr9kxOR8DjUYGGbtFAcHO7Bj10w",
+‎    authDomain: "bgunenet.firebaseapp.com",
+‎    projectId: "bgunenet",
+‎    storageBucket: "bgunenet.firebasestorage.app",
+‎    messagingSenderId: "234576095202",
+‎    appId: "1:234576095202:web:b8931f7548359650a4fbbb",
+‎    measurementId: "G-M2HY1489XB"
 };
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
