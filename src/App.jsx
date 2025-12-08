@@ -56,7 +56,7 @@ setLogLevel('silent');
 // --- KONSTANTA GLOBAL ---
 const DEVELOPER_EMAIL = 'irhamdika00@gmail.com'; 
 const APP_NAME = "BguneNet";
-const APP_LOGO = "https://h.uguu.se/pUqpPupx.png";
+const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
