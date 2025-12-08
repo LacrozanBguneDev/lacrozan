@@ -48,9 +48,8 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Scale, FileText, ChevronLeft, CornerDownRight, Video, MessageCircle, MessageSquareText
+    Scale, FileText, ChevronLeft, CornerDownRight, Video, MessageCircle
 } from 'lucide-react';
-
 setLogLevel('silent');
 
 // --- KONSTANTA GLOBAL ---
