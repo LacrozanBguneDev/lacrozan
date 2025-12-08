@@ -66,14 +66,13 @@ const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0
 // --- KONFIGURASI FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyCK9UJfQr9kxOR8DjUYGGbtFAcHO7Bj10w",
-‎    authDomain: "bgunenet.firebaseapp.com",
-‎    projectId: "bgunenet",
-‎    storageBucket: "bgunenet.firebasestorage.app",
-‎    messagingSenderId: "234576095202",
-‎    appId: "1:234576095202:web:b8931f7548359650a4fbbb",
-‎    measurementId: "G-M2HY1489XB"
+  authDomain: "bgunenet.firebaseapp.com",
+  projectId: "bgunenet",
+  storageBucket: "bgunenet.firebasestorage.app",
+  messagingSenderId: "234576095202",
+  appId: "1:234576095202:web:b8931f7548359650a4fbbb",
+  measurementId: "G-M2HY1489XB"
 };
-
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
