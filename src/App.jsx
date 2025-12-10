@@ -48,7 +48,7 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX
+    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff
 } from 'lucide-react';
 
 setLogLevel('silent');
@@ -210,16 +210,20 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
 // 6. Formatter Waktu
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
-    const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
-    const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    if (seconds > 86400) return { relative: fullDate, full: fullDate };
-    if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return { relative: `${minutes} menit lalu`, full: fullDate };
-    const hours = Math.floor(minutes / 60);
-    return { relative: `${hours} jam lalu`, full: fullDate };
+    try {
+        const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+        const now = new Date();
+        const seconds = Math.floor((now - date) / 1000);
+        const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        if (seconds > 86400) return { relative: fullDate, full: fullDate };
+        if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return { relative: `${minutes} menit lalu`, full: fullDate };
+        const hours = Math.floor(minutes / 60);
+        return { relative: `${hours} jam lalu`, full: fullDate };
+    } catch (e) {
+        return { relative: 'Baru saja', full: '' };
+    }
 };
 
 // 7. Detektor Media Embed (UPDATED: YouTube, TikTok, IG)
@@ -274,9 +278,11 @@ const extractHashtags = (text) => {
 // 10. Cek Online Status
 const isUserOnline = (lastSeen) => {
     if (!lastSeen) return false;
-    const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
-    const diff = Date.now() - last.getTime();
-    return diff < 10 * 60 * 1000; 
+    try {
+        const last = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
+        const diff = Date.now() - last.getTime();
+        return diff < 10 * 60 * 1000; 
+    } catch(e) { return false; }
 };
 
 // ==========================================
@@ -334,6 +340,13 @@ const ImageWithRetry = ({ src, alt, className, onClick }) => {
     const [retryCount, setRetryCount] = useState(0);
     
     useEffect(() => {
+        // Reset state jika src berubah
+        setLoading(true);
+        setError(false);
+        setRetryCount(0);
+    }, [src]);
+
+    useEffect(() => {
         let timer;
         if (loading) {
             timer = setTimeout(() => {
@@ -341,7 +354,7 @@ const ImageWithRetry = ({ src, alt, className, onClick }) => {
             }, 10000); 
         }
         return () => clearTimeout(timer);
-    }, [loading, src]);
+    }, [loading, src, retryCount]); // Tambahkan retryCount ke dependency
 
     const handleRetry = (e) => {
         e.stopPropagation(); setError(false); setLoading(true); setRetryCount(prev => prev + 1);
@@ -790,56 +803,39 @@ const LeaderboardScreen = ({ allUsers }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-// --- SMART GRID MEDIA DISPLAY (NEW V25) ---
+// --- SMART GRID MEDIA DISPLAY (PERBAIKAN: GRID RAPI & PETAK) ---
 const MediaGrid = ({ mediaUrls, onImageClick }) => {
     const count = mediaUrls.length;
     
     if (count === 0) return null;
 
+    // FOTO TUNGGAL (Tampil Full)
     if (count === 1) {
         return (
-            <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative aspect-video" onClick={() => onImageClick(0)}>
-                <img src={mediaUrls[0]} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition duration-500"/>
+            <div className="mb-4 rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative" onClick={() => onImageClick(0)}>
+                <img src={mediaUrls[0]} className="w-full h-auto max-h-[500px] object-cover cursor-pointer hover:scale-105 transition duration-500"/>
             </div>
         );
     }
 
-    if (count === 2) {
-        return (
-            <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden aspect-video">
-                {mediaUrls.map((url, i) => (
-                    <div key={i} className="relative h-full" onClick={() => onImageClick(i)}>
-                        <img src={url} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
-                    </div>
-                ))}
-            </div>
-        );
-    }
-
-    if (count === 3) {
-        return (
-            <div className="mb-4 grid grid-cols-2 gap-1 rounded-2xl overflow-hidden aspect-square">
-                <div className="col-span-2 h-[60%]" onClick={() => onImageClick(0)}>
-                    <img src={mediaUrls[0]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
-                </div>
-                <div className="h-[40%]" onClick={() => onImageClick(1)}>
-                    <img src={mediaUrls[1]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
-                </div>
-                <div className="h-[40%]" onClick={() => onImageClick(2)}>
-                    <img src={mediaUrls[2]} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
-                </div>
-            </div>
-        );
-    }
-
-    // 4 or more (Small Grid Logic for Space Saving)
+    // MULTI FOTO: LOGIKA PETAK RAPI (GRID)
+    // Menggunakan Grid 3 Kolom jika lebih dari 2 foto, agar kotak-kotak kecil rapi.
+    // Menggunakan Grid 2 Kolom jika pas 2 foto.
     return (
-        <div className="mb-4 grid grid-cols-3 gap-0.5 rounded-2xl overflow-hidden aspect-square">
+        <div className={`mb-4 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-2xl overflow-hidden`}>
             {mediaUrls.slice(0, 9).map((url, i) => (
-                <div key={i} className={`relative h-full ${i===0?'col-span-3 row-span-2 h-48':''}`} onClick={() => onImageClick(i)}>
-                    <img src={url} className="w-full h-full object-cover cursor-pointer hover:brightness-90 transition"/>
+                <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}>
+                    <img 
+                        src={url} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        loading="lazy"
+                    />
+                    {/* Overlay Hitam Transparan saat Hover */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                    
+                    {/* Counter Jika Lebih dari 9 Foto */}
                     {i === 8 && count > 9 && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-bold text-xl cursor-pointer">
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">
                             +{count - 9}
                         </div>
                     )}
@@ -961,8 +957,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
     
-    // Helper to organize comments (Simple indent strategy)
-    // Flattened for simple storage but rendered with checks
+    // User Badge dengan Fallback aman jika user undefined
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
     return (
@@ -973,8 +968,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0]}</span>}</div></div>
-                    <div><h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight flex items-center gap-1">{post.user?.username} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white flex items-center justify-center overflow-hidden">{post.user?.photoURL ? <ImageWithRetry src={post.user.photoURL} alt="User" className="w-full h-full object-cover"/> : <span className="font-bold text-sky-600">{post.user?.username?.[0] || '?'}</span>}</div></div>
+                    <div><h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight flex items-center gap-1">{post.user?.username || 'Pengguna'} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
                 </div>
                 <div className="flex gap-2">
                     {!isOwner && post.userId !== currentUserId && ( <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
@@ -1258,18 +1253,18 @@ const TrendingTags = ({ posts, onTagClick }) => {
 };
 
 // --- HOME SCREEN ---
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick }) => {
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
     const [isFirstLoad, setIsFirstLoad] = useState(true);
-    const [loadingFeed, setLoadingFeed] = useState(true);
     const [displayCount, setDisplayCount] = useState(5);
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
 
     useEffect(() => {
-        if (allPosts.length === 0) { setLoadingFeed(false); return; }
-        let basePosts = allPosts; // Semua postingan termasuk video dll
+        if (isLoadingFeed) return;
+        
+        let basePosts = [...allPosts]; 
         let pinnedPost = null;
         if (newPostId) {
             const idx = basePosts.findIndex(p => p.id === newPostId);
@@ -1288,8 +1283,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         if (pinnedPost) processedPosts.unshift(pinnedPost);
         setStableFeed(processedPosts);
         setIsFirstLoad(false);
-        setLoadingFeed(false);
-    }, [allPosts, sortType, newPostId]); 
+    }, [allPosts, sortType, newPostId, isLoadingFeed]); 
 
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
@@ -1304,7 +1298,14 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         return () => { if (currentBottom) observer.unobserve(currentBottom); };
     }, [stableFeed, displayCount, loadingMore]);
 
-    const manualRefresh = () => { setLoadingFeed(true); setStableFeed([]); setIsFirstLoad(true); setSortType('random'); setDisplayCount(5); clearNewPost(); setTimeout(() => setLoadingFeed(false), 800); };
+    const manualRefresh = () => { 
+        setIsFirstLoad(true); 
+        setSortType('random'); 
+        setDisplayCount(5); 
+        clearNewPost(); 
+        retryFeed(); // Panggil fungsi refresh dari App
+    };
+    
     const visiblePosts = stableFeed.slice(0, displayCount);
 
     return (
@@ -1320,7 +1321,17 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
 
-            {loadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 ? (
+            {/* ERROR HANDLING JIKA OFFLINE */}
+            {feedError && (
+                <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 rounded-3xl mb-4 text-center">
+                    <WifiOff size={48} className="text-red-400 mb-2"/>
+                    <h3 className="text-red-600 dark:text-red-400 font-bold">Koneksi Bermasalah</h3>
+                    <p className="text-xs text-red-400 mb-4">Gagal memuat postingan.</p>
+                    <button onClick={manualRefresh} className="px-4 py-2 bg-red-500 text-white rounded-full text-xs font-bold shadow-lg">Coba Lagi</button>
+                </div>
+            )}
+
+            {isLoadingFeed ? <><SkeletonPost/><SkeletonPost/></> : visiblePosts.length === 0 && !feedError ? (
                 <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
             ) : (
                 <>
@@ -1418,6 +1429,11 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+
+    // State Loading Feed & Error (Global)
+    const [isLoadingFeed, setIsLoadingFeed] = useState(true);
+    const [feedError, setFeedError] = useState(false);
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
@@ -1520,12 +1536,46 @@ const App = () => {
         }
     }, [user]);
 
-    // Listener Global (Jalan untuk Guest & User)
+    // Listener Global (Jalan untuk Guest & User) - DIPERBAIKI
     useEffect(() => {
-        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); const uids = [...new Set(raw.map(r=>r.userId))]; const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u)))); const map = {}; snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()}); setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user}))); }); 
+        setIsLoadingFeed(true);
+        setFeedError(false);
+
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
+            try {
+                // Fetch postingan dulu (cepat)
+                const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+                
+                // Set data awal meskipun data user belum lengkap (Anti-Delay)
+                setPosts(raw); 
+
+                // Fetch data user secara async (tanpa blokir render)
+                const uids = [...new Set(raw.map(r=>r.userId))];
+                const map = {};
+                
+                // Gunakan try-catch di dalam fetch user juga agar kalau gagal satu tidak hancur semua
+                try {
+                    const snaps = await Promise.all(uids.map(u=>getDoc(doc(db, getPublicCollection('userProfiles'), u))));
+                    snaps.forEach(sn=>{if(sn.exists()) map[sn.id]=sn.data()});
+                    
+                    // Update posts dengan data user lengkap
+                    setPosts(raw.map(r=>({...r, user: map[r.userId]||r.user})));
+                } catch (userErr) {
+                    console.error("Gagal load profil user:", userErr);
+                    // Tetap biarkan postingan tampil meski tanpa profil lengkap
+                }
+
+                setIsLoadingFeed(false);
+            } catch (err) {
+                console.error("Error fetching posts:", err);
+                setFeedError(true);
+                setIsLoadingFeed(false);
+            }
+        }); 
+
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
         return () => { unsubPosts(); unsubUsers(); };
-    }, []);
+    }, [refreshTrigger]); // Dependensi refreshTrigger untuk tombol coba lagi
 
     const handleFollow = async (uid, isFollowing) => { 
         if (!user) { setShowAuthModal(true); return; } // Guest check
@@ -1579,7 +1629,7 @@ const App = () => {
                 )}
 
                 <main className={page!=='legal' ? 'pt-16' : ''}>
-                    {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
+                    {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>}
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
