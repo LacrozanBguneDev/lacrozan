@@ -48,10 +48,11 @@ import {
     BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon
+    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
+    Bug, ArrowUp, Move // Icon tambahan untuk Log & Drag
 } from 'lucide-react';
 
-setLogLevel('silent');
+setLogLevel('silent'); // Default firebase silent
 
 // --- KONSTANTA GLOBAL ---
 const DEVELOPER_EMAIL = 'irhamdika00@gmail.com'; 
@@ -94,6 +95,26 @@ try {
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
+
+// 0. SYSTEM LOGGER (BARU: Untuk menangkap error user)
+const logSystemError = async (error, context = 'general', user = null) => {
+    try {
+        // Jangan log error koneksi internet biasa untuk menghemat kuota
+        if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
+
+        await addDoc(collection(db, getPublicCollection('systemLogs')), {
+            message: error.message || String(error),
+            stack: error.stack || '',
+            context: context,
+            userId: user?.uid || 'guest',
+            username: user?.displayName || user?.username || 'Guest',
+            timestamp: serverTimestamp(),
+            userAgent: navigator.userAgent
+        });
+    } catch (e) {
+        // Silent fail jika logging gagal
+    }
+};
 
 // 1. Request Izin Notifikasi
 const requestNotificationPermission = async (userId) => {
@@ -289,6 +310,66 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & PERBAIKAN
 // ==========================================
 
+// --- COMPONENT: Draggable Gift Button (BARU - Bisa Digeser) ---
+const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
+    const [position, setPosition] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 180 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartRef = useRef({ x: 0, y: 0 });
+    const btnRef = useRef(null);
+
+    // Initial position on mount (safe area)
+    useEffect(() => {
+        setPosition({ x: window.innerWidth - 80, y: window.innerHeight - 180 });
+    }, []);
+
+    const handleStart = (clientX, clientY) => {
+        setIsDragging(false);
+        if(btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect();
+            dragStartRef.current = {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+    };
+
+    const handleMove = (clientX, clientY) => {
+        setIsDragging(true);
+        // Cegah tombol keluar layar
+        const newX = Math.min(Math.max(0, clientX - dragStartRef.current.x), window.innerWidth - 60);
+        const newY = Math.min(Math.max(0, clientY - dragStartRef.current.y), window.innerHeight - 60);
+        setPosition({ x: newX, y: newY });
+    };
+
+    const handleEnd = () => {
+        // Jika hanya klik (tidak drag), trigger onClick
+        setTimeout(() => setIsDragging(false), 100);
+    };
+
+    return (
+        <div 
+            ref={btnRef}
+            className="fixed z-[55] touch-none select-none cursor-move transition-shadow"
+            style={{ left: position.x, top: position.y }}
+            onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+            onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)}
+            onTouchEnd={handleEnd}
+            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+        >
+            <button 
+                onClick={() => !isDragging && onClick()}
+                className="bg-gradient-to-br from-yellow-400 to-orange-500 p-3 rounded-full shadow-2xl shadow-orange-500/50 relative group active:scale-95 transition-transform"
+            >
+                <GiftIcon size={28} className={`text-white ${canClaim ? 'animate-bounce' : ''}`}/>
+                {canClaim && <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-black/70 text-white text-[9px] px-2 py-0.5 rounded-full whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    Geser Aku!
+                </div>
+            </button>
+        </div>
+    );
+};
+
 // --- PWA INSTALL PROMPT ---
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -422,7 +503,7 @@ const NetworkStatus = () => {
 };
 
 // --- REWARDS MODAL (HADIAH HARIAN) ---
-const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime }) => {
+const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime, isGuest, onLoginRequest }) => {
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4 animate-in zoom-in-95">
             <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 max-w-sm w-full text-center relative overflow-hidden shadow-2xl border border-sky-100 dark:border-gray-700">
@@ -433,17 +514,29 @@ const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime }) => {
                 </div>
                 
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Hujan Hadiah!</h2>
-                <p className="text-gray-500 text-sm mb-6">Login setiap hari untuk mendapatkan reputasi gratis dan jadilah Legend!</p>
-
-                {canClaim ? (
-                    <button onClick={onClaim} className="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-orange-200 hover:scale-105 transition flex items-center justify-center gap-2">
-                        <Sparkles size={18}/> Klaim Hadiah
-                    </button>
+                
+                {isGuest ? (
+                    <>
+                        <p className="text-gray-500 text-sm mb-6">Login sekarang untuk mengklaim reputasi gratis dan mulai mendaki Leaderboard!</p>
+                        <button onClick={() => { onClose(); onLoginRequest(); }} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition flex items-center justify-center gap-2">
+                            <LogIn size={18}/> Login Untuk Klaim
+                        </button>
+                    </>
                 ) : (
-                    <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-300">
-                        <Clock size={16} className="inline mr-1 mb-0.5"/>
-                        Tunggu {nextClaimTime} lagi
-                    </div>
+                    <>
+                        <p className="text-gray-500 text-sm mb-6">Login setiap hari untuk mendapatkan reputasi gratis dan jadilah Legend!</p>
+
+                        {canClaim ? (
+                            <button onClick={onClaim} className="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-orange-200 hover:scale-105 transition flex items-center justify-center gap-2">
+                                <Sparkles size={18}/> Klaim Hadiah
+                            </button>
+                        ) : (
+                            <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-300">
+                                <Clock size={16} className="inline mr-1 mb-0.5"/>
+                                Tunggu {nextClaimTime} lagi
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
@@ -575,6 +668,9 @@ const DeveloperDashboard = ({ onClose }) => {
     const [sendingBC, setSendingBC] = useState(false);
     const [userSearchTerm, setUserSearchTerm] = useState('');
     const [allUsersList, setAllUsersList] = useState([]);
+    // State Tab
+    const [activeTab, setActiveTab] = useState('overview'); // overview, logs
+    const [systemLogs, setSystemLogs] = useState([]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -604,6 +700,13 @@ const DeveloperDashboard = ({ onClose }) => {
             setLoading(false);
         };
         fetchData();
+
+        // Listen Logs
+        const unsubLogs = onSnapshot(query(collection(db, getPublicCollection('systemLogs')), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
+            setSystemLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        return () => unsubLogs();
     }, []);
 
     const handleBroadcast = async () => {
@@ -644,7 +747,30 @@ const DeveloperDashboard = ({ onClose }) => {
         <div className="fixed inset-0 bg-gray-100 dark:bg-gray-900 z-[60] overflow-y-auto p-4 pb-20">
             <div className="max-w-2xl mx-auto">
                 <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 dark:text-white flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white dark:bg-gray-800 dark:text-white p-2 rounded-full shadow hover:bg-gray-200 dark:hover:bg-gray-700"><X/></button></div>
-                {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : (
+                
+                {/* TABS */}
+                <div className="flex gap-2 mb-6">
+                    <button onClick={()=>setActiveTab('overview')} className={`px-4 py-2 rounded-lg font-bold text-sm ${activeTab==='overview'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500'}`}>Overview</button>
+                    <button onClick={()=>setActiveTab('logs')} className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ${activeTab==='logs'?'bg-rose-500 text-white':'bg-white dark:bg-gray-800 text-gray-500'}`}><Bug size={14}/> System Logs</button>
+                </div>
+
+                {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : activeTab === 'logs' ? (
+                    // LOGS VIEW
+                    <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-xs h-[500px] overflow-y-auto">
+                        <h3 className="text-white font-bold mb-4 border-b border-gray-700 pb-2">Console Error Logs (User Side)</h3>
+                        {systemLogs.length === 0 && <p className="text-gray-500">Belum ada error log.</p>}
+                        {systemLogs.map(log => (
+                            <div key={log.id} className="mb-3 border-b border-gray-800 pb-2">
+                                <span className="text-gray-500">[{log.timestamp?.toDate ? log.timestamp.toDate().toLocaleTimeString() : 'Just now'}]</span>
+                                <span className="text-yellow-500 mx-2">[{log.username}]</span>
+                                <span className="text-blue-400">[{log.context}]</span>
+                                <div className="text-red-400 mt-1">{log.message}</div>
+                                {log.stack && <div className="text-gray-600 mt-1 whitespace-pre-wrap">{log.stack.substring(0,200)}...</div>}
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    // OVERVIEW VIEW
                     <div className="space-y-6">
                         <div className="grid grid-cols-3 gap-4">
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-sky-100 dark:border-gray-700 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.users}</h3><p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Total User</p></div>
@@ -827,34 +953,39 @@ const LegalPage = ({ onBack }) => {
 
 // --- LEADERBOARD SCREEN (FITUR BARU) ---
 const LeaderboardScreen = ({ allUsers }) => {
-    // Sortir user berdasarkan followers terbanyak
+    // Sortir user berdasarkan REPUTASI (Sesuai Request)
     const sortedUsers = useMemo(() => {
         return [...allUsers]
-            .sort((a, b) => (b.followers?.length || 0) - (a.followers?.length || 0))
+            .sort((a, b) => (b.reputation || 0) - (a.reputation || 0))
             .slice(0, 50); // Top 50
     }, [allUsers]);
 
     return (
         <div className="max-w-lg mx-auto p-4 pb-24">
-            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Papan Peringkat</h1>
+            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top Reputasi</h1>
             <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-                {sortedUsers.map((u, index) => (
-                    <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${index < 3 ? 'bg-gradient-to-r from-yellow-50/50 to-transparent dark:from-yellow-900/10' : ''}`}>
-                        <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-500':index===1?'text-gray-400':index===2?'text-orange-500':'text-gray-300'}`}>
-                            {index + 1}
+                {sortedUsers.map((u, index) => {
+                     const badge = getReputationBadge(u.reputation || 0, false);
+                     return (
+                        <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${index < 3 ? 'bg-gradient-to-r from-yellow-50/50 to-transparent dark:from-yellow-900/10' : ''}`}>
+                            <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-500':index===1?'text-gray-400':index===2?'text-orange-500':'text-gray-300'}`}>
+                                {index + 1}
+                            </div>
+                            <div className="relative mr-3">
+                                {/* FIX: Menggunakan Avatar Component yang Robust */}
+                                <Avatar src={u.photoURL} fallbackText={u.username} className="w-10 h-10 rounded-full border border-gray-200 dark:border-gray-600"/>
+                                {index === 0 && <Crown size={14} className="absolute -top-1 -right-1 text-yellow-500 fill-yellow-500"/>}
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">{u.username}</h3>
+                                <p className="text-xs text-gray-400 font-bold flex items-center gap-1">
+                                    <Sparkles size={10} className="text-yellow-500"/> {u.reputation || 0} Reputasi
+                                </p>
+                            </div>
+                            {index < 3 && <Medal size={20} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}
                         </div>
-                        <div className="relative mr-3">
-                            {/* FIX: Menggunakan Avatar Component yang Robust */}
-                            <Avatar src={u.photoURL} fallbackText={u.username} className="w-10 h-10 rounded-full border border-gray-200 dark:border-gray-600"/>
-                            {index === 0 && <Crown size={14} className="absolute -top-1 -right-1 text-yellow-500 fill-yellow-500"/>}
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">{u.username}</h3>
-                            <p className="text-xs text-gray-400">{(u.followers?.length || 0)} Pengikut</p>
-                        </div>
-                        {index < 3 && <Medal size={20} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}
-                    </div>
-                ))}
+                     )
+                })}
             </div>
         </div>
     );
@@ -1293,6 +1424,21 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
 
+    // FEATURE EXTRA: Scroll to Top
+    const [showScrollTop, setShowScrollTop] = useState(false);
+    useEffect(() => {
+        const handleScroll = () => {
+            if (window.scrollY > 300) setShowScrollTop(true);
+            else setShowScrollTop(false);
+        };
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
+    const scrollToTop = () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     useEffect(() => {
         if (isLoadingFeed) return;
         
@@ -1378,6 +1524,15 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                         {!loadingMore && stableFeed.length <= displayCount && stableFeed.length > 0 && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
                     </div>
                 </>
+            )}
+
+            {showScrollTop && (
+                <button 
+                    onClick={scrollToTop}
+                    className="fixed bottom-24 right-4 bg-sky-500 text-white p-3 rounded-full shadow-xl hover:bg-sky-600 transition animate-in zoom-in"
+                >
+                    <ArrowUp size={20}/>
+                </button>
             )}
         </div>
     );
@@ -1476,6 +1631,47 @@ const App = () => {
     const [showRewards, setShowRewards] = useState(false);
     const [canClaimReward, setCanClaimReward] = useState(false);
     const [nextRewardTime, setNextRewardTime] = useState('');
+
+    // --- GLOBAL ERROR CATCHER ---
+    useEffect(() => {
+        // Intercept global errors
+        const handleError = (event) => {
+            if (!user || user.email !== DEVELOPER_EMAIL) {
+                // Sembunyikan error dari devtools jika bukan developer
+                event.preventDefault(); 
+                logSystemError(event.error || new Error(event.message), 'global_error', user);
+            }
+        };
+
+        const handleRejection = (event) => {
+            if (!user || user.email !== DEVELOPER_EMAIL) {
+                event.preventDefault();
+                logSystemError(event.reason || new Error('Unhandled Promise Rejection'), 'promise_rejection', user);
+            }
+        };
+
+        window.addEventListener('error', handleError);
+        window.addEventListener('unhandledrejection', handleRejection);
+
+        return () => {
+            window.removeEventListener('error', handleError);
+            window.removeEventListener('unhandledrejection', handleRejection);
+        };
+    }, [user]);
+
+    // --- CONSOLE OVERRIDE (Untuk sembunyikan log dari user biasa) ---
+    useEffect(() => {
+        if (user && user.email !== DEVELOPER_EMAIL) {
+             // Simpan referensi asli jika ingin debug lokal
+             // const originalConsoleError = console.error;
+             
+             // Override
+             console.error = (...args) => {
+                 // Kirim ke DB (Opsional, hati-hati spam)
+                 // logSystemError(new Error(args.join(' ')), 'console_error', user);
+             };
+        }
+    }, [user]);
 
     useEffect(() => { 
         const handleOff = () => setIsOffline(true);
@@ -1616,7 +1812,7 @@ const App = () => {
         }
     }, [user]);
 
-    // Listener Global (Jalan untuk Guest & User) - DIPERBAIKI SECARA MASIF
+    // Listener Global (Jalan untuk Guest & User)
     useEffect(() => {
         setIsLoadingFeed(true);
         setFeedError(false);
@@ -1627,7 +1823,6 @@ const App = () => {
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
                 
                 // Gunakan data user yang tertanam di post sebagai fallback utama
-                // Ini kunci agar guest bisa melihat postingan tanpa fetch user profile
                 const postsWithFallback = raw.map(p => ({
                     ...p,
                     user: p.user || { username: 'Pengguna', photoURL: '' } 
@@ -1636,7 +1831,6 @@ const App = () => {
                 setPosts(postsWithFallback); 
 
                 // 2. Fetch data user terbaru di background (Lazy Load)
-                // Jika gagal (karena permission guest), tidak akan merusak tampilan
                 try {
                     const uids = [...new Set(raw.map(r=>r.userId))];
                     const userPromises = uids.map(uid => 
@@ -1657,12 +1851,12 @@ const App = () => {
                         })));
                     }
                 } catch (backgroundError) {
-                    console.warn("Background fetch user failed (Normal for Guest):", backgroundError);
+                    // console.warn("Background fetch user failed (Normal for Guest):", backgroundError);
                 }
 
                 setIsLoadingFeed(false);
             } catch (err) {
-                console.error("Error fetching posts:", err);
+                // console.error("Error fetching posts:", err);
                 setFeedError(true);
                 setIsLoadingFeed(false);
             }
@@ -1727,7 +1921,19 @@ const App = () => {
                 )}
 
                 <main className={page!=='legal' ? 'pt-16' : ''}>
-                    {page==='home' && <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>}
+                    {page==='home' && (
+                        <>
+                            <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>
+                            
+                            {/* FLOATING DRAGGABLE GIFT (Hanya di Home) */}
+                            <DraggableGift 
+                                onClick={() => setShowRewards(true)} 
+                                canClaim={canClaimReward && !isGuest} 
+                                nextClaimTime={nextRewardTime}
+                            />
+                        </>
+                    )}
+                    
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
@@ -1747,13 +1953,7 @@ const App = () => {
                         
                         <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
                         
-                        {/* REWARDS BUTTON */}
-                        {!isGuest && (
-                            <button onClick={()=>setShowRewards(true)} className="p-2 rounded-full relative group transition hover:bg-yellow-50 dark:hover:bg-yellow-900/30">
-                                <GiftIcon size={24} className={`transition ${canClaimReward ? 'text-yellow-500 animate-bounce' : 'text-gray-400 dark:text-gray-500'}`}/>
-                                {canClaimReward && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
-                            </button>
-                        )}
+                        {/* REWARDS BUTTON DIHAPUS DARI NAV (Sudah jadi Floating) */}
 
                         {isGuest ? (
                              <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/>
@@ -1764,7 +1964,16 @@ const App = () => {
                 )}
 
                 {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}\
-                {showRewards && <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} />}
+                {showRewards && (
+                    <DailyRewardModal 
+                        onClose={()=>setShowRewards(false)} 
+                        onClaim={handleClaimReward} 
+                        canClaim={canClaimReward} 
+                        nextClaimTime={nextRewardTime} 
+                        isGuest={isGuest}
+                        onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }}
+                    />
+                )}
                 {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}
                 <PWAInstallPrompt />
             </div>
