@@ -49,7 +49,7 @@ import {
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
-    Bug, ArrowUp, Move // Icon tambahan untuk Log & Drag
+    Bug, ArrowUp, Move, ChevronDown, ChevronUp // Icon tambahan
 } from 'lucide-react';
 
 setLogLevel('silent'); // Default firebase silent
@@ -99,7 +99,6 @@ try {
 // 0. SYSTEM LOGGER (BARU: Untuk menangkap error user)
 const logSystemError = async (error, context = 'general', user = null) => {
     try {
-        // Jangan log error koneksi internet biasa untuk menghemat kuota
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
 
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
@@ -141,7 +140,6 @@ const compressImageToBase64 = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Kita batasi lebar max 800px untuk menghemat ruang drastis
                 const MAX_WIDTH = 800; 
                 let width = img.width;
                 let height = img.height;
@@ -157,7 +155,6 @@ const compressImageToBase64 = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Konversi ke Base64 JPEG dengan kualitas 60%
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
                 resolve(dataUrl);
             };
@@ -172,10 +169,9 @@ const uploadToFaaAPI = async (file, onProgress) => {
     const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
     const formData = new FormData();
     onProgress(10);
-    formData.append('file', file); // Sesuai curl command
+    formData.append('file', file); 
 
     try {
-        // Simulasi progress awal karena fetch tidak punya onUploadProgress native di browser standar tanpa xhr
         const progressInterval = setInterval(() => {
             onProgress(prev => Math.min(prev + 5, 90));
         }, 500);
@@ -189,7 +185,6 @@ const uploadToFaaAPI = async (file, onProgress) => {
         const data = await response.json();
         onProgress(100);
         
-        // Parsing response sesuai struktur API FAA
         if (data && data.result && data.result.url) {
             let secureUrl = data.result.url;
             return secureUrl;
@@ -247,45 +242,34 @@ const formatTimeAgo = (timestamp) => {
     }
 };
 
-// 7. Detektor Media Embed (UPDATED: YouTube, TikTok, IG)
+// 7. Detektor Media Embed
 const getMediaEmbed = (url) => {
     if (!url) return null;
-    
-    // YouTube
     const youtubeMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*v=|embed\/|v\/|shorts\/))([\w-]{11})/);
     if (youtubeMatch) { 
         return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${youtubeMatch[1]}?autoplay=0&rel=0`, id: youtubeMatch[1] }; 
     }
-
-    // Instagram (Post/Reel)
     const igMatch = url.match(/(?:instagram\.com\/(?:p|reel|tv)\/)([\w-]+)/);
     if (igMatch) {
         return { type: 'instagram', embedUrl: `https://www.instagram.com/p/${igMatch[1]}/embed`, id: igMatch[1], displayUrl: url };
     }
-
-    // TikTok
     const tiktokMatch = url.match(/(?:tiktok\.com\/)(?:@[\w.-]+\/video\/|v\/)([\d]+)/);
     if (tiktokMatch) {
-        // Gunakan embed v2 atau fallback ke display
         return { type: 'tiktok', embedUrl: `https://www.tiktok.com/embed/v2/${tiktokMatch[1]}`, id: tiktokMatch[1], displayUrl: url };
     }
-
     if (/\.(mp3|wav|ogg|m4a)$/i.test(url)) { return { type: 'audio_file', url: url }; }
-    
-    // Fallback Link biasa
     if (url.startsWith('http')) {
         return { type: 'link', embedUrl: url, displayUrl: url }; 
     }
-    
     return null;
 };
 
 // 8. Kalkulator Reputasi
 const getReputationBadge = (reputation, isDev) => {
     if (isDev) return { label: "DEVELOPER", icon: ShieldCheck, color: "bg-blue-600 text-white" };
-    if (reputation >= 500) return { label: "LEGEND", icon: Crown, color: "bg-yellow-500 text-white" };
-    if (reputation >= 100) return { label: "INFLUENCER", icon: Gem, color: "bg-purple-500 text-white" };
-    if (reputation >= 50) return { label: "RISING STAR", icon: Flame, color: "bg-orange-500 text-white" };
+    if (reputation >= 1000) return { label: "LEGEND", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
+    if (reputation >= 500) return { label: "INFLUENCER", icon: Gem, color: "bg-purple-500 text-white" };
+    if (reputation >= 100) return { label: "RISING STAR", icon: Flame, color: "bg-orange-500 text-white" };
     return { label: "WARGA", icon: User, color: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300" };
 };
 
@@ -310,14 +294,13 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & PERBAIKAN
 // ==========================================
 
-// --- COMPONENT: Draggable Gift Button (BARU - Bisa Digeser) ---
+// --- COMPONENT: Draggable Gift Button ---
 const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
     const [position, setPosition] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 180 });
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef({ x: 0, y: 0 });
     const btnRef = useRef(null);
 
-    // Initial position on mount (safe area)
     useEffect(() => {
         setPosition({ x: window.innerWidth - 80, y: window.innerHeight - 180 });
     }, []);
@@ -335,14 +318,12 @@ const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
 
     const handleMove = (clientX, clientY) => {
         setIsDragging(true);
-        // Cegah tombol keluar layar
         const newX = Math.min(Math.max(0, clientX - dragStartRef.current.x), window.innerWidth - 60);
         const newY = Math.min(Math.max(0, clientY - dragStartRef.current.y), window.innerHeight - 60);
         setPosition({ x: newX, y: newY });
     };
 
     const handleEnd = () => {
-        // Jika hanya klik (tidak drag), trigger onClick
         setTimeout(() => setIsDragging(false), 100);
     };
 
@@ -414,13 +395,9 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- AVATAR ROBUST (PENGGANTI IMAGE WITH RETRY YANG SERING ERROR) ---
-// Solusi: Jika gambar gagal load atau loading, langsung tampilkan inisial/fallback.
-// Tidak ada lagi loading terus menerus.
-const Avatar = ({ src, alt, className, fallbackText, size = "normal" }) => {
+// --- AVATAR ROBUST ---
+const Avatar = ({ src, alt, className, fallbackText }) => {
     const [error, setError] = useState(false);
-    
-    // Jika src kosong atau sudah error, tampilkan fallback
     if (!src || error) {
         return (
             <div className={`${className} bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-black text-gray-500 dark:text-gray-400 select-none`}>
@@ -428,50 +405,7 @@ const Avatar = ({ src, alt, className, fallbackText, size = "normal" }) => {
             </div>
         );
     }
-
-    return (
-        <img 
-            src={src} 
-            alt={alt} 
-            className={`${className} object-cover`}
-            onError={() => setError(true)}
-            loading="lazy"
-        />
-    );
-};
-
-// --- IMAGE WITH RETRY (Untuk Gambar Postingan - Tetap Pakai Retry) ---
-const ImageWithRetry = ({ src, alt, className, onClick }) => {
-    const [error, setError] = useState(false);
-    const [loading, setLoading] = useState(true);
-    
-    // Simple logic: Jika loading > 10 detik, anggap error
-    useEffect(() => {
-        const timer = setTimeout(() => { if (loading) setError(true); }, 10000);
-        return () => clearTimeout(timer);
-    }, [loading]);
-
-    if (error) {
-        return (
-            <div className={`bg-gray-100 dark:bg-gray-800 flex flex-col items-center justify-center text-gray-400 min-h-[200px] ${className}`}>
-                <ImageOff size={32} className="mb-2 opacity-50"/>
-                <p className="text-xs">Gagal memuat gambar</p>
-            </div>
-        );
-    }
-
-    return (
-        <div className={`relative ${className} bg-gray-100 dark:bg-gray-800`} onClick={onClick}>
-            {loading && <div className="absolute inset-0 flex items-center justify-center"><Loader2 className="animate-spin text-gray-400"/></div>}
-            <img 
-                src={src} 
-                alt={alt} 
-                className={`w-full h-full object-cover transition-opacity duration-300 ${loading ? 'opacity-0' : 'opacity-100'}`}
-                onLoad={() => setLoading(false)}
-                onError={() => setError(true)}
-            />
-        </div>
-    );
+    return <img src={src} alt={alt} className={`${className} object-cover`} onError={() => setError(true)} loading="lazy" />;
 };
 
 // --- NETWORK STATUS NOTIFICATION ---
@@ -482,14 +416,9 @@ const NetworkStatus = () => {
     useEffect(() => {
         const handleOnline = () => { setIsOnline(true); setShowNotif(true); setTimeout(() => setShowNotif(false), 3000); };
         const handleOffline = () => { setIsOnline(false); setShowNotif(true); };
-
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
-
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
+        return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
     }, []);
 
     if (!showNotif) return null;
@@ -502,19 +431,16 @@ const NetworkStatus = () => {
     );
 };
 
-// --- REWARDS MODAL (HADIAH HARIAN) ---
+// --- REWARDS MODAL ---
 const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime, isGuest, onLoginRequest }) => {
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4 animate-in zoom-in-95">
             <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 max-w-sm w-full text-center relative overflow-hidden shadow-2xl border border-sky-100 dark:border-gray-700">
                 <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
-                
                 <div className="w-20 h-20 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
                     <GiftIcon size={40} className="text-yellow-600 dark:text-yellow-400"/>
                 </div>
-                
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Hujan Hadiah!</h2>
-                
                 {isGuest ? (
                     <>
                         <p className="text-gray-500 text-sm mb-6">Login sekarang untuk mengklaim reputasi gratis dan mulai mendaki Leaderboard!</p>
@@ -525,7 +451,6 @@ const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime, isGuest, 
                 ) : (
                     <>
                         <p className="text-gray-500 text-sm mb-6">Login setiap hari untuk mendapatkan reputasi gratis dan jadilah Legend!</p>
-
                         {canClaim ? (
                             <button onClick={onClaim} className="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-orange-200 hover:scale-105 transition flex items-center justify-center gap-2">
                                 <Sparkles size={18}/> Klaim Hadiah
@@ -543,10 +468,9 @@ const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime, isGuest, 
     );
 };
 
-// --- LIGHTBOX (FULLSCREEN IMAGE VIEWER) ---
+// --- LIGHTBOX ---
 const Lightbox = ({ images, initialIndex, onClose }) => {
     const [index, setIndex] = useState(initialIndex);
-    
     return (
         <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-in fade-in duration-200">
             <button onClick={onClose} className="absolute top-4 right-4 text-white p-2 bg-white/10 rounded-full hover:bg-white/20 backdrop-blur-md z-50">
@@ -639,7 +563,6 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { if (match.includes('href="')) return match; return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; });
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
     
-    // Hashtag handling with data-tag attribute for click handler
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
     
@@ -658,18 +581,15 @@ const renderMarkdown = (text, onHashtagClick) => {
 // ==========================================
 // BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
-// (Kode DeveloperDashboard dipertahankan 100% sama dengan aslinya)
 const DeveloperDashboard = ({ onClose }) => {
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
-    const [onlineUsers, setOnlineUsers] = useState([]);
     const [chartData, setChartData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [broadcastMsg, setBroadcastMsg] = useState('');
     const [sendingBC, setSendingBC] = useState(false);
     const [userSearchTerm, setUserSearchTerm] = useState('');
     const [allUsersList, setAllUsersList] = useState([]);
-    // State Tab
-    const [activeTab, setActiveTab] = useState('overview'); // overview, logs
+    const [activeTab, setActiveTab] = useState('overview'); 
     const [systemLogs, setSystemLogs] = useState([]);
 
     useEffect(() => {
@@ -680,8 +600,6 @@ const DeveloperDashboard = ({ onClose }) => {
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
             const rawPosts = postsSnap.docs.map(d => d.data());
             const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
-            const tenMinAgo = Date.now() - 10 * 60 * 1000;
-            const active = usersSnap.docs.map(d => ({id: d.id, ...d.data()})).filter(u => u.lastSeen?.toMillis && u.lastSeen.toMillis() > tenMinAgo);
             
             setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
 
@@ -695,13 +613,11 @@ const DeveloperDashboard = ({ onClose }) => {
                 last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
             }
             setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
-            setOnlineUsers(active);
             setChartData(last7Days);
             setLoading(false);
         };
         fetchData();
 
-        // Listen Logs
         const unsubLogs = onSnapshot(query(collection(db, getPublicCollection('systemLogs')), orderBy('timestamp', 'desc'), limit(50)), (snap) => {
             setSystemLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         });
@@ -748,14 +664,12 @@ const DeveloperDashboard = ({ onClose }) => {
             <div className="max-w-2xl mx-auto">
                 <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-gray-800 dark:text-white flex items-center gap-2"><ShieldCheck className="text-sky-600"/> Developer Panel</h2><button onClick={onClose} className="bg-white dark:bg-gray-800 dark:text-white p-2 rounded-full shadow hover:bg-gray-200 dark:hover:bg-gray-700"><X/></button></div>
                 
-                {/* TABS */}
                 <div className="flex gap-2 mb-6">
                     <button onClick={()=>setActiveTab('overview')} className={`px-4 py-2 rounded-lg font-bold text-sm ${activeTab==='overview'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500'}`}>Overview</button>
                     <button onClick={()=>setActiveTab('logs')} className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ${activeTab==='logs'?'bg-rose-500 text-white':'bg-white dark:bg-gray-800 text-gray-500'}`}><Bug size={14}/> System Logs</button>
                 </div>
 
                 {loading ? <div className="text-center py-20"><Loader2 className="animate-spin mx-auto text-sky-600"/></div> : activeTab === 'logs' ? (
-                    // LOGS VIEW
                     <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-xs h-[500px] overflow-y-auto">
                         <h3 className="text-white font-bold mb-4 border-b border-gray-700 pb-2">Console Error Logs (User Side)</h3>
                         {systemLogs.length === 0 && <p className="text-gray-500">Belum ada error log.</p>}
@@ -770,7 +684,6 @@ const DeveloperDashboard = ({ onClose }) => {
                         ))}
                     </div>
                 ) : (
-                    // OVERVIEW VIEW
                     <div className="space-y-6">
                         <div className="grid grid-cols-3 gap-4">
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-sky-100 dark:border-gray-700 text-center"><Users className="mx-auto text-sky-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.users}</h3><p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Total User</p></div>
@@ -778,14 +691,12 @@ const DeveloperDashboard = ({ onClose }) => {
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-emerald-100 dark:border-gray-700 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 dark:text-gray-400 uppercase font-bold">Post Hari Ini</p></div>
                         </div>
                         
-                        {/* BROADCAST SECTION */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
                             <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
                             <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-3 rounded-xl text-sm border border-gray-200 dark:border-gray-600 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
                             <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
 
-                        {/* USER MANAGEMENT SECTION */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-red-100 dark:border-gray-700">
                              <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><UserX size={18} className="text-red-500"/> Manajemen User (Ban/Hapus)</h3>
                              <input value={userSearchTerm} onChange={e=>setUserSearchTerm(e.target.value)} placeholder="Cari username / email..." className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-2 rounded-lg text-sm border border-gray-200 dark:border-gray-600 mb-4 outline-none"/>
@@ -824,10 +735,10 @@ const DeveloperDashboard = ({ onClose }) => {
 };
 
 // ==========================================
-// BAGIAN 5: LAYAR OTENTIKASI, LEGAL & PENGATURAN USER
+// BAGIAN 5: LAYAR OTENTIKASI & USER
 // ==========================================
 
-// --- ONBOARDING SCREEN (PENGGANTI LANDING PAGE UNTUK USER BARU) ---
+// --- ONBOARDING SCREEN ---
 const OnboardingScreen = ({ onComplete, user }) => {
     const [username, setUsername] = useState('');
     const [loading, setLoading] = useState(false);
@@ -847,7 +758,7 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 followers: [],
                 savedPosts: [],
                 lastSeen: serverTimestamp(),
-                reputation: 0 // New Rewards System
+                reputation: 0 
             });
             onComplete();
         } catch (error) {
@@ -863,7 +774,6 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
                 <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
-                
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="text-left">
                         <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
@@ -878,7 +788,7 @@ const OnboardingScreen = ({ onComplete, user }) => {
     );
 };
 
-// --- AUTH SCREEN (LOGIN GOOGLE SAJA) ---
+// --- AUTH SCREEN ---
 const AuthModal = ({ onClose }) => {
     const handleGoogleLogin = async () => {
         try {
@@ -909,7 +819,7 @@ const AuthModal = ({ onClose }) => {
     );
 };
 
-// --- LEGAL PAGE (KEBIJAKAN HUKUM) ---
+// --- LEGAL PAGE (DIPERBARUI) ---
 const LegalPage = ({ onBack }) => {
     return (
         <div className="min-h-screen bg-white dark:bg-gray-900 pb-24 pt-20 px-6 max-w-2xl mx-auto animate-in fade-in">
@@ -923,6 +833,17 @@ const LegalPage = ({ onBack }) => {
 
             <div className="space-y-8">
                 <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Code size={18} className="text-sky-500"/> Tentang Pembuat</h2>
+                    <div className="bg-sky-50 dark:bg-sky-900/20 p-5 rounded-2xl border border-sky-100 dark:border-sky-800 flex items-center gap-4">
+                        <img src="https://c.termai.cc/i6/EAb.jpg" alt="Pembuat" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"/>
+                        <div>
+                            <h3 className="font-bold text-gray-900 dark:text-white">M. Irham Andika Putra</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-300">Siswa SMP Negeri 3 Mentok</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Umur 14 Tahun</p>
+                        </div>
+                    </div>
+                </section>
+                <section>
                     <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Lock size={18} className="text-sky-500"/> Kebijakan Privasi</h2>
                     <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
                         <p className="mb-3">Di {APP_NAME}, privasi Anda adalah prioritas kami. Kami mengumpulkan data minimal yang diperlukan untuk fungsionalitas aplikasi.</p>
@@ -931,7 +852,6 @@ const LegalPage = ({ onBack }) => {
                             <li><strong>Konten:</strong> Postingan, Komentar, dan Pesan yang Anda buat.</li>
                             <li><strong>Aktivitas:</strong> Log interaksi seperti Like dan Follow untuk personalisasi.</li>
                         </ul>
-                        <p>Kami tidak menjual data Anda ke pihak ketiga. Data disimpan aman menggunakan infrastruktur Google Cloud (Firebase).</p>
                     </div>
                 </section>
                 <section>
@@ -943,7 +863,6 @@ const LegalPage = ({ onBack }) => {
                             <li>Saling menghormati antar pengguna.</li>
                             <li>Tidak melakukan spam atau aktivitas bot.</li>
                         </ul>
-                        <p className="mt-3 text-rose-500 font-bold text-xs">Pelanggaran dapat mengakibatkan pemblokiran akun permanen.</p>
                     </div>
                 </section>
             </div>
@@ -951,38 +870,60 @@ const LegalPage = ({ onBack }) => {
     );
 };
 
-// --- LEADERBOARD SCREEN (FITUR BARU) ---
+// --- LEADERBOARD SCREEN (DIPERBARUI SISTEM REPUTASI) ---
 const LeaderboardScreen = ({ allUsers }) => {
-    // Sortir user berdasarkan REPUTASI (Sesuai Request)
+    // Sortir user berdasarkan REPUTASI (Reputasi sudah diakumulasi dari interaksi)
     const sortedUsers = useMemo(() => {
         return [...allUsers]
             .sort((a, b) => (b.reputation || 0) - (a.reputation || 0))
-            .slice(0, 50); // Top 50
+            .slice(0, 50); 
     }, [allUsers]);
 
     return (
         <div className="max-w-lg mx-auto p-4 pb-24">
-            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top Reputasi</h1>
+            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top Kreator Viral</h1>
             <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                 {sortedUsers.map((u, index) => {
-                     const badge = getReputationBadge(u.reputation || 0, false);
+                     // Styling khusus untuk peringkat 1, 2, 3
+                     let rankStyle = "";
+                     let rankIcon = null;
+                     
+                     if (index === 0) {
+                         rankStyle = "bg-gradient-to-r from-yellow-50 to-transparent dark:from-yellow-900/20 border-l-4 border-yellow-500";
+                         rankIcon = <Crown size={20} className="text-yellow-500 fill-yellow-500 drop-shadow-sm"/>;
+                     } else if (index === 1) {
+                         rankStyle = "bg-gradient-to-r from-gray-50 to-transparent dark:from-gray-700/30 border-l-4 border-gray-400";
+                         rankIcon = <Medal size={20} className="text-gray-400 fill-gray-200"/>;
+                     } else if (index === 2) {
+                         rankStyle = "bg-gradient-to-r from-orange-50 to-transparent dark:from-orange-900/20 border-l-4 border-orange-500";
+                         rankIcon = <Medal size={20} className="text-orange-500 fill-orange-200"/>;
+                     }
+
                      return (
-                        <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${index < 3 ? 'bg-gradient-to-r from-yellow-50/50 to-transparent dark:from-yellow-900/10' : ''}`}>
-                            <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-500':index===1?'text-gray-400':index===2?'text-orange-500':'text-gray-300'}`}>
+                        <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${rankStyle}`}>
+                            <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-600':index===1?'text-gray-500':index===2?'text-orange-600':'text-gray-300'}`}>
                                 {index + 1}
                             </div>
                             <div className="relative mr-3">
-                                {/* FIX: Menggunakan Avatar Component yang Robust */}
-                                <Avatar src={u.photoURL} fallbackText={u.username} className="w-10 h-10 rounded-full border border-gray-200 dark:border-gray-600"/>
-                                {index === 0 && <Crown size={14} className="absolute -top-1 -right-1 text-yellow-500 fill-yellow-500"/>}
+                                <Avatar src={u.photoURL} fallbackText={u.username} className={`w-12 h-12 rounded-full border-2 ${index===0?'border-yellow-500':index===1?'border-gray-400':index===2?'border-orange-500':'border-gray-200 dark:border-gray-600'}`}/>
+                                {index === 0 && <div className="absolute -top-2 -right-1 animate-bounce">{rankIcon}</div>}
                             </div>
                             <div className="flex-1">
-                                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm">{u.username}</h3>
-                                <p className="text-xs text-gray-400 font-bold flex items-center gap-1">
-                                    <Sparkles size={10} className="text-yellow-500"/> {u.reputation || 0} Reputasi
+                                <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">
+                                    {u.username}
+                                    {index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}
+                                </h3>
+                                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                                    {u.followers?.length || 0} Pengikut
                                 </p>
                             </div>
-                            {index < 3 && <Medal size={20} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}
+                            <div className="text-right">
+                                <div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1">
+                                    <Flame size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>
+                                    {u.reputation || 0}
+                                </div>
+                                <div className="text-[9px] text-gray-400 uppercase font-bold">Poin</div>
+                            </div>
                         </div>
                      )
                 })}
@@ -995,7 +936,6 @@ const LeaderboardScreen = ({ allUsers }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
-// --- SMART GRID MEDIA DISPLAY ---
 const MediaGrid = ({ mediaUrls, onImageClick }) => {
     const count = mediaUrls.length;
     if (count === 0) return null;
@@ -1010,11 +950,7 @@ const MediaGrid = ({ mediaUrls, onImageClick }) => {
         <div className={`mb-4 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-2xl overflow-hidden`}>
             {mediaUrls.slice(0, 9).map((url, i) => (
                 <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}>
-                    <img 
-                        src={url} 
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                        loading="lazy"
-                    />
+                    <img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy"/>
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                     {i === 8 && count > 9 && (
                         <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">+{count - 9}</div>
@@ -1025,7 +961,7 @@ const MediaGrid = ({ mediaUrls, onImageClick }) => {
     );
 };
 
-// --- POST ITEM (DENGAN PERBAIKAN FOTO PROFIL & GUEST MODE) ---
+// --- POST ITEM ---
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick }) => {
     const [liked, setLiked] = useState(false);
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -1039,16 +975,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [isSaved, setIsSaved] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
-    
-    // Lightbox State
     const [lightboxOpen, setLightboxOpen] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState(0);
 
     const isOwner = currentUserId && post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
-
-    // Safe access
     const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
     const isFollowedByTarget = profile ? (profile.followers || []).includes(post.userId) : false;
     const isFriend = isFollowing && isFollowedByTarget;
@@ -1056,7 +988,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const MAX_CHARS = 250;
     const isLongText = post.content && post.content.length > MAX_CHARS;
     const displayText = isExpanded || !isLongText ? post.content : post.content.substring(0, MAX_CHARS) + "...";
-
     const mediaList = post.mediaUrls || (post.mediaUrl ? [post.mediaUrl] : []);
 
     useEffect(() => {
@@ -1076,10 +1007,15 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         setLiked(newLiked);
         setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
         const ref = doc(db, getPublicCollection('posts'), post.id);
+        const authorRef = doc(db, getPublicCollection('userProfiles'), post.userId);
         try {
             if (newLiked) {
                 await updateDoc(ref, { likes: arrayUnion(currentUserId) });
-                if (post.userId !== currentUserId) sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id);
+                // REPUTASI UPDATE: Tambah reputasi author saat di-like
+                if (post.userId !== currentUserId) {
+                    await updateDoc(authorRef, { reputation: increment(2) }); // +2 Poin per Like
+                    sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id);
+                }
             } else {
                 await updateDoc(ref, { likes: arrayRemove(currentUserId) });
             }
@@ -1114,8 +1050,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
             
-            if (post.userId !== currentUserId && !replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id);
-            if (replyTo && replyTo.userId !== currentUserId) sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id);
+            // REPUTASI UPDATE: Tambah reputasi author saat dikomen
+            if (post.userId !== currentUserId) {
+                await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(5) }); // +5 Poin per Komen
+                if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id);
+            }
+            // Reputasi untuk yang membalas
+            if (replyTo && replyTo.userId !== currentUserId) {
+                await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(3) }); // +3 Poin balasan
+                sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id);
+            }
 
             setNewComment('');
             setReplyTo(null);
@@ -1132,9 +1076,54 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
-    
-    // User Badge
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
+
+    // --- LOGIKA KOMENTAR BERJENJANG ---
+    const rootComments = comments.filter(c => !c.parentId);
+    const getReplies = (parentId) => comments.filter(c => c.parentId === parentId);
+
+    // Komponen Internal untuk List Komentar
+    const CommentList = ({ commentList, isReply = false }) => (
+        <div className="space-y-3">
+            {commentList.map(c => {
+                const replies = getReplies(c.id);
+                const [showAllReplies, setShowAllReplies] = useState(false);
+                const visibleReplies = showAllReplies ? replies : replies.slice(0, 2);
+
+                return (
+                    <div key={c.id} className="flex flex-col">
+                        <div className={`p-3 rounded-xl text-xs flex flex-col group transition ${isReply ? 'ml-8 bg-gray-100 dark:bg-gray-800 border-l-2 border-sky-300 mb-2' : 'bg-gray-50 dark:bg-gray-900'}`}>
+                            <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="font-bold text-gray-800 dark:text-gray-200">{c.username}</span>
+                                        {c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
+                                    </div>
+                                    <span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span>
+                                </div>
+                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+                                     {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}
+                                     {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Render Replies under Parent */}
+                        {replies.length > 0 && (
+                            <div className="mt-1">
+                                <CommentList commentList={visibleReplies} isReply={true} />
+                                {replies.length > 2 && !showAllReplies && (
+                                    <button onClick={() => setShowAllReplies(true)} className="ml-8 text-[10px] font-bold text-sky-600 hover:underline flex items-center mb-2">
+                                        Lihat {replies.length - 2} balasan lainnya...
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg">
@@ -1144,7 +1133,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    {/* CRITICAL FIX: GUNAKAN AVATAR ROBUST */}
                     <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]">
                         <div className="w-full h-full rounded-full bg-white overflow-hidden">
                              <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full"/>
@@ -1192,23 +1180,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             {showComments && (
                 <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
                     <div className="max-h-60 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">
-                        {comments.length === 0 ? <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> : comments.map(c => ( 
-                            <div key={c.id} className={`p-3 rounded-xl text-xs flex flex-col group transition ${c.parentId ? 'ml-8 bg-gray-100 dark:bg-gray-800 border-l-2 border-sky-300' : 'bg-gray-50 dark:bg-gray-900'}`}>
-                                <div className="flex justify-between items-start">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="font-bold text-gray-800 dark:text-gray-200">{c.username}</span>
-                                            {c.replyToUsername && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
-                                        </div>
-                                        <span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
-                                         {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}
-                                         {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
-                                    </div>
-                                </div>
-                            </div> 
-                        ))}
+                        {comments.length === 0 ? (
+                            <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> 
+                        ) : (
+                            // MENGGUNAKAN KOMPONEN LIST BARU YANG NESTED
+                            <CommentList commentList={rootComments} />
+                        )}
                     </div>
                     <form onSubmit={handleComment} className="relative">
                         {replyTo && (
@@ -1230,8 +1207,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// --- CREATE POST (DENGAN HYBRID UPLOAD) ---
-// (Kode CreatePost dipertahankan 100% sama dengan aslinya)
+// --- CREATE POST ---
 const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
@@ -1261,18 +1237,15 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 
             if (form.files.length > 0) {
                 const firstFile = form.files[0];
-                
                 if (firstFile.type.startsWith('image')) {
                     mediaType = 'image';
                     setProg(10);
-                    // FOTO: Gunakan Base64 Kompresi (Hemat DB, Cepat)
                     for (let i = 0; i < form.files.length; i++) {
                         const base64 = await compressImageToBase64(form.files[i]);
                         mediaUrls.push(base64);
                         setProg(10 + ((i + 1) / form.files.length) * 80);
                     }
                 } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) {
-                    // VIDEO/AUDIO: Gunakan API FAA Tourl (Biar kuat upload besar)
                     const uploadedUrl = await uploadToFaaAPI(firstFile, setProg);
                     mediaUrls.push(uploadedUrl);
                     mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio';
@@ -1289,8 +1262,8 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 userId, 
                 title: form.title, 
                 content: form.content, 
-                mediaUrls: mediaUrls, // Array foto/video
-                mediaUrl: mediaUrls[0] || '', // Legacy
+                mediaUrls: mediaUrls, 
+                mediaUrl: mediaUrls[0] || '', 
                 mediaType: mediaType, 
                 timestamp: serverTimestamp(), 
                 likes: [], 
@@ -1298,6 +1271,9 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 category: category, 
                 user: {username, uid: userId}
             });
+            // REPUTASI UPDATE: Bonus Posting Konten
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(10) }); // +10 Poin Posting
+            
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
@@ -1335,8 +1311,8 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN ---
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest }) => {
+// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU) ---
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
@@ -1362,7 +1338,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         try { 
             let url = profileData.photoURL;
             if (file) {
-                // FOTO PROFIL JUGA PAKAI BASE64
                 url = await compressImageToBase64(file);
             }
             await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); 
@@ -1372,21 +1347,35 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
-    const badge = getReputationBadge(totalLikes, isDev);
+    // Badge menggunakan REPUTASI ASLI yang tersimpan di DB
+    const badge = getReputationBadge(profileData.reputation || 0, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
     const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
     const isFriend = isFollowing && isFollowedByTarget; 
     const isOnline = isUserOnline(profileData.lastSeen);
     const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
+    // HITUNG RANKING
+    let rank = null;
+    if (allUsers) {
+        const sorted = [...allUsers].sort((a,b) => (b.reputation||0) - (a.reputation||0));
+        rank = sorted.findIndex(u => u.uid === profileData.uid) + 1;
+    }
+
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm border border-sky-50 dark:border-gray-700 mb-8 mx-4 text-center relative overflow-hidden">
+            <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
+                {/* Indikator Peringkat Visual */}
+                {rank && rank <= 3 && (
+                    <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>
+                        #{rank} VIRAL
+                    </div>
+                )}
+
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8">
-                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>
+                    <div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${rank===1 ? 'border-yellow-400' : isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>
                         {load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}
-                        {/* FIX: AVATAR ROBUST */}
                         <Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/>
                     </div>
                     <div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>
@@ -1394,7 +1383,11 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 </div>
 
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
-                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label} (Reputasi: {totalLikes})</div>
+                
+                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}>
+                    <badge.icon size={14}/> {badge.label} ({profileData.reputation || 0} Poin)
+                </div>
+
                 {!isSelf && !isGuest && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
                 <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
@@ -1415,7 +1408,7 @@ const TrendingTags = ({ posts, onTagClick }) => {
     );
 };
 
-// --- HOME SCREEN ---
+// --- HOME SCREEN (SCROLL BUTTON DIHAPUS) ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
@@ -1424,20 +1417,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
 
-    // FEATURE EXTRA: Scroll to Top
-    const [showScrollTop, setShowScrollTop] = useState(false);
-    useEffect(() => {
-        const handleScroll = () => {
-            if (window.scrollY > 300) setShowScrollTop(true);
-            else setShowScrollTop(false);
-        };
-        window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
-
-    const scrollToTop = () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
+    // Fitur ScrollTop dihapus sesuai permintaan agar lebih ringan
 
     useEffect(() => {
         if (isLoadingFeed) return;
@@ -1481,7 +1461,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         setSortType('random'); 
         setDisplayCount(5); 
         clearNewPost(); 
-        retryFeed(); // Panggil fungsi refresh dari App
+        retryFeed(); 
     };
     
     const visiblePosts = stableFeed.slice(0, displayCount);
@@ -1499,7 +1479,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
 
-            {/* ERROR HANDLING JIKA OFFLINE */}
             {feedError && (
                 <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 rounded-3xl mb-4 text-center">
                     <WifiOff size={48} className="text-red-400 mb-2"/>
@@ -1524,15 +1503,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                         {!loadingMore && stableFeed.length <= displayCount && stableFeed.length > 0 && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
                     </div>
                 </>
-            )}
-
-            {showScrollTop && (
-                <button 
-                    onClick={scrollToTop}
-                    className="fixed bottom-24 right-4 bg-sky-500 text-white p-3 rounded-full shadow-xl hover:bg-sky-600 transition animate-in zoom-in"
-                >
-                    <ArrowUp size={20}/>
-                </button>
             )}
         </div>
     );
@@ -1616,60 +1586,41 @@ const App = () => {
     const [newPostId, setNewPostId] = useState(null);
     const [showSplash, setShowSplash] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-
-    // State Loading Feed & Error (Global)
     const [isLoadingFeed, setIsLoadingFeed] = useState(true);
     const [feedError, setFeedError] = useState(false);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
-
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [darkMode, setDarkMode] = useState(false);
     const [isOffline, setIsOffline] = useState(!navigator.onLine);
-
-    // Rewards State
     const [showRewards, setShowRewards] = useState(false);
     const [canClaimReward, setCanClaimReward] = useState(false);
     const [nextRewardTime, setNextRewardTime] = useState('');
 
-    // --- GLOBAL ERROR CATCHER ---
     useEffect(() => {
-        // Intercept global errors
         const handleError = (event) => {
             if (!user || user.email !== DEVELOPER_EMAIL) {
-                // Sembunyikan error dari devtools jika bukan developer
                 event.preventDefault(); 
                 logSystemError(event.error || new Error(event.message), 'global_error', user);
             }
         };
-
         const handleRejection = (event) => {
             if (!user || user.email !== DEVELOPER_EMAIL) {
                 event.preventDefault();
                 logSystemError(event.reason || new Error('Unhandled Promise Rejection'), 'promise_rejection', user);
             }
         };
-
         window.addEventListener('error', handleError);
         window.addEventListener('unhandledrejection', handleRejection);
-
         return () => {
             window.removeEventListener('error', handleError);
             window.removeEventListener('unhandledrejection', handleRejection);
         };
     }, [user]);
 
-    // --- CONSOLE OVERRIDE (Untuk sembunyikan log dari user biasa) ---
     useEffect(() => {
         if (user && user.email !== DEVELOPER_EMAIL) {
-             // Simpan referensi asli jika ingin debug lokal
-             // const originalConsoleError = console.error;
-             
-             // Override
-             console.error = (...args) => {
-                 // Kirim ke DB (Opsional, hati-hati spam)
-                 // logSystemError(new Error(args.join(' ')), 'console_error', user);
-             };
+             console.error = (...args) => {};
         }
     }, [user]);
 
@@ -1691,7 +1642,6 @@ const App = () => {
         }
     }, []);
 
-    // Check Reward Status
     useEffect(() => {
         if (!profile) return;
         const lastClaim = profile.lastRewardClaim ? profile.lastRewardClaim.toMillis() : 0;
@@ -1716,7 +1666,7 @@ const App = () => {
         try {
             await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {
                 lastRewardClaim: serverTimestamp(),
-                reputation: increment(50) // Dapat 50 Reputasi
+                reputation: increment(50) 
             });
             alert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas.");
             setShowRewards(false);
@@ -1737,7 +1687,6 @@ const App = () => {
         }
     };
 
-    // DEEP LINKING CHECKER (Universal Access)
     useEffect(() => { 
         const timer = setTimeout(() => setShowSplash(false), 3000); 
         const p = new URLSearchParams(window.location.search).get('post'); 
@@ -1812,56 +1761,40 @@ const App = () => {
         }
     }, [user]);
 
-    // Listener Global (Jalan untuk Guest & User)
     useEffect(() => {
         setIsLoadingFeed(true);
         setFeedError(false);
-
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
             try {
-                // 1. Load Data Mentah Dulu (Cepat, agar UI tidak kosong)
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-                
-                // Gunakan data user yang tertanam di post sebagai fallback utama
                 const postsWithFallback = raw.map(p => ({
                     ...p,
                     user: p.user || { username: 'Pengguna', photoURL: '' } 
                 }));
-                
                 setPosts(postsWithFallback); 
-
-                // 2. Fetch data user terbaru di background (Lazy Load)
                 try {
                     const uids = [...new Set(raw.map(r=>r.userId))];
                     const userPromises = uids.map(uid => 
                         getDoc(doc(db, getPublicCollection('userProfiles'), uid))
                         .then(snap => ({ id: uid, data: snap.exists() ? snap.data() : null }))
-                        .catch(() => ({ id: uid, data: null })) // Silent fail
+                        .catch(() => ({ id: uid, data: null }))
                     );
-
                     const userResults = await Promise.all(userPromises);
                     const userMap = {};
                     userResults.forEach(res => { if(res.data) userMap[res.id] = res.data; });
-
-                    // Update posts jika data user berhasil diambil
                     if (Object.keys(userMap).length > 0) {
                         setPosts(prevPosts => prevPosts.map(p => ({
                             ...p,
                             user: userMap[p.userId] || p.user
                         })));
                     }
-                } catch (backgroundError) {
-                    // console.warn("Background fetch user failed (Normal for Guest):", backgroundError);
-                }
-
+                } catch (backgroundError) {}
                 setIsLoadingFeed(false);
             } catch (err) {
-                // console.error("Error fetching posts:", err);
                 setFeedError(true);
                 setIsLoadingFeed(false);
             }
         }); 
-
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
         return () => { unsubPosts(); unsubUsers(); };
     }, [refreshTrigger]); 
@@ -1871,7 +1804,20 @@ const App = () => {
         if (!profile) return; 
         const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); 
         const targetRef = doc(db, getPublicCollection('userProfiles'), uid); 
-        try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } catch (e) { console.error("Gagal update pertemanan", e); } 
+        try { 
+            if(isFollowing) { 
+                await updateDoc(meRef, {following: arrayRemove(uid)}); 
+                await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); 
+            } else { 
+                await updateDoc(meRef, {following: arrayUnion(uid)}); 
+                await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); 
+                
+                // REPUTASI UPDATE: Tambah Reputasi saat difollow
+                await updateDoc(targetRef, { reputation: increment(5) }); // +5 Poin Follow
+                
+                sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); 
+            } 
+        } catch (e) { console.error("Gagal update pertemanan", e); } 
     };
     
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
@@ -1889,7 +1835,6 @@ const App = () => {
             <style>{`.dark body { background-color: #111827; color: white; }`}</style>
             <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
                 <NetworkStatus />
-                
                 {page!=='legal' && ( 
                     <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-800 shadow-sm transition-colors duration-300">
                         <div className="flex items-center gap-2" onClick={()=>setPage('home')}>
@@ -1924,23 +1869,16 @@ const App = () => {
                     {page==='home' && (
                         <>
                             <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>
-                            
-                            {/* FLOATING DRAGGABLE GIFT (Hanya di Home) */}
-                            <DraggableGift 
-                                onClick={() => setShowRewards(true)} 
-                                canClaim={canClaimReward && !isGuest} 
-                                nextClaimTime={nextRewardTime}
-                            />
+                            <DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/>
                         </>
                     )}
-                    
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                     {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
                     {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
                     {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} />}
-                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} />}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                 </main>
                 
@@ -1948,32 +1886,14 @@ const App = () => {
                     <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-6 py-3 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-6 z-40">
                         <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
                         <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
-                        
                         <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={24}/></button>
-                        
                         <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
-                        
-                        {/* REWARDS BUTTON DIHAPUS DARI NAV (Sudah jadi Floating) */}
-
-                        {isGuest ? (
-                             <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/>
-                        ) : (
-                             <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/>
-                        )}
+                        {isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}
                     </nav>
                 )}
 
-                {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}\
-                {showRewards && (
-                    <DailyRewardModal 
-                        onClose={()=>setShowRewards(false)} 
-                        onClaim={handleClaimReward} 
-                        canClaim={canClaimReward} 
-                        nextClaimTime={nextRewardTime} 
-                        isGuest={isGuest}
-                        onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }}
-                    />
-                )}
+                {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
+                {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
                 {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}
                 <PWAInstallPrompt />
             </div>
