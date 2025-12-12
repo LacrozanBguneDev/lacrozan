@@ -1078,50 +1078,56 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isVideo = (post.mediaUrl && (/\.(mp4|webm)$/i.test(post.mediaUrl) || post.mediaType === 'video')) && !embed;
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
 
-    // --- LOGIKA KOMENTAR BERJENJANG ---
+    // --- LOGIKA KOMENTAR BERJENJANG (REFACTORED) ---
     const rootComments = comments.filter(c => !c.parentId);
     const getReplies = (parentId) => comments.filter(c => c.parentId === parentId);
 
-    // Komponen Internal untuk List Komentar
-    const CommentList = ({ commentList, isReply = false }) => (
-        <div className="space-y-3">
-            {commentList.map(c => {
-                const replies = getReplies(c.id);
-                const [showAllReplies, setShowAllReplies] = useState(false);
-                const visibleReplies = showAllReplies ? replies : replies.slice(0, 2);
+    // FIX: KOMPONEN TERPISAH UNTUK ITEM KOMENTAR (MENGHINDARI ERROR #310)
+    const CommentItem = ({ c, isReply }) => {
+        const replies = getReplies(c.id);
+        const [showAllReplies, setShowAllReplies] = useState(false);
+        const visibleReplies = showAllReplies ? replies : replies.slice(0, 2);
 
-                return (
-                    <div key={c.id} className="flex flex-col">
-                        <div className={`p-3 rounded-xl text-xs flex flex-col group transition ${isReply ? 'ml-8 bg-gray-100 dark:bg-gray-800 border-l-2 border-sky-300 mb-2' : 'bg-gray-50 dark:bg-gray-900'}`}>
-                            <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="font-bold text-gray-800 dark:text-gray-200">{c.username}</span>
-                                        {c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
-                                    </div>
-                                    <span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span>
-                                </div>
-                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
-                                     {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}
-                                     {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
-                                </div>
+        return (
+            <div className="flex flex-col">
+                <div className={`p-3 rounded-xl text-xs flex flex-col group transition ${isReply ? 'ml-8 bg-gray-100 dark:bg-gray-800 border-l-2 border-sky-300 mb-2' : 'bg-gray-50 dark:bg-gray-900'}`}>
+                    <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-gray-800 dark:text-gray-200">{c.username}</span>
+                                {c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
                             </div>
+                            <span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span>
                         </div>
-                        
-                        {/* Render Replies under Parent */}
-                        {replies.length > 0 && (
-                            <div className="mt-1">
-                                <CommentList commentList={visibleReplies} isReply={true} />
-                                {replies.length > 2 && !showAllReplies && (
-                                    <button onClick={() => setShowAllReplies(true)} className="ml-8 text-[10px] font-bold text-sky-600 hover:underline flex items-center mb-2">
-                                        Lihat {replies.length - 2} balasan lainnya...
-                                    </button>
-                                )}
-                            </div>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+                                {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}
+                                {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}
+                        </div>
+                    </div>
+                </div>
+                
+                {replies.length > 0 && (
+                    <div className="mt-1">
+                        <div className="space-y-3">
+                            {visibleReplies.map(reply => (
+                                <CommentItem key={reply.id} c={reply} isReply={true} />
+                            ))}
+                        </div>
+                        {replies.length > 2 && !showAllReplies && (
+                            <button onClick={() => setShowAllReplies(true)} className="ml-8 text-[10px] font-bold text-sky-600 hover:underline flex items-center mb-2">
+                                Lihat {replies.length - 2} balasan lainnya...
+                            </button>
                         )}
                     </div>
-                );
-            })}
+                )}
+            </div>
+        );
+    };
+
+    // Wrapper Sederhana
+    const CommentList = ({ commentList }) => (
+        <div className="space-y-3">
+            {commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}
         </div>
     );
 
@@ -1362,6 +1368,15 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         rank = sorted.findIndex(u => u.uid === profileData.uid) + 1;
     }
 
+    // HITUNG PROGRESS KE LEVEL BERIKUTNYA (FITUR BARU)
+    const getNextRankData = (points) => {
+        if (points < 100) return { next: 100, label: 'Rising Star', percent: (points/100)*100 };
+        if (points < 500) return { next: 500, label: 'Influencer', percent: ((points-100)/400)*100 };
+        if (points < 1000) return { next: 1000, label: 'Legend', percent: ((points-500)/500)*100 };
+        return { next: null, label: 'Max Level', percent: 100 };
+    };
+    const rankProgress = getNextRankData(profileData.reputation || 0);
+
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
             <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
@@ -1385,7 +1400,21 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}>
-                    <badge.icon size={14}/> {badge.label} ({profileData.reputation || 0} Poin)
+                    <badge.icon size={14}/> {badge.label}
+                </div>
+
+                {/* Progress Bar Feature */}
+                <div className="px-8 mt-2 mb-4 w-full">
+                    <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1">
+                        <span>{profileData.reputation || 0} XP</span>
+                        <span>{rankProgress.next ? `${rankProgress.next} XP` : 'MAX'}</span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div>
+                    </div>
+                    <p className="text-[10px] text-center mt-1 text-sky-500 font-bold">
+                        {rankProgress.next ? `Butuh ${rankProgress.next - (profileData.reputation||0)} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}
+                    </p>
                 </div>
 
                 {!isSelf && !isGuest && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
