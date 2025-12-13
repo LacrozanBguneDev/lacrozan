@@ -33,9 +33,8 @@ import {
     limit,
     increment,
     writeBatch,
-    startAfter, // ARCHITECT: Added for pagination
-    runTransaction, // ARCHITECT: Added for atomic operations
-    getDocs // ARCHITECT: Added for on-demand fetching
+    startAfter,
+    getDocs
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -104,17 +103,6 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// ARCHITECT: GLOBAL STATS HELPER
-// Fungsi ini memastikan counter tetap sinkron tanpa perlu membaca seluruh database
-const updateGlobalStats = (batch, type, change) => {
-    const statsRef = doc(db, getPublicCollection('systemStats'), 'general');
-    // Kita asumsikan dokumen stats sudah ada, jika belum, Dashboard akan membuatnya (Lazy Init)
-    batch.set(statsRef, { 
-        [type]: increment(change),
-        lastUpdated: serverTimestamp() 
-    }, { merge: true });
-};
-
 // 0. SYSTEM LOGGER (FIX: Menangani null user properties agar tidak crash)
 const logSystemError = async (error, context = 'general', user = null) => {
     try {
@@ -163,7 +151,8 @@ const compressImageToBase64 = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 800; 
+                // OPTIMASI: Kurangi resolusi maksimal sedikit agar loading lebih cepat
+                const MAX_WIDTH = 600; 
                 let width = img.width;
                 let height = img.height;
 
@@ -178,7 +167,8 @@ const compressImageToBase64 = (file) => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                // OPTIMASI: Kualitas 0.5 cukup untuk mobile, mempercepat loading
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                 resolve(dataUrl);
             };
             img.onerror = (error) => reject(error);
@@ -606,7 +596,7 @@ const renderMarkdown = (text, onHashtagClick) => {
 };
 
 // ==========================================
-// BAGIAN 4: DASHBOARD DEVELOPER (ARCHITECT REDESIGN)
+// BAGIAN 4: DASHBOARD DEVELOPER
 // ==========================================
 const DeveloperDashboard = ({ onClose }) => {
     const [stats, setStats] = useState({ users: 0, posts: 0, postsToday: 0 });
@@ -621,42 +611,28 @@ const DeveloperDashboard = ({ onClose }) => {
 
     useEffect(() => {
         const fetchData = async () => {
-            // ARCHITECT: Use metadata for global stats to avoid reading all docs
-            // If metadata doesn't exist, we perform a one-time heavy read to initialize it
-            const statsDocRef = doc(db, getPublicCollection('systemStats'), 'general');
-            const statsSnap = await getDoc(statsDocRef);
-            let totalPosts = 0;
-            let totalUsers = 0;
-
-            if (statsSnap.exists()) {
-                const data = statsSnap.data();
-                totalPosts = data.totalPosts || 0;
-                totalUsers = data.totalUsers || 0;
-            } else {
-                // Fallback (Heavy Read) - Hanya sekali seumur hidup aplikasi
-                const pSnap = await getDocs(collection(db, getPublicCollection('posts')));
-                const uSnap = await getDocs(collection(db, getPublicCollection('userProfiles')));
-                totalPosts = pSnap.size;
-                totalUsers = uSnap.size;
-                await setDoc(statsDocRef, { totalPosts, totalUsers });
-            }
-
-            // Fetch recent posts only for chart (Optimization)
-            const todayStart = new Date();
-            todayStart.setHours(0,0,0,0);
-            const recentPostsQuery = query(collection(db, getPublicCollection('posts')), where('timestamp', '>=', todayStart));
-            const recentSnap = await getDocs(recentPostsQuery);
-            const postsToday = recentSnap.size;
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            // Cukup hitung total post secara kasar (metadata tidak tersedia di client, ambil snapshot limit besar atau estimasi)
+            // Untuk performa, dashboard admin boleh load lebih banyak tapi terpisah
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), (snap) => { resolve(snap); unsub(); }); });
             
-            // Users list for management (Pagination could be added here too, but we limit to 50 for now)
-            const usersSnap = await getDocs(query(collection(db, getPublicCollection('userProfiles')), limit(50)));
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const rawPosts = postsSnap.docs.map(d => d.data());
+            const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+            
             setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
 
-            // Mock Chart Data based on stats (Simulated for performance, real implementation needs aggregation collection)
             const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-            const last7Days = days.map(d => ({ day: d, count: Math.floor(Math.random() * 20), height: Math.floor(Math.random() * 80) + 20 }));
-            
-            setStats({ users: totalUsers, posts: totalPosts, postsToday });
+            const last7Days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+                const dayEnd = dayStart + 86400000;
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
+                last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
+            }
+            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
             setChartData(last7Days);
             setLoading(false);
         };
@@ -674,22 +650,12 @@ const DeveloperDashboard = ({ onClose }) => {
         if(!confirm("Kirim pengumuman ke SEMUA user?")) return;
         setSendingBC(true);
         try {
-            // Note: In real production, use Cloud Functions for broadcasting to avoid client-side iteration loop
-            const usersSnap = await getDocs(collection(db, getPublicCollection('userProfiles')));
-            const batch = writeBatch(db);
-            let count = 0;
-            
-            usersSnap.docs.forEach(docSnap => {
-                if (count < 450) { // Firestore batch limit 500
-                    const ref = doc(collection(db, getPublicCollection('notifications')));
-                    batch.set(ref, {
-                        toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
-                    });
-                    count++;
-                }
-            });
-            await batch.commit();
-            alert("Pengumuman berhasil dikirim (Batch terbatas 450 user)!"); setBroadcastMsg('');
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); });
+            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), {
+                toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp()
+            }));
+            await Promise.all(promises);
+            alert("Pengumuman berhasil dikirim!"); setBroadcastMsg('');
         } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); }
     };
 
@@ -706,12 +672,7 @@ const DeveloperDashboard = ({ onClose }) => {
         if(!confirm("⚠️ PERINGATAN: Hapus data user ini secara permanen? Tindakan ini tidak bisa dibatalkan!")) return;
         try {
             await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid));
-            // ARCHITECT: Update Global Stats
-            const statsRef = doc(db, getPublicCollection('systemStats'), 'general');
-            await updateDoc(statsRef, { totalUsers: increment(-1) });
-            
             setAllUsersList(prev => prev.filter(u => u.id !== uid));
-            setStats(prev => ({...prev, users: prev.users - 1}));
             alert("Data user dihapus.");
         } catch(e) { alert("Gagal hapus: " + e.message); }
     };
@@ -807,11 +768,7 @@ const OnboardingScreen = ({ onComplete, user }) => {
         if (!username.trim()) return alert("Username wajib diisi!");
         setLoading(true);
         try {
-            // ARCHITECT: Atomic User Creation + Global Stats Update
-            const batch = writeBatch(db);
-            const userRef = doc(db, getPublicCollection('userProfiles'), user.uid);
-            
-            batch.set(userRef, {
+            await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), {
                 username: username.trim(),
                 email: user.email,
                 uid: user.uid,
@@ -822,12 +779,8 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 savedPosts: [],
                 lastSeen: serverTimestamp(),
                 reputation: 0,
-                lastPostTime: 0
+                lastPostTime: 0 // Inisialisasi untuk anti-spam
             });
-            
-            updateGlobalStats(batch, 'totalUsers', 1);
-            
-            await batch.commit();
             onComplete();
         } catch (error) {
             alert("Gagal menyimpan data: " + error.message);
@@ -1139,31 +1092,32 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { console.error(error); }
     };
 
-    const handleDelete = async () => { 
-        if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) {
-            // ARCHITECT: Atomic Delete with Anti-Cheat
-            // Jika user menghapus post, poin mereka harus ditarik kembali untuk mencegah "Post -> Dapat Poin -> Hapus" abuse.
+    // --- FIX: REPUTATION ROLLBACK ON DELETE ---
+    const handleDelete = async () => {
+        // Pesan konfirmasi yang jelas
+        const confirmMsg = isMeDeveloper && !isOwner 
+            ? "⚠️ ADMIN: Hapus postingan orang lain?" 
+            : "Hapus postingan ini? Reputasi yang didapat dari post ini (Likes/Comments/Create) akan DITARIK KEMBALI.";
+
+        if (confirm(confirmMsg)) { 
             try {
-                const batch = writeBatch(db);
-                const postRef = doc(db, getPublicCollection('posts'), post.id);
+                // 1. Hitung total reputasi yang harus ditarik kembali
+                // Base Post: 10 poin
+                // Likes: 2 poin * jumlah like
+                // Komentar: 5 poin * jumlah komentar (estimasi kasar, karena kita tidak bisa track siapa yg komen untuk tarik poin mereka, kita tarik poin authornya saja dari "keterlibatan")
+                const earnedReputation = 10 + ((post.likes?.length || 0) * 2) + ((post.commentsCount || 0) * 5);
+                
+                // 2. Tarik kembali reputasi dari user
                 const userRef = doc(db, getPublicCollection('userProfiles'), post.userId);
-                
-                // 1. Delete Post
-                batch.delete(postRef);
+                await updateDoc(userRef, {
+                    reputation: increment(-earnedReputation)
+                });
 
-                // 2. Kurangi Statistik Global
-                updateGlobalStats(batch, 'totalPosts', -1);
+                // 3. Hapus Postingan
+                await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); 
                 
-                // 3. Penalty Poin (Anti-Cheat) - Tarik kembali 10 poin
-                // Hanya lakukan jika ini post milik user itu sendiri (bukan admin yang hapus)
-                if (isOwner) {
-                     batch.update(userRef, { reputation: increment(-10) });
-                }
-
-                await batch.commit();
-                alert("Postingan dihapus.");
+                alert(`Postingan dihapus. ${earnedReputation} Poin Reputasi ditarik kembali.`);
             } catch (e) {
-                console.error("Delete error:", e);
                 alert("Gagal menghapus: " + e.message);
             }
         } 
@@ -1303,7 +1257,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             </div>
                         )}
                         <div className="flex gap-2">
-                            <input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
+                            <input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
                             <button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-xl shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button>
                         </div>
                     </form>
@@ -1384,13 +1338,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
             
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             
-            // ARCHITECT: ATOMIC WRITE (BATCH)
-            const batch = writeBatch(db);
-            const postRef = doc(collection(db, getPublicCollection('posts')));
-            const userRef = doc(db, getPublicCollection('userProfiles'), userId);
-
-            // 1. Create Post
-            batch.set(postRef, {
+            const ref = await addDoc(collection(db, getPublicCollection('posts')), {
                 userId, 
                 title: form.title, 
                 content: form.content, 
@@ -1403,20 +1351,14 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 category: category, 
                 user: {username, uid: userId}
             });
-
-            // 2. Update User (Reputation & Last Post)
-            batch.update(userRef, { 
-                reputation: increment(10),
-                lastPostTime: Date.now() 
-            });
-
-            // 3. Update Global Stats
-            updateGlobalStats(batch, 'totalPosts', 1);
-
-            // Execute Batch
-            await batch.commit();
             
-            setProg(100); setTimeout(()=>onSuccess(postRef.id, false), 500);
+            // REPUTASI UPDATE: Bonus Posting Konten & Update Last Post Time
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { 
+                reputation: increment(10),
+                lastPostTime: Date.now() // Update waktu post terakhir
+            }); 
+            
+            setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
 
@@ -1463,40 +1405,27 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const [activeTab, setActiveTab] = useState('posts'); 
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
-    // ARCHITECT: Local state for scoped fetching
-    const [scopedPosts, setScopedPosts] = useState([]);
-    const [loadingScoped, setLoadingScoped] = useState(false);
+    
+    // NEW: Local Posts khusus untuk Profile ini (Solusi "Postingan Hilang")
+    const [localPosts, setLocalPosts] = useState([]);
+    const [loadingLocal, setLoadingLocal] = useState(true);
 
     const viewerUid = viewerProfile ? viewerProfile.uid : null;
     const isSelf = viewerUid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
-    // ARCHITECT: Use allPosts from props if available (feed), otherwise use fetched data
-    // Because feed is now paginated, allPosts might not contain this user's old posts.
-    const feedPosts = allPosts.filter(p=>p.userId===profileData.uid);
-    // Combine feed posts with scoped posts, deduplicate by ID
-    const combinedPosts = useMemo(() => {
-        const map = new Map();
-        [...feedPosts, ...scopedPosts].forEach(p => map.set(p.id, p));
-        return Array.from(map.values()).sort((a,b)=>(b.timestamp?.toMillis||0)-(a.timestamp?.toMillis||0));
-    }, [feedPosts, scopedPosts]);
-
-    const userPosts = combinedPosts;
-
+    // FETCH KHUSUS: Ambil postingan spesifik user ini, tidak bergantung feed global
     useEffect(() => {
-        // Fetch specific user posts if feed doesn't have enough
-        const fetchUserPosts = async () => {
-            if (feedPosts.length < 5) {
-                setLoadingScoped(true);
-                const q = query(collection(db, getPublicCollection('posts')), where('userId', '==', profileData.uid), orderBy('timestamp', 'desc'), limit(20));
-                const snap = await getDocs(q);
-                setScopedPosts(snap.docs.map(d => ({id:d.id, ...d.data()})));
-                setLoadingScoped(false);
-            }
-        };
-        fetchUserPosts();
+        setLoadingLocal(true);
+        // Query khusus user ini, ambil 50 terakhir
+        const q = query(collection(db, getPublicCollection('posts')), where('userId', '==', profileData.uid), orderBy('timestamp', 'desc'), limit(50));
+        const unsub = onSnapshot(q, (snap) => {
+            const fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            setLocalPosts(fetched);
+            setLoadingLocal(false);
+        });
+        return () => unsub();
     }, [profileData.uid]);
-
 
     const followersCount = (profileData.followers || []).length;
     const followingCount = (profileData.following || []).length;
@@ -1517,7 +1446,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     };
 
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
-    const totalLikes = userPosts.reduce((acc, curr) => acc + (curr.likes?.length || 0), 0);
+    
     // Badge menggunakan REPUTASI ASLI yang tersimpan di DB
     const badge = getReputationBadge(profileData.reputation || 0, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
@@ -1590,8 +1519,10 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
             
             <div className="px-4 space-y-6">
                 {activeTab === 'posts' ? (
-                    loadingScoped ? <Loader2 className="animate-spin mx-auto"/> :
-                    userPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
+                    loadingLocal ? <SkeletonPost /> :
+                    localPosts.length > 0 ? (
+                        localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)
+                    ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
                 ) : ( 
                     savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
                 )}
@@ -1621,18 +1552,15 @@ const TrendingTags = ({ posts, onTagClick }) => {
     );
 };
 
-// --- HOME SCREEN (SCROLL BUTTON DIHAPUS, ADDED PAGINATION UI) ---
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed, onLoadMore, hasMore }) => {
+// --- HOME SCREEN (SCROLL BUTTON DIHAPUS, GANTI PAGINATION) ---
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
     const [isFirstLoad, setIsFirstLoad] = useState(true);
-    // ARCHITECT: displayCount is now handled by physical array size from pagination, but we can keep client slicing for smooth UX if needed.
-    // However, with real server pagination, we rely on 'allPosts' growing.
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
 
-    // Fitur ScrollTop dihapus sesuai permintaan agar lebih ringan
-
+    // Initial Sync dengan Realtime data (Top 20)
     useEffect(() => {
         if (isLoadingFeed) return;
         
@@ -1648,38 +1576,70 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         else if (sortType === 'popular') processedPosts = basePosts.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
         else if (sortType === 'meme') processedPosts = basePosts.filter(p => p.category === 'meme').sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
         else {
-            // Random is tricky with pagination. We just shuffle what we have.
             if (isFirstLoad || stableFeed.length === 0) processedPosts = shuffleArray([...basePosts]);
-            else {
-                // Keep old structure, append new items
-                const existingIds = new Set(stableFeed.map(p => p.id));
-                const newItems = basePosts.filter(p => !existingIds.has(p.id));
-                processedPosts = [...stableFeed, ...newItems];
-            }
+            else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined); // Sync update jika post ada
+            
+            // Tambahkan posts lama yang sudah diload lewat pagination jika ada
+            const loadedOldPosts = stableFeed.filter(old => !basePosts.find(bp => bp.id === old.id));
+            processedPosts = [...processedPosts, ...loadedOldPosts];
         }
 
         if (pinnedPost) processedPosts.unshift(pinnedPost);
-        setStableFeed(processedPosts);
+        
+        // Hapus duplikat
+        const uniquePosts = Array.from(new Set(processedPosts.map(a => a.id)))
+             .map(id => processedPosts.find(a => a.id === id));
+             
+        setStableFeed(uniquePosts);
         setIsFirstLoad(false);
     }, [allPosts, sortType, newPostId, isLoadingFeed]); 
 
-    // ARCHITECT: Intersection Observer now triggers Server Load More
+    // LOAD MORE FUNCTION (Pagination)
+    const loadMorePosts = async () => {
+        if (loadingMore || sortType !== 'random') return; // Pagination hanya aktif di mode default/random
+        setLoadingMore(true);
+        try {
+            const lastPost = stableFeed[stableFeed.length - 1];
+            if (!lastPost || !lastPost.timestamp) { setLoadingMore(false); return; }
+
+            const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
+            const snapshot = await getDocs(q);
+            
+            if (!snapshot.empty) {
+                const newPosts = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+                
+                // Fetch User data untuk post baru (Sederhana)
+                // Di app nyata sebaiknya cache user profile terpisah
+                const enrichedPostsPromises = newPosts.map(async (p) => {
+                    const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), p.userId));
+                    return { ...p, user: uSnap.exists() ? uSnap.data() : {username: 'User'} };
+                });
+                
+                const enrichedPosts = await Promise.all(enrichedPostsPromises);
+                setStableFeed(prev => [...prev, ...enrichedPosts]);
+            }
+        } catch (e) {
+            console.error("Gagal load more:", e);
+        }
+        setLoadingMore(false);
+    };
+
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
             const first = entries[0];
-            if (first.isIntersecting && !loadingMore && hasMore) {
-                setLoadingMore(true);
-                onLoadMore().finally(() => setLoadingMore(false));
+            if (first.isIntersecting && !loadingMore && !isLoadingFeed) {
+                loadMorePosts();
             }
         }, { threshold: 0.5 });
         const currentBottom = bottomRef.current;
         if (currentBottom) observer.observe(currentBottom);
         return () => { if (currentBottom) observer.unobserve(currentBottom); };
-    }, [hasMore, loadingMore, onLoadMore]);
+    }, [stableFeed, loadingMore, isLoadingFeed, sortType]);
 
     const manualRefresh = () => { 
         setIsFirstLoad(true); 
         setSortType('random'); 
+        setStableFeed([]); // Clear feed
         clearNewPost(); 
         retryFeed(); 
     };
@@ -1717,8 +1677,8 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-20 w-full flex items-center justify-center">
-                        {loadingMore && <Loader2 className="animate-spin text-sky-500"/>}
-                        {!loadingMore && !hasMore && <span className="text-xs text-gray-400">-- Anda sudah mencapai ujung dunia --</span>}
+                        {loadingMore && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat postingan lama...</span></div>}
+                        {!loadingMore && stableFeed.length > 5 && <button onClick={loadMorePosts} className="text-xs text-gray-400 hover:text-sky-500 font-bold px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-full">Muat Lebih Banyak</button>}
                     </div>
                 </>
             )}
@@ -1737,25 +1697,16 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-    // ARCHITECT: If post not in paginated list, we might need to fetch it separately.
-    // For now, assume simplified logic or that deep link handles it. 
-    // Optimization: Add a useEffect to fetch single doc if `post` is undefined.
-    const [postData, setPostData] = useState(allPosts.find(p => p.id === postId));
-
-    useEffect(() => {
-        if (!postData && postId) {
-            getDoc(doc(db, getPublicCollection('posts'), postId)).then(snap => {
-                if (snap.exists()) setPostData({id: snap.id, ...snap.data()});
-            });
-        }
-    }, [postId, postData]);
-
+    // Coba cari di allPosts (Top 20), kalau tidak ada harusnya fetch single post (bisa ditambahkan nanti untuk robustness)
+    const post = allPosts.find(p => p.id === postId);
+    
+    // Fallback: Jika post tidak ada di feed (karena limit), kita bisa tampilkan skeleton atau fetch (di versi simple ini kita beri pesan)
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
-    if (!postData) return <div className="p-10 text-center text-gray-400 mt-20"><Loader2 className="animate-spin mx-auto mb-2"/>Memuat postingan...<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali</button></div>;
+    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan sedang dimuat atau tidak ditemukan.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     return (
         <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={postData} {...props}/>
+            <PostItem post={post} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
         </div>
     );
@@ -1764,32 +1715,14 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
-    const [searching, setSearching] = useState(false);
 
-    // ARCHITECT: SEARCH MUST BE SERVER SIDE OR HYBRID NOW
-    // Because allPosts is small (paginated), local search is insufficient.
-    // Firestore doesn't support full text search natively. We implement a simple startAt/endAt or fallback to client filtering of what we have + known users.
-    // For this implementation, we will fetch ALL Users (lightweight enough usually) but search posts is limited.
-    
     useEffect(() => {
-        const doSearch = async () => {
-             if (!queryTerm) { setResults({ users: [], posts: [] }); return; }
-             setSearching(true);
-             const lower = queryTerm.toLowerCase();
-             
-             // Client-side user search is okay if we have the list, but better to query.
-             // Since allUsers prop might be truncated in future optimizations, let's keep it simple for now using props.
-             const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
-             
-             // For posts, we search locally first. Real backend would use Algolia/Elasticsearch.
-             // We'll stick to local filtered posts for now to avoid complexity explosion in this file.
-             const foundPosts = allPosts.filter(p => p.content?.toLowerCase().includes(lower) || p.title?.toLowerCase().includes(lower));
-             
-             setResults({ users: foundUsers, posts: foundPosts });
-             setSearching(false);
-        };
-        const timeout = setTimeout(doSearch, 500);
-        return () => clearTimeout(timeout);
+        if (!queryTerm) { setResults({ users: [], posts: [] }); return; }
+        const lower = queryTerm.toLowerCase();
+        const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
+        // Pencarian post saat ini hanya di Top 20 (bisa diupgrade ke Algolia/Full Text Search Firebase extension untuk full DB)
+        const foundPosts = allPosts.filter(p => p.content?.toLowerCase().includes(lower) || p.title?.toLowerCase().includes(lower));
+        setResults({ users: foundUsers, posts: foundPosts });
     }, [queryTerm, allPosts, allUsers]);
 
     return (
@@ -1797,8 +1730,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, 
             <div className="bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-2 mb-6">
                 <Search className="ml-2 text-gray-400"/><input value={queryTerm} onChange={e=>setQueryTerm(e.target.value)} placeholder="Cari orang, hashtag, atau postingan..." className="flex-1 p-2 outline-none bg-transparent dark:text-white"/>
             </div>
-            {searching && <div className="text-center mb-4"><Loader2 className="animate-spin inline text-sky-500"/></div>}
-            {queryTerm && !searching && (
+            {queryTerm && (
                 <div className="space-y-6">
                     {results.users.length > 0 && (
                         <div>
@@ -1808,7 +1740,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, 
                     )}
                     {results.posts.length > 0 && (
                         <div>
-                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan (Dari Feed Aktif)</h3>
+                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan</h3>
                             <div className="space-y-3">{results.posts.map(p => ( 
                                 <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex gap-3 cursor-pointer" onClick={()=>{ setTargetPostId(p.id); setPage('view_post'); }}> 
                                     <div className="flex-1"> <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> <p className="text-xs text-gray-500 line-clamp-2">{p.content}</p> </div> 
@@ -1816,7 +1748,6 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, 
                             ))}</div>
                         </div>
                     )}
-                    {results.posts.length === 0 && results.users.length === 0 && <div className="text-center text-gray-400">Tidak ditemukan.</div>}
                 </div>
             )}
             {!queryTerm && <div className="text-center text-gray-400 mt-20 flex flex-col items-center"><Search size={48} className="opacity-20 mb-4"/><p>Mulai ketik untuk mencari...</p></div>}
@@ -1824,7 +1755,7 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, 
     );
 };
 
-// --- 11. APP UTAMA (ARCHITECT REDESIGN: PAGINATION STATE) ---
+// --- 11. APP UTAMA ---
 const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
@@ -1847,10 +1778,6 @@ const App = () => {
     const [showRewards, setShowRewards] = useState(false);
     const [canClaimReward, setCanClaimReward] = useState(false);
     const [nextRewardTime, setNextRewardTime] = useState('');
-
-    // ARCHITECT: Pagination State
-    const [lastVisible, setLastVisible] = useState(null);
-    const [hasMore, setHasMore] = useState(true);
 
     useEffect(() => {
         const handleError = (event) => {
@@ -2016,30 +1943,35 @@ const App = () => {
         }
     }, [user]);
 
-    // ARCHITECT: Load Initial Data (Paginated)
     useEffect(() => {
         setIsLoadingFeed(true);
         setFeedError(false);
-        setLastVisible(null);
-        setHasMore(true);
-
-        // Limit initial load to 20 for performance
-        const firstQuery = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20));
-
-        const unsubPosts = onSnapshot(firstQuery, async s => {
+        // FIX PERFORMA: MENGGUNAKAN LIMIT 20 AGAR TIDAK LOAD SEMUA DATA
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), async s => {
             try {
-                // Update pagination cursor based on snapshot's last doc
-                if (s.docs.length > 0) {
-                    setLastVisible(s.docs[s.docs.length - 1]);
-                }
-                
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
                 const postsWithFallback = raw.map(p => ({
                     ...p,
                     user: p.user || { username: 'Pengguna', photoURL: '' } 
                 }));
-                
                 setPosts(postsWithFallback); 
+                try {
+                    const uids = [...new Set(raw.map(r=>r.userId))];
+                    const userPromises = uids.map(uid => 
+                        getDoc(doc(db, getPublicCollection('userProfiles'), uid))
+                        .then(snap => ({ id: uid, data: snap.exists() ? snap.data() : null }))
+                        .catch(() => ({ id: uid, data: null }))
+                    );
+                    const userResults = await Promise.all(userPromises);
+                    const userMap = {};
+                    userResults.forEach(res => { if(res.data) userMap[res.id] = res.data; });
+                    if (Object.keys(userMap).length > 0) {
+                        setPosts(prevPosts => prevPosts.map(p => ({
+                            ...p,
+                            user: userMap[p.userId] || p.user
+                        })));
+                    }
+                } catch (backgroundError) {}
                 setIsLoadingFeed(false);
             } catch (err) {
                 setFeedError(true);
@@ -2049,33 +1981,6 @@ const App = () => {
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
         return () => { unsubPosts(); unsubUsers(); };
     }, [refreshTrigger]); 
-
-    // ARCHITECT: Load More Function
-    const fetchMorePosts = useCallback(async () => {
-        if (!lastVisible || !hasMore) return;
-
-        try {
-            const nextQuery = query(
-                collection(db, getPublicCollection('posts')),
-                orderBy('timestamp', 'desc'),
-                startAfter(lastVisible),
-                limit(10)
-            );
-
-            const snap = await getDocs(nextQuery);
-
-            if (!snap.empty) {
-                setLastVisible(snap.docs[snap.docs.length - 1]);
-                const newPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                setPosts(prev => [...prev, ...newPosts]);
-            } else {
-                setHasMore(false);
-            }
-        } catch (e) {
-            console.error("Failed to load more:", e);
-        }
-    }, [lastVisible, hasMore]);
-
 
     const handleFollow = async (uid, isFollowing) => { 
         if (!user) { setShowAuthModal(true); return; } 
@@ -2148,24 +2053,7 @@ const App = () => {
                 <main className={page!=='legal' ? 'pt-16' : ''}>
                     {page==='home' && (
                         <>
-                            <HomeScreen 
-                                currentUserId={user?.uid} 
-                                profile={profile} 
-                                allPosts={posts} 
-                                handleFollow={handleFollow} 
-                                goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} 
-                                newPostId={newPostId} 
-                                clearNewPost={()=>setNewPostId(null)} 
-                                isMeDeveloper={isMeDeveloper} 
-                                isGuest={isGuest} 
-                                onRequestLogin={()=>setShowAuthModal(true)} 
-                                onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} 
-                                isLoadingFeed={isLoadingFeed} 
-                                feedError={feedError} 
-                                retryFeed={()=>setRefreshTrigger(p=>p+1)}
-                                onLoadMore={fetchMorePosts}
-                                hasMore={hasMore}
-                            />
+                            <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>
                             <DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/>
                         </>
                     )}
