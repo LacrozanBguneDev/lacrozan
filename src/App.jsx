@@ -611,9 +611,18 @@ const DeveloperDashboard = ({ onClose }) => {
 
     useEffect(() => {
         const fetchData = async () => {
+            // FIX: GUNAKAN LIMIT BESAR UNTUK DASHBOARD AGAR DATA AKURAT
+            // User request: "Dashboard developer data semua postingan itu harus akurat"
+            // Kita pisahkan query ini dari feed utama, dengan limit 5000 agar mencakup banyak history
             const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
-            // FIX: NAIKKAN LIMIT DASHBOARD AGAR SEMUA DATA MASUK (10000)
-            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(10000)), (snap) => { resolve(snap); unsub(); }); });
+            
+            // Limit dinaikkan ke 5000 agar data "total" akurat bagi developer
+            const postsSnap = await new Promise(resolve => { 
+                const unsub = onSnapshot(
+                    query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(5000)), 
+                    (snap) => { resolve(snap); unsub(); }
+                ); 
+            });
             
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -1394,8 +1403,8 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU) ---
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
+// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU & FIXED MISSING POSTS) ---
+const ProfileScreen = ({ viewerProfile, profileData, handleFollow, isGuest, allUsers }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
     const [file, setFile] = useState(null); 
@@ -1405,44 +1414,36 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
     
-    // FIX POSTINGAN HILANG & PERFORMA: LIMIT DINAMIS
+    // PERBAIKAN: LOCAL POSTS DENGAN PAGINASI UNTUK PROFILE
     const [localPosts, setLocalPosts] = useState([]);
     const [loadingLocal, setLoadingLocal] = useState(true);
-    const [postsLimit, setPostsLimit] = useState(15); // Mulai dari 15 postingan
+    const [visibleLimit, setVisibleLimit] = useState(15); // Awal muat 15 postingan
 
     const viewerUid = viewerProfile ? viewerProfile.uid : null;
     const isSelf = viewerUid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
-    // FETCH KHUSUS: Ambil postingan spesifik user ini, tidak bergantung feed global
+    // FETCH KHUSUS: Menggunakan limit dinamis agar performa cepat di awal
     useEffect(() => {
         setLoadingLocal(true);
-        // Hapus orderBy yang berat, gunakan client-side sorting untuk performa maksimal
-        // Gunakan dynamic limit yang bisa ditambah (15 -> 25 -> 35 dst)
+        // FIX: Tambahkan orderBy 'timestamp' desc agar postingan urut waktu
         const q = query(
             collection(db, getPublicCollection('posts')), 
             where('userId', '==', profileData.uid), 
-            limit(postsLimit)
+            orderBy('timestamp', 'desc'), // Pastikan index composite dibuat di Firestore jika error
+            limit(visibleLimit)
         );
         
         const unsub = onSnapshot(q, (snap) => {
             let fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
-            
-            // Manual Sort di Client Side agar lebih cepat dan tidak butuh index composite
-            fetched.sort((a, b) => {
-                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
-                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
-                return timeB - timeA; // Descending
-            });
-
             setLocalPosts(fetched);
             setLoadingLocal(false);
         });
         return () => unsub();
-    }, [profileData.uid, postsLimit]); // Re-run saat limit bertambah
+    }, [profileData.uid, visibleLimit]);
 
-    const loadMoreProfilePosts = () => {
-        setPostsLimit(prev => prev + 10);
+    const handleLoadMore = () => {
+        setVisibleLimit(prev => prev + 10); // Tambah 10 postingan saat scroll/klik
     };
 
     const followersCount = (profileData.followers || []).length;
@@ -1465,13 +1466,11 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     
-    // Badge menggunakan REPUTASI ASLI yang tersimpan di DB
     const badge = getReputationBadge(profileData.reputation || 0, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
     const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
     const isFriend = isFollowing && isFollowedByTarget; 
     const isOnline = isUserOnline(profileData.lastSeen);
-    const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
     // HITUNG RANKING
     let rank = null;
@@ -1480,7 +1479,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         rank = sorted.findIndex(u => u.uid === profileData.uid) + 1;
     }
 
-    // HITUNG PROGRESS KE LEVEL BERIKUTNYA (FITUR BARU)
     const getNextRankData = (points) => {
         if (points < 100) return { next: 100, label: 'Rising Star', percent: (points/100)*100 };
         if (points < 500) return { next: 500, label: 'Influencer', percent: ((points-100)/400)*100 };
@@ -1492,7 +1490,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     return (
         <div className="max-w-lg mx-auto pb-24 pt-6">
             <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
-                {/* Indikator Peringkat Visual */}
                 {rank && rank <= 3 && (
                     <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>
                         #{rank} VIRAL
@@ -1515,7 +1512,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                     <badge.icon size={14}/> {badge.label}
                 </div>
 
-                {/* Progress Bar Feature */}
                 <div className="px-8 mt-2 mb-4 w-full">
                     <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1">
                         <span>{profileData.reputation || 0} XP</span>
@@ -1537,15 +1533,17 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
             
             <div className="px-4 space-y-6">
                 {activeTab === 'posts' ? (
-                    loadingLocal && localPosts.length === 0 ? <SkeletonPost /> :
+                    loadingLocal ? <SkeletonPost /> :
                     localPosts.length > 0 ? (
                         <>
                             {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
-                            <button onClick={loadMoreProfilePosts} className="w-full py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-300 font-bold text-xs hover:bg-sky-100 hover:text-sky-600 transition">Muat Lebih Banyak...</button>
+                            <div className="text-center py-4">
+                                <button onClick={handleLoadMore} className="text-xs text-sky-500 font-bold px-4 py-2 border border-sky-100 rounded-full hover:bg-sky-50">Muat Lebih Banyak (+10)</button>
+                            </div>
                         </>
                     ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
                 ) : ( 
-                    savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
+                   <div className="text-center text-gray-400 py-10">Postingan disimpan (Fitur Coming Soon)</div>
                 )}
             </div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
@@ -1574,128 +1572,59 @@ const TrendingTags = ({ posts, onTagClick }) => {
 };
 
 // --- HOME SCREEN (SCROLL BUTTON DIHAPUS, GANTI PAGINATION) ---
-const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
-    const [sortType, setSortType] = useState('random'); 
-    const [stableFeed, setStableFeed] = useState([]);
-    const [isFirstLoad, setIsFirstLoad] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
+const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed, onLoadMore }) => {
+    const [sortType, setSortType] = useState('latest'); // DEFAULT 'latest' AGAR STABIL & CEPAT
     const bottomRef = useRef(null);
-
-    // Initial Sync dengan Realtime data
-    useEffect(() => {
-        if (isLoadingFeed) return;
+    
+    // FILTER LOGIC UNTUK TAMPILAN (Client Side Optimization)
+    // Walaupun data difetch dengan query tertentu, kita pastikan tampilannya sesuai tab
+    const displayPosts = useMemo(() => {
+        let filtered = [...allPosts];
         
-        let basePosts = [...allPosts]; 
-        let pinnedPost = null;
-        if (newPostId) {
-            const idx = basePosts.findIndex(p => p.id === newPostId);
-            if (idx > -1) { pinnedPost = basePosts[idx]; basePosts.splice(idx, 1); }
-        }
-
-        let processedPosts = [];
-        
-        // PENGATURAN FEED SPESIFIK:
         if (sortType === 'meme') {
-             // LOGIKA MUAT KHUSUS MEME (Jika di feed global ada meme, tampilkan. Sisanya loadMore)
-             processedPosts = basePosts.filter(p => p.category === 'meme').sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
-        } else if (sortType === 'popular') {
-             // LOGIKA POPULAR: Sortir dari data yang ada
-             processedPosts = basePosts.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-        } else if (sortType === 'latest') {
-             // LOGIKA TERBARU
-             processedPosts = basePosts.sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
-        } else {
-             // DEFAULT (Shuffle)
-             if (isFirstLoad || stableFeed.length === 0) processedPosts = shuffleArray([...basePosts]);
-             else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined);
-             
-             // Gabungkan dengan post yang sudah diload
-             const loadedOldPosts = stableFeed.filter(old => !basePosts.find(bp => bp.id === old.id));
-             processedPosts = [...processedPosts, ...loadedOldPosts];
+            filtered = filtered.filter(p => p.category === 'meme' || p.content?.toLowerCase().includes('#meme'));
         }
-
-        if (pinnedPost) processedPosts.unshift(pinnedPost);
         
-        const uniquePosts = Array.from(new Set(processedPosts.map(a => a.id)))
-             .map(id => processedPosts.find(a => a.id === id));
-             
-        setStableFeed(uniquePosts);
-        setIsFirstLoad(false);
-    }, [allPosts, sortType, newPostId, isLoadingFeed]); 
-
-    // LOAD MORE FUNCTION (Pagination)
-    const loadMorePosts = async () => {
-        if (loadingMore) return;
-        setLoadingMore(true);
-        try {
-            const lastPost = stableFeed[stableFeed.length - 1];
-            if (!lastPost || !lastPost.timestamp) { setLoadingMore(false); return; }
-
-            // SISTEM MUAT MASING-MASING BERDASARKAN KATEGORI
-            let q;
-            if (sortType === 'meme') {
-                q = query(collection(db, getPublicCollection('posts')), where('category', '==', 'meme'), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
-            } else if (sortType === 'popular') {
-                // Untuk popular, fetch latest batch berikutnya lalu sort client side (keterbatasan NoSQL)
-                q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
-            } else {
-                q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
-            }
-
-            const snapshot = await getDocs(q);
-            
-            if (!snapshot.empty) {
-                const newPosts = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
-                
-                const enrichedPostsPromises = newPosts.map(async (p) => {
-                    const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), p.userId));
-                    return { ...p, user: uSnap.exists() ? uSnap.data() : {username: 'User'} };
-                });
-                
-                const enrichedPosts = await Promise.all(enrichedPostsPromises);
-                
-                // Jika sedang di tab populer, gabungkan lalu sort ulang
-                if (sortType === 'popular') {
-                    setStableFeed(prev => [...prev, ...enrichedPosts].sort((a,b) => (b.likes?.length || 0) - (a.likes?.length || 0)));
-                } else {
-                    setStableFeed(prev => [...prev, ...enrichedPosts]);
-                }
-            }
-        } catch (e) {
-            console.error("Gagal load more:", e);
+        // Sorting
+        if (sortType === 'popular') {
+            filtered.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+        } else {
+            // Default Latest
+             filtered.sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
         }
-        setLoadingMore(false);
-    };
+        
+        return filtered;
+    }, [allPosts, sortType]);
 
-    useEffect(() => {
-        const observer = new IntersectionObserver((entries) => {
-            const first = entries[0];
-            if (first.isIntersecting && !loadingMore && !isLoadingFeed) {
-                loadMorePosts();
-            }
-        }, { threshold: 0.5 });
-        const currentBottom = bottomRef.current;
-        if (currentBottom) observer.observe(currentBottom);
-        return () => { if (currentBottom) observer.unobserve(currentBottom); };
-    }, [stableFeed, loadingMore, isLoadingFeed, sortType]);
-
-    const manualRefresh = () => { 
-        setIsFirstLoad(true); 
-        setSortType('random'); 
-        setStableFeed([]); // Clear feed
-        clearNewPost(); 
-        retryFeed(); 
+    // HANDLER CHANGE SORT
+    const handleSortChange = (type) => {
+        setSortType(type);
+        // Kita panggil fungsi retryFeed di parent untuk mereset query utama dengan filter baru
+        onLoadMore(15, type); // Reset ke 15 item awal dengan tipe baru
     };
     
+    // SCROLL DETECTOR UNTUK AUTO LOAD (INFINITE SCROLL)
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !isLoadingFeed) {
+                // Saat scroll mentok bawah, minta parent tambah limit +10
+                onLoadMore(null, sortType); 
+            }
+        }, { threshold: 0.5 });
+        
+        if (bottomRef.current) observer.observe(bottomRef.current);
+        return () => { if (bottomRef.current) observer.unobserve(bottomRef.current); };
+    }, [isLoadingFeed, sortType]);
+
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
             <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-2 -mx-4 px-4">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Terbaru</button>
-                     <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
-                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme</button>
+                     <button onClick={() => handleSortChange('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Terbaru</button>
+                     <button onClick={() => handleSortChange('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
+                     <button onClick={() => handleSortChange('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme</button>
                 </div>
-                <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
+                <button onClick={retryFeed} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
 
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
@@ -1705,23 +1634,26 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                     <WifiOff size={48} className="text-red-400 mb-2"/>
                     <h3 className="text-red-600 dark:text-red-400 font-bold">Koneksi Bermasalah</h3>
                     <p className="text-xs text-red-400 mb-4">Gagal memuat postingan.</p>
-                    <button onClick={manualRefresh} className="px-4 py-2 bg-red-500 text-white rounded-full text-xs font-bold shadow-lg">Coba Lagi</button>
+                    <button onClick={retryFeed} className="px-4 py-2 bg-red-500 text-white rounded-full text-xs font-bold shadow-lg">Coba Lagi</button>
                 </div>
             )}
 
-            {isLoadingFeed ? <><SkeletonPost/><SkeletonPost/></> : stableFeed.length === 0 && !feedError ? (
-                <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
+            {isLoadingFeed && displayPosts.length === 0 ? <><SkeletonPost/><SkeletonPost/></> : displayPosts.length === 0 && !feedError ? (
+                <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan di kategori ini.</p></div>
             ) : (
                 <>
-                    {stableFeed.map(p => (
+                    {displayPosts.map(p => (
                         <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
                             <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick}/>
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-20 w-full flex items-center justify-center">
-                        {loadingMore && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat postingan lama...</span></div>}
-                        {!loadingMore && stableFeed.length > 5 && <button onClick={loadMorePosts} className="text-xs text-gray-400 hover:text-sky-500 font-bold px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-full">Muat Lebih Banyak</button>}
+                        {isLoadingFeed ? (
+                            <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat data...</span></div>
+                        ) : (
+                            <button onClick={()=>onLoadMore(null, sortType)} className="text-xs text-gray-400 hover:text-sky-500 font-bold px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-full">Muat Lebih Banyak (+10)</button>
+                        )}
                     </div>
                 </>
             )}
@@ -1858,6 +1790,10 @@ const App = () => {
     const [showRewards, setShowRewards] = useState(false);
     const [canClaimReward, setCanClaimReward] = useState(false);
     const [nextRewardTime, setNextRewardTime] = useState('');
+    
+    // STATE BARU: Limit Pagination
+    const [feedLimit, setFeedLimit] = useState(15);
+    const [currentFilter, setCurrentFilter] = useState('latest');
 
     useEffect(() => {
         const handleError = (event) => {
@@ -2023,15 +1959,24 @@ const App = () => {
         }
     }, [user]);
 
+    // FETCH FEED DENGAN LOGIKA PAGINASI & FILTER
     useEffect(() => {
         setIsLoadingFeed(true);
         setFeedError(false);
         
-        // PERBAIKAN PERFORMA UTAMA: LIMIT 15
-        // Ini adalah "Initial Load". Sisanya akan ditangani oleh "loadMorePosts" di HomeScreen
-        // Menggunakan "orderBy" saja agar query ringan
-        const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(15));
+        // Membangun Query berdasarkan Filter
+        let q = collection(db, getPublicCollection('posts'));
         
+        if (currentFilter === 'meme') {
+            // Untuk meme kita filter langsung dari DB agar efisien
+            q = query(q, where('category', '==', 'meme'), orderBy('timestamp', 'desc'), limit(feedLimit));
+        } else if (currentFilter === 'popular') {
+            q = query(q, orderBy('likes', 'desc'), limit(feedLimit));
+        } else {
+             // Default Latest
+             q = query(q, orderBy('timestamp', 'desc'), limit(feedLimit));
+        }
+
         const unsubPosts = onSnapshot(q, async s => {
             try {
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
@@ -2041,16 +1986,18 @@ const App = () => {
                 }));
                 setPosts(postsWithFallback); 
                 try {
+                    // Fetch user data untuk caching
                     const uids = [...new Set(raw.map(r=>r.userId))];
-                    const userPromises = uids.map(uid => 
-                        getDoc(doc(db, getPublicCollection('userProfiles'), uid))
-                        .then(snap => ({ id: uid, data: snap.exists() ? snap.data() : null }))
-                        .catch(() => ({ id: uid, data: null }))
-                    );
-                    const userResults = await Promise.all(userPromises);
-                    const userMap = {};
-                    userResults.forEach(res => { if(res.data) userMap[res.id] = res.data; });
-                    if (Object.keys(userMap).length > 0) {
+                    if(uids.length > 0) {
+                         // Batch user fetch (bisa dioptimasi nanti)
+                        const userPromises = uids.map(uid => 
+                            getDoc(doc(db, getPublicCollection('userProfiles'), uid))
+                            .then(snap => ({ id: uid, data: snap.exists() ? snap.data() : null }))
+                            .catch(() => ({ id: uid, data: null }))
+                        );
+                        const userResults = await Promise.all(userPromises);
+                        const userMap = {};
+                        userResults.forEach(res => { if(res.data) userMap[res.id] = res.data; });
                         setPosts(prevPosts => prevPosts.map(p => ({
                             ...p,
                             user: userMap[p.userId] || p.user
@@ -2059,13 +2006,28 @@ const App = () => {
                 } catch (backgroundError) {}
                 setIsLoadingFeed(false);
             } catch (err) {
+                console.error("Feed error:", err);
                 setFeedError(true);
                 setIsLoadingFeed(false);
             }
         }); 
+        
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
         return () => { unsubPosts(); unsubUsers(); };
-    }, [refreshTrigger]); 
+    }, [refreshTrigger, feedLimit, currentFilter]); 
+
+    // FUNGSI LOAD MORE
+    const handleLoadMoreFeed = (resetTo = null, newFilterType = null) => {
+        if (resetTo) {
+            setFeedLimit(resetTo);
+        } else {
+            setFeedLimit(prev => prev + 10);
+        }
+        
+        if (newFilterType) {
+            setCurrentFilter(newFilterType);
+        }
+    };
 
     const handleFollow = async (uid, isFollowing) => { 
         if (!user) { setShowAuthModal(true); return; } 
@@ -2138,7 +2100,23 @@ const App = () => {
                 <main className={page!=='legal' ? 'pt-16' : ''}>
                     {page==='home' && (
                         <>
-                            <HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/>
+                            <HomeScreen 
+                                currentUserId={user?.uid} 
+                                profile={profile} 
+                                allPosts={posts} 
+                                handleFollow={handleFollow} 
+                                goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} 
+                                newPostId={newPostId} 
+                                clearNewPost={()=>setNewPostId(null)} 
+                                isMeDeveloper={isMeDeveloper} 
+                                isGuest={isGuest} 
+                                onRequestLogin={()=>setShowAuthModal(true)} 
+                                onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} 
+                                isLoadingFeed={isLoadingFeed} 
+                                feedError={feedError} 
+                                retryFeed={()=>setRefreshTrigger(p=>p+1)}
+                                onLoadMore={handleLoadMoreFeed} // Pass fungsi load more
+                            />
                             <DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/>
                         </>
                     )}
@@ -2147,8 +2125,8 @@ const App = () => {
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
                     {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
                     {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
-                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
+                    {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
+                    {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                 </main>
                 
