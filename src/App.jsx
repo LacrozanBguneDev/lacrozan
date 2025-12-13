@@ -1285,7 +1285,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 ...form, 
                 files: selectedFiles, 
                 isShort: isVideo, 
-                isAudio: isAudio,
+                isAudio: isAudio, 
                 url: '' 
             });
         }
@@ -1552,17 +1552,52 @@ const TrendingTags = ({ posts, onTagClick }) => {
     );
 };
 
-// --- HOME SCREEN (SCROLL BUTTON DIHAPUS, GANTI PAGINATION) ---
+// --- HOME SCREEN (REFACTORED: MEME SEPARATE FETCH LOGIC) ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
     const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
+    const [memeFeed, setMemeFeed] = useState([]); // Separate Feed for Meme
+    const [isLoadingMeme, setIsLoadingMeme] = useState(false);
+    
     const [isFirstLoad, setIsFirstLoad] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
+    const isMemeMode = sortType === 'meme';
 
-    // Initial Sync dengan Realtime data (Top 20)
+    // 1. Logic Fetch KHUSUS Meme
+    const fetchInitialMemes = async () => {
+        setIsLoadingMeme(true);
+        setMemeFeed([]);
+        try {
+            // Ambil 5 Meme Pertama
+            const q = query(collection(db, getPublicCollection('posts')), where('category', '==', 'meme'), orderBy('timestamp', 'desc'), limit(5));
+            const snapshot = await getDocs(q);
+            const fetchedMemes = await Promise.all(snapshot.docs.map(async d => {
+                const data = d.data();
+                // Fetch user data sederhana untuk meme ini
+                const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
+                return { id: d.id, ...data, user: userSnap.exists() ? userSnap.data() : {username: 'User'} };
+            }));
+            setMemeFeed(fetchedMemes);
+        } catch (e) {
+            console.error("Gagal load meme:", e);
+        }
+        setIsLoadingMeme(false);
+    };
+
+    // Trigger Fetch Meme saat tombol diklik
     useEffect(() => {
-        if (isLoadingFeed) return;
+        if (sortType === 'meme') {
+            fetchInitialMemes();
+        } else {
+            // Reset state meme jika keluar mode meme (opsional, untuk hemat memori)
+            setMemeFeed([]); 
+        }
+    }, [sortType]);
+
+    // 2. Logic Feed Utama (Beranda)
+    useEffect(() => {
+        if (isLoadingFeed || isMemeMode) return; // Jangan jalankan jika sedang loading awal atau mode meme
         
         let basePosts = [...allPosts]; 
         let pinnedPost = null;
@@ -1574,49 +1609,68 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         let processedPosts = [];
         if (sortType === 'latest') processedPosts = basePosts.sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
         else if (sortType === 'popular') processedPosts = basePosts.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
-        else if (sortType === 'meme') processedPosts = basePosts.filter(p => p.category === 'meme').sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
         else {
+            // Random / Default
             if (isFirstLoad || stableFeed.length === 0) processedPosts = shuffleArray([...basePosts]);
-            else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined); // Sync update jika post ada
+            else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined);
             
-            // Tambahkan posts lama yang sudah diload lewat pagination jika ada
+            // Tambahkan posts baru yang mungkin masuk lewat pagination normal (bukan meme)
             const loadedOldPosts = stableFeed.filter(old => !basePosts.find(bp => bp.id === old.id));
             processedPosts = [...processedPosts, ...loadedOldPosts];
         }
 
         if (pinnedPost) processedPosts.unshift(pinnedPost);
         
-        // Hapus duplikat
         const uniquePosts = Array.from(new Set(processedPosts.map(a => a.id)))
              .map(id => processedPosts.find(a => a.id === id));
              
         setStableFeed(uniquePosts);
         setIsFirstLoad(false);
-    }, [allPosts, sortType, newPostId, isLoadingFeed]); 
+    }, [allPosts, sortType, newPostId, isLoadingFeed]); // Hapus dependensi 'isMemeMode' agar tidak loop, ditangani logic if di atas
 
-    // LOAD MORE FUNCTION (Pagination)
+    // 3. Load More Logic (Berbeda utk Meme & Beranda)
     const loadMorePosts = async () => {
-        if (loadingMore || sortType !== 'random') return; // Pagination hanya aktif di mode default/random
+        if (loadingMore) return;
         setLoadingMore(true);
         try {
-            const lastPost = stableFeed[stableFeed.length - 1];
-            if (!lastPost || !lastPost.timestamp) { setLoadingMore(false); return; }
+            if (isMemeMode) {
+                // --- LOGIC LOAD MORE MEME (TERPISAH) ---
+                const lastMeme = memeFeed[memeFeed.length - 1];
+                if (!lastMeme) { setLoadingMore(false); return; }
+                
+                const q = query(
+                    collection(db, getPublicCollection('posts')), 
+                    where('category', '==', 'meme'), 
+                    orderBy('timestamp', 'desc'), 
+                    startAfter(lastMeme.timestamp), 
+                    limit(5)
+                );
+                const snapshot = await getDocs(q);
+                if (!snapshot.empty) {
+                    const newMemes = await Promise.all(snapshot.docs.map(async d => {
+                        const data = d.data();
+                        const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
+                        return { id: d.id, ...data, user: userSnap.exists() ? userSnap.data() : {username: 'User'} };
+                    }));
+                    setMemeFeed(prev => [...prev, ...newMemes]);
+                }
 
-            const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
-            const snapshot = await getDocs(q);
-            
-            if (!snapshot.empty) {
-                const newPosts = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+            } else if (sortType === 'random') {
+                // --- LOGIC LOAD MORE BERANDA ---
+                const lastPost = stableFeed[stableFeed.length - 1];
+                if (!lastPost || !lastPost.timestamp) { setLoadingMore(false); return; }
+
+                const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
+                const snapshot = await getDocs(q);
                 
-                // Fetch User data untuk post baru (Sederhana)
-                // Di app nyata sebaiknya cache user profile terpisah
-                const enrichedPostsPromises = newPosts.map(async (p) => {
-                    const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), p.userId));
-                    return { ...p, user: uSnap.exists() ? uSnap.data() : {username: 'User'} };
-                });
-                
-                const enrichedPosts = await Promise.all(enrichedPostsPromises);
-                setStableFeed(prev => [...prev, ...enrichedPosts]);
+                if (!snapshot.empty) {
+                    const newPosts = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+                    const enrichedPosts = await Promise.all(newPosts.map(async (p) => {
+                        const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), p.userId));
+                        return { ...p, user: uSnap.exists() ? uSnap.data() : {username: 'User'} };
+                    }));
+                    setStableFeed(prev => [...prev, ...enrichedPosts]);
+                }
             }
         } catch (e) {
             console.error("Gagal load more:", e);
@@ -1627,37 +1681,45 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
             const first = entries[0];
-            if (first.isIntersecting && !loadingMore && !isLoadingFeed) {
+            // Load more jika terlihat DAN (bukan loading feed awal ATAU mode meme sudah selesai loading awal)
+            if (first.isIntersecting && !loadingMore && (!isLoadingFeed || (isMemeMode && !isLoadingMeme))) {
                 loadMorePosts();
             }
         }, { threshold: 0.5 });
         const currentBottom = bottomRef.current;
         if (currentBottom) observer.observe(currentBottom);
         return () => { if (currentBottom) observer.unobserve(currentBottom); };
-    }, [stableFeed, loadingMore, isLoadingFeed, sortType]);
+    }, [stableFeed, memeFeed, loadingMore, isLoadingFeed, isLoadingMeme, sortType]);
 
     const manualRefresh = () => { 
-        setIsFirstLoad(true); 
-        setSortType('random'); 
-        setStableFeed([]); // Clear feed
-        clearNewPost(); 
-        retryFeed(); 
+        if (isMemeMode) {
+            fetchInitialMemes();
+        } else {
+            setIsFirstLoad(true); 
+            setSortType('random'); 
+            setStableFeed([]); 
+            clearNewPost(); 
+            retryFeed(); 
+        }
     };
+
+    // Tentukan data mana yang dirender
+    const postsToRender = isMemeMode ? memeFeed : stableFeed;
     
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
             <div className="flex items-center justify-between mb-4 pt-4 sticky top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-2 -mx-4 px-4">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                     <button onClick={() => setSortType('latest')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Terbaru</button>
+                     <button onClick={() => setSortType('random')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='random' || sortType==='latest'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
+                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
                      <button onClick={() => setSortType('popular')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
-                     <button onClick={() => setSortType('meme')} className={`px-4 py-2 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme</button>
                 </div>
                 <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
 
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
 
-            {feedError && (
+            {feedError && !isMemeMode && (
                 <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 rounded-3xl mb-4 text-center">
                     <WifiOff size={48} className="text-red-400 mb-2"/>
                     <h3 className="text-red-600 dark:text-red-400 font-bold">Koneksi Bermasalah</h3>
@@ -1666,19 +1728,20 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                 </div>
             )}
 
-            {isLoadingFeed ? <><SkeletonPost/><SkeletonPost/></> : stableFeed.length === 0 && !feedError ? (
-                <div className="text-center py-10 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700"><p className="text-gray-400 font-bold">Belum ada postingan.</p></div>
+            {(isLoadingFeed && !isMemeMode) || (isLoadingMeme && isMemeMode) ? <><SkeletonPost/><SkeletonPost/></> : postsToRender.length === 0 && !feedError ? (
+                <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700">
+                    <p className="text-gray-400 font-bold">{isMemeMode ? "Belum ada meme lucu nih." : "Belum ada postingan."}</p>
+                </div>
             ) : (
                 <>
-                    {stableFeed.map(p => (
+                    {postsToRender.map(p => (
                         <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
                             <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick}/>
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-20 w-full flex items-center justify-center">
-                        {loadingMore && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat postingan lama...</span></div>}
-                        {!loadingMore && stableFeed.length > 5 && <button onClick={loadMorePosts} className="text-xs text-gray-400 hover:text-sky-500 font-bold px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-full">Muat Lebih Banyak</button>}
+                        {loadingMore && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat lebih banyak...</span></div>}
                     </div>
                 </>
             )}
@@ -1696,41 +1759,129 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
 
+// --- SINGLE POST VIEW (REFACTORED: INDEPENDENT FETCH) ---
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-    // Coba cari di allPosts (Top 20), kalau tidak ada harusnya fetch single post (bisa ditambahkan nanti untuk robustness)
-    const post = allPosts.find(p => p.id === postId);
+    // 1. Coba cari di props allPosts (cache memory)
+    const cachedPost = allPosts.find(p => p.id === postId);
     
-    // Fallback: Jika post tidak ada di feed (karena limit), kita bisa tampilkan skeleton atau fetch (di versi simple ini kita beri pesan)
-    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
-    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan sedang dimuat atau tidak ditemukan.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    // 2. State untuk fetch manual jika tidak ada di cache
+    const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
+    const [loading, setLoading] = useState(!cachedPost);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        // Jika sudah ada di cache, pakai itu.
+        if (cachedPost) {
+            setFetchedPost(cachedPost);
+            setLoading(false);
+            return;
+        }
+        
+        // Jika tidak ada (misal dari link share), FETCH manual
+        const fetchSinglePost = async () => {
+            setLoading(true);
+            try {
+                const docRef = doc(db, getPublicCollection('posts'), postId);
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    // Fetch user juga agar tampilan lengkap
+                    const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
+                    const completePost = {
+                        id: docSnap.id,
+                        ...data,
+                        user: userSnap.exists() ? userSnap.data() : { username: 'User' }
+                    };
+                    setFetchedPost(completePost);
+                } else {
+                    setError(true);
+                }
+            } catch (e) {
+                console.error(e);
+                setError(true);
+            }
+            setLoading(false);
+        };
+        
+        if (postId) fetchSinglePost();
+    }, [postId, cachedPost]);
+
+    const handleBack = () => { 
+        const url = new URL(window.location); 
+        url.searchParams.delete('post'); 
+        window.history.pushState({}, '', url); 
+        goBack(); 
+    };
+
+    if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
+    
+    if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    
     return (
         <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={post} {...props}/>
-            <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
+            <PostItem post={fetchedPost} {...props}/>
+            <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
         </div>
     );
 };
 
-const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
+// --- SEARCH SCREEN (REFACTORED: INDEPENDENT SEARCH) ---
+const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
+    const [isSearching, setIsSearching] = useState(false);
 
+    // Effect khusus untuk search yang LEBIH LUAS dan TIDAK BERGANTUNG pada Home Feed
     useEffect(() => {
-        if (!queryTerm) { setResults({ users: [], posts: [] }); return; }
-        const lower = queryTerm.toLowerCase();
-        const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
-        // Pencarian post saat ini hanya di Top 20 (bisa diupgrade ke Algolia/Full Text Search Firebase extension untuk full DB)
-        const foundPosts = allPosts.filter(p => p.content?.toLowerCase().includes(lower) || p.title?.toLowerCase().includes(lower));
-        setResults({ users: foundUsers, posts: foundPosts });
-    }, [queryTerm, allPosts, allUsers]);
+        if (!queryTerm.trim()) { setResults({ users: [], posts: [] }); return; }
+        
+        const doSearch = async () => {
+            setIsSearching(true);
+            const lower = queryTerm.toLowerCase();
+
+            // 1. Search User (Tetap dari list user global yang di-cache di App, karena user list tidak terlalu besar)
+            const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
+            
+            // 2. Search Post - FETCH BARU yang lebih banyak (misal 50-100 terakhir) untuk difilter
+            // Firestore tidak support native text search, jadi kita fetch batch terbaru lalu filter client-side
+            // Ini memenuhi syarat "tanpa berpatokan sama postingan yang dimuat di beranda"
+            try {
+                const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(100)); // Ambil 100 post terakhir
+                const snap = await getDocs(q);
+                
+                const foundPosts = snap.docs
+                    .map(d => ({id: d.id, ...d.data()}))
+                    .filter(p => 
+                        (p.content && p.content.toLowerCase().includes(lower)) || 
+                        (p.title && p.title.toLowerCase().includes(lower)) ||
+                        (p.category === 'meme' && lower.includes('meme')) // Support keyword "meme"
+                    );
+
+                setResults({ users: foundUsers, posts: foundPosts });
+            } catch (e) {
+                console.error("Search error", e);
+            } finally {
+                setIsSearching(false);
+            }
+        };
+
+        // Debounce sedikit agar tidak spam request
+        const timeout = setTimeout(doSearch, 500);
+        return () => clearTimeout(timeout);
+        
+    }, [queryTerm, allUsers]);
 
     return (
         <div className="max-w-lg mx-auto p-4 pb-24">
             <div className="bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-2 mb-6">
                 <Search className="ml-2 text-gray-400"/><input value={queryTerm} onChange={e=>setQueryTerm(e.target.value)} placeholder="Cari orang, hashtag, atau postingan..." className="flex-1 p-2 outline-none bg-transparent dark:text-white"/>
             </div>
-            {queryTerm && (
+            
+            {isSearching ? (
+                <div className="text-center py-10"><Loader2 className="animate-spin text-sky-500 mx-auto"/></div>
+            ) : queryTerm && (
                 <div className="space-y-6">
                     {results.users.length > 0 && (
                         <div>
@@ -1740,13 +1891,20 @@ const SearchScreen = ({ allPosts, allUsers, profile, handleFollow, goToProfile, 
                     )}
                     {results.posts.length > 0 && (
                         <div>
-                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan</h3>
+                            <h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan Hasil Pencarian</h3>
                             <div className="space-y-3">{results.posts.map(p => ( 
-                                <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex gap-3 cursor-pointer" onClick={()=>{ setTargetPostId(p.id); setPage('view_post'); }}> 
-                                    <div className="flex-1"> <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> <p className="text-xs text-gray-500 line-clamp-2">{p.content}</p> </div> 
+                                <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex gap-3 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition" onClick={()=>{ setTargetPostId(p.id); setPage('view_post'); }}> 
+                                    <div className="flex-1"> 
+                                        <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> 
+                                        <p className="text-xs text-gray-500 line-clamp-2 mb-2">{p.content}</p> 
+                                        {p.mediaUrl && <div className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded inline-block text-gray-500"><ImageIcon size={10} className="inline mr-1"/>Ada Media</div>}
+                                    </div> 
                                 </div> 
                             ))}</div>
                         </div>
+                    )}
+                    {results.users.length === 0 && results.posts.length === 0 && (
+                        <div className="text-center text-gray-400 py-10">Tidak ditemukan hasil untuk "{queryTerm}"</div>
                     )}
                 </div>
             )}
@@ -1871,6 +2029,8 @@ const App = () => {
 
     useEffect(() => { 
         const timer = setTimeout(() => setShowSplash(false), 3000); 
+        // Logic baru: Jika ada param post, prioritas setPage view_post
+        // Ini akan merender SinglePostView yang fetch sendiri datanya
         const p = new URLSearchParams(window.location.search).get('post'); 
         if (p) {
             setTargetPid(p);
@@ -1944,9 +2104,11 @@ const App = () => {
     }, [user]);
 
     useEffect(() => {
+        // Fetch Feed Beranda (Tetap berjalan di background tapi tidak menghambat UI lain)
+        // Kita batasi 20 untuk performa
         setIsLoadingFeed(true);
         setFeedError(false);
-        // FIX PERFORMA: MENGGUNAKAN LIMIT 20 AGAR TIDAK LOAD SEMUA DATA
+        
         const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), async s => {
             try {
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
@@ -2058,7 +2220,7 @@ const App = () => {
                         </>
                     )}
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
-                    {page==='search' && <SearchScreen allPosts={posts} allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
+                    {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                     {page==='leaderboard' && <LeaderboardScreen allUsers={users} />}
                     {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
                     {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
