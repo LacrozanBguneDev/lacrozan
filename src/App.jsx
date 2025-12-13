@@ -1395,7 +1395,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU) ---
+// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU & PERBAIKAN LOADING) ---
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
@@ -1414,16 +1414,33 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const isSelf = viewerUid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
-    // FETCH KHUSUS: Ambil postingan spesifik user ini, tidak bergantung feed global
+    // FETCH KHUSUS: Perbaikan - Menghapus orderBy('timestamp') di Query untuk menghindari Index Error
     useEffect(() => {
         setLoadingLocal(true);
-        // Query khusus user ini, ambil 50 terakhir
-        const q = query(collection(db, getPublicCollection('posts')), where('userId', '==', profileData.uid), orderBy('timestamp', 'desc'), limit(50));
+        // FIX: Hanya ambil berdasarkan userId, urutkan manual di client agar tidak perlu Composite Index
+        const q = query(
+            collection(db, getPublicCollection('posts')), 
+            where('userId', '==', profileData.uid), 
+            limit(50)
+        );
+        
         const unsub = onSnapshot(q, (snap) => {
-            const fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            let fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            
+            // Urutkan manual (Client-Side Sorting) untuk mengatasi masalah Index Firestore
+            fetched.sort((a, b) => {
+                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                return timeB - timeA; // Descending (Terbaru di atas)
+            });
+
             setLocalPosts(fetched);
             setLoadingLocal(false);
+        }, (error) => {
+            console.error("Profile Fetch Error:", error);
+            setLoadingLocal(false); // Pastikan loading mati meskipun error
         });
+        
         return () => unsub();
     }, [profileData.uid]);
 
@@ -1564,20 +1581,34 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const bottomRef = useRef(null);
     const isMemeMode = sortType === 'meme';
 
-    // 1. Logic Fetch KHUSUS Meme
+    // 1. Logic Fetch KHUSUS Meme (PERBAIKAN: Client-side Sorting)
     const fetchInitialMemes = async () => {
         setIsLoadingMeme(true);
         setMemeFeed([]);
         try {
-            // Ambil 5 Meme Pertama
-            const q = query(collection(db, getPublicCollection('posts')), where('category', '==', 'meme'), orderBy('timestamp', 'desc'), limit(5));
+            // FIX: Hapus orderBy('timestamp') dan startAfter() agar tidak perlu Composite Index
+            // Kita ambil batch agak besar (50), lalu filter dan urutkan di client.
+            const q = query(
+                collection(db, getPublicCollection('posts')), 
+                where('category', '==', 'meme'), 
+                limit(50)
+            );
+            
             const snapshot = await getDocs(q);
-            const fetchedMemes = await Promise.all(snapshot.docs.map(async d => {
+            let fetchedMemes = await Promise.all(snapshot.docs.map(async d => {
                 const data = d.data();
                 // Fetch user data sederhana untuk meme ini
                 const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
                 return { id: d.id, ...data, user: userSnap.exists() ? userSnap.data() : {username: 'User'} };
             }));
+
+            // Client-side Sorting (Terbaru paling atas)
+            fetchedMemes.sort((a, b) => {
+                 const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                 const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                 return timeB - timeA;
+            });
+
             setMemeFeed(fetchedMemes);
         } catch (e) {
             console.error("Gagal load meme:", e);
@@ -1634,26 +1665,13 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         setLoadingMore(true);
         try {
             if (isMemeMode) {
-                // --- LOGIC LOAD MORE MEME (TERPISAH) ---
-                const lastMeme = memeFeed[memeFeed.length - 1];
-                if (!lastMeme) { setLoadingMore(false); return; }
-                
-                const q = query(
-                    collection(db, getPublicCollection('posts')), 
-                    where('category', '==', 'meme'), 
-                    orderBy('timestamp', 'desc'), 
-                    startAfter(lastMeme.timestamp), 
-                    limit(5)
-                );
-                const snapshot = await getDocs(q);
-                if (!snapshot.empty) {
-                    const newMemes = await Promise.all(snapshot.docs.map(async d => {
-                        const data = d.data();
-                        const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
-                        return { id: d.id, ...data, user: userSnap.exists() ? userSnap.data() : {username: 'User'} };
-                    }));
-                    setMemeFeed(prev => [...prev, ...newMemes]);
-                }
+                // --- LOGIC LOAD MORE MEME (OFF untuk sementara agar stabil) ---
+                // Karena kita menghapus orderBy di query utama, pagination dengan startAfter(timestamp) tidak akan valid
+                // Solusinya: Load 50 sekaligus di awal (sudah cukup banyak untuk MVP).
+                // Jika ingin load more, perlu client-side pagination yang kompleks. 
+                // Kita biarkan kosong agar tidak error.
+                setLoadingMore(false);
+                return;
 
             } else if (sortType === 'random') {
                 // --- LOGIC LOAD MORE BERANDA ---
