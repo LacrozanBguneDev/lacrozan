@@ -49,10 +49,15 @@ import {
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
-    Bug, ArrowUp, Move, ChevronDown, ChevronUp // Icon tambahan
+    Bug, ArrowUp, Move, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 setLogLevel('silent'); // Default firebase silent
+
+// --- DISCLAIMER KEAMANAN ---
+// Catatan: API Key Firebase memang bersifat publik (client-side). 
+// Keamanan data SEPENUHNYA bergantung pada "Firestore Security Rules" di Console Firebase Anda.
+// Pastikan Anda telah mengatur rules agar user hanya bisa edit data mereka sendiri.
 
 // --- KONSTANTA GLOBAL ---
 const DEVELOPER_EMAIL = 'irhamdika00@gmail.com'; 
@@ -96,17 +101,21 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// 0. SYSTEM LOGGER (BARU: Untuk menangkap error user)
+// 0. SYSTEM LOGGER (FIX: Menangani null user properties agar tidak crash)
 const logSystemError = async (error, context = 'general', user = null) => {
     try {
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
+
+        // SAFE GUARD: Pastikan username tidak dibaca dari null
+        const safeUsername = user ? (user.displayName || user.username || 'Guest') : 'Guest';
+        const safeUid = user ? (user.uid || 'guest') : 'guest';
 
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
             message: error.message || String(error),
             stack: error.stack || '',
             context: context,
-            userId: user?.uid || 'guest',
-            username: user?.displayName || user?.username || 'Guest',
+            userId: safeUid,
+            username: safeUsername,
             timestamp: serverTimestamp(),
             userAgent: navigator.userAgent
         });
@@ -395,13 +404,17 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// --- AVATAR ROBUST ---
+// --- AVATAR ROBUST (FIX: Mencegah error null access) ---
 const Avatar = ({ src, alt, className, fallbackText }) => {
     const [error, setError] = useState(false);
+    
+    // SAFE GUARD: Pastikan fallbackText ada sebelum diakses indexnya
+    const safeFallback = fallbackText ? fallbackText : "?";
+    
     if (!src || error) {
         return (
             <div className={`${className} bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-black text-gray-500 dark:text-gray-400 select-none`}>
-                {fallbackText ? fallbackText[0].toUpperCase() : '?'}
+                {safeFallback[0]?.toUpperCase() || '?'}
             </div>
         );
     }
@@ -758,7 +771,8 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 followers: [],
                 savedPosts: [],
                 lastSeen: serverTimestamp(),
-                reputation: 0 
+                reputation: 0,
+                lastPostTime: 0 // Inisialisasi untuk anti-spam
             });
             onComplete();
         } catch (error) {
@@ -1012,6 +1026,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             if (newLiked) {
                 await updateDoc(ref, { likes: arrayUnion(currentUserId) });
                 // REPUTASI UPDATE: Tambah reputasi author saat di-like
+                // SECURITY UPDATE: Cegah user dapat poin jika like postingan sendiri
                 if (post.userId !== currentUserId) {
                     await updateDoc(authorRef, { reputation: increment(2) }); // +2 Poin per Like
                     sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id);
@@ -1035,13 +1050,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const handleComment = async (e) => {
         e.preventDefault(); 
         if (isGuest) { onRequestLogin(); return; }
+        // CRASH FIX: Guard clause jika profil belum termuat
+        if (!profile) return;
+        
         if (!newComment.trim()) return;
         try {
             const commentData = { 
                 postId: post.id, 
                 userId: currentUserId, 
                 text: newComment, 
-                username: profile.username, 
+                username: profile.username || 'User', // Fallback
                 timestamp: serverTimestamp(),
                 parentId: replyTo ? replyTo.id : null, 
                 replyToUsername: replyTo ? replyTo.username : null
@@ -1051,11 +1069,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
             
             // REPUTASI UPDATE: Tambah reputasi author saat dikomen
+            // SECURITY UPDATE: Cegah user dapat poin jika komen postingan sendiri
             if (post.userId !== currentUserId) {
                 await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(5) }); // +5 Poin per Komen
                 if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id);
             }
-            // Reputasi untuk yang membalas
+            // Reputasi untuk yang membalas (Cegah self-reply farming)
             if (replyTo && replyTo.userId !== currentUserId) {
                 await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(3) }); // +3 Poin balasan
                 sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id);
@@ -1094,7 +1113,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div className="flex justify-between items-start">
                         <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                                <span className="font-bold text-gray-800 dark:text-gray-200">{c.username}</span>
+                                <span className="font-bold text-gray-800 dark:text-gray-200">{c.username || 'User'}</span>
                                 {c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
                             </div>
                             <span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span>
@@ -1201,7 +1220,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             </div>
                         )}
                         <div className="flex gap-2">
-                            <input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
+                            <input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
                             <button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-xl shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button>
                         </div>
                     </form>
@@ -1236,7 +1255,25 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     };
 
     const submit = async (e) => {
-        e.preventDefault(); setLoading(true); setProg(0);
+        e.preventDefault(); 
+        
+        // SECURITY UPDATE: Rate Limiting (Cooldown 60 detik)
+        try {
+            const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), userId));
+            if (userDoc.exists()) {
+                const userData = userDoc.data();
+                const lastPost = userData.lastPostTime || 0;
+                const now = Date.now();
+                if (now - lastPost < 60000) { // 60000 ms = 1 menit
+                    alert("Tunggu 1 menit sebelum memposting lagi. (Anti-Spam)");
+                    return;
+                }
+            }
+        } catch(err) {
+            console.error("Gagal cek cooldown", err);
+        }
+
+        setLoading(true); setProg(0);
         try {
             let mediaUrls = [];
             let mediaType = 'text';
@@ -1277,8 +1314,12 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 category: category, 
                 user: {username, uid: userId}
             });
-            // REPUTASI UPDATE: Bonus Posting Konten
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(10) }); // +10 Poin Posting
+            
+            // REPUTASI UPDATE: Bonus Posting Konten & Update Last Post Time
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { 
+                reputation: increment(10),
+                lastPostTime: Date.now() // Update waktu post terakhir
+            }); 
             
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
@@ -1430,7 +1471,18 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
 // --- TRENDING TAGS ---
 const TrendingTags = ({ posts, onTagClick }) => {
-    const tags = useMemo(() => { const tagCounts = {}; posts.forEach(p => { extractHashtags(p.content).forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); }); return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); }, [posts]);
+    const tags = useMemo(() => { 
+        const tagCounts = {}; 
+        posts.forEach(p => { 
+            // SECURITY UPDATE: Cegah satu postingan spam tag yang sama
+            const uniqueTags = new Set(extractHashtags(p.content));
+            uniqueTags.forEach(tag => { 
+                tagCounts[tag] = (tagCounts[tag] || 0) + 1; 
+            }); 
+        }); 
+        return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); 
+    }, [posts]);
+
     if (tags.length === 0) return null;
     return (
         <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} onClick={()=>onTagClick(tag)} className="px-3 py-1 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-600 dark:text-gray-300 shadow-sm whitespace-nowrap flex items-center gap-1 cursor-pointer hover:bg-sky-50">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div>
@@ -1842,9 +1894,11 @@ const App = () => {
                 await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); 
                 
                 // REPUTASI UPDATE: Tambah Reputasi saat difollow
-                await updateDoc(targetRef, { reputation: increment(5) }); // +5 Poin Follow
-                
-                sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); 
+                // SECURITY UPDATE: Cegah follow diri sendiri (untuk jaga-jaga)
+                if (uid !== profile.uid) {
+                    await updateDoc(targetRef, { reputation: increment(5) }); // +5 Poin Follow
+                    sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); 
+                }
             } 
         } catch (e) { console.error("Gagal update pertemanan", e); } 
     };
