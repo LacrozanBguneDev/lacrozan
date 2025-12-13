@@ -1085,7 +1085,37 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { console.error(error); }
     };
 
-    const handleDelete = async () => { if (confirm(isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?")) { await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); } };
+    // --- FIX: REPUTATION ROLLBACK ON DELETE ---
+    const handleDelete = async () => {
+        // Pesan konfirmasi yang jelas
+        const confirmMsg = isMeDeveloper && !isOwner 
+            ? "⚠️ ADMIN: Hapus postingan orang lain?" 
+            : "Hapus postingan ini? Reputasi yang didapat dari post ini (Likes/Comments/Create) akan DITARIK KEMBALI.";
+
+        if (confirm(confirmMsg)) { 
+            try {
+                // 1. Hitung total reputasi yang harus ditarik kembali
+                // Base Post: 10 poin
+                // Likes: 2 poin * jumlah like
+                // Komentar: 5 poin * jumlah komentar (estimasi kasar, karena kita tidak bisa track siapa yg komen untuk tarik poin mereka, kita tarik poin authornya saja dari "keterlibatan")
+                const earnedReputation = 10 + ((post.likes?.length || 0) * 2) + ((post.commentsCount || 0) * 5);
+                
+                // 2. Tarik kembali reputasi dari user
+                const userRef = doc(db, getPublicCollection('userProfiles'), post.userId);
+                await updateDoc(userRef, {
+                    reputation: increment(-earnedReputation)
+                });
+
+                // 3. Hapus Postingan
+                await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); 
+                
+                alert(`Postingan dihapus. ${earnedReputation} Poin Reputasi ditarik kembali.`);
+            } catch (e) {
+                alert("Gagal menghapus: " + e.message);
+            }
+        } 
+    };
+
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
     const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin! Orang lain bisa membukanya langsung.'); } catch (e) { alert('Gagal menyalin link'); } };
@@ -1220,7 +1250,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             </div>
                         )}
                         <div className="flex gap-2">
-                            <input value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
+                            <input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/>
                             <button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-xl shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button>
                         </div>
                     </form>
@@ -1845,7 +1875,8 @@ const App = () => {
     useEffect(() => {
         setIsLoadingFeed(true);
         setFeedError(false);
-        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts'))), async s => {
+        // FIX PERFORMA: MENGGUNAKAN LIMIT 20 AGAR TIDAK LOAD SEMUA DATA
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), async s => {
             try {
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
                 const postsWithFallback = raw.map(p => ({
