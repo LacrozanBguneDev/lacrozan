@@ -612,9 +612,8 @@ const DeveloperDashboard = ({ onClose }) => {
     useEffect(() => {
         const fetchData = async () => {
             const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
-            // Cukup hitung total post secara kasar (metadata tidak tersedia di client, ambil snapshot limit besar atau estimasi)
-            // Untuk performa, dashboard admin boleh load lebih banyak tapi terpisah
-            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), (snap) => { resolve(snap); unsub(); }); });
+            // FIX: NAIKKAN LIMIT DASHBOARD AGAR DATA TIDAK HILANG (3000)
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(3000)), (snap) => { resolve(snap); unsub(); }); });
             
             const now = new Date();
             const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -1415,12 +1414,23 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
     // FETCH KHUSUS: Ambil postingan spesifik user ini, tidak bergantung feed global
+    // FIX: Hapus orderBy di Firestore Query untuk menghindari masalah index yang membuat loading lama
+    // Kita sort secara manual di client side (JavaScript)
     useEffect(() => {
         setLoadingLocal(true);
-        // Query khusus user ini, ambil 50 terakhir
-        const q = query(collection(db, getPublicCollection('posts')), where('userId', '==', profileData.uid), orderBy('timestamp', 'desc'), limit(50));
+        // FIX: Hanya gunakan where, hapus orderBy di query agar tidak perlu index composite
+        const q = query(collection(db, getPublicCollection('posts')), where('userId', '==', profileData.uid), limit(50));
+        
         const unsub = onSnapshot(q, (snap) => {
-            const fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            let fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            
+            // Manual Sort di Client Side (Lebih aman jika index belum ready)
+            fetched.sort((a, b) => {
+                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                return timeB - timeA; // Descending
+            });
+
             setLocalPosts(fetched);
             setLoadingLocal(false);
         });
@@ -1696,17 +1706,54 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     return <div className="max-w-lg mx-auto p-4 pb-24"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
 
+// FIX: Direct fetch jika postingan tidak ada di feed (Mengatasi "postingan hilang" saat di-share)
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-    // Coba cari di allPosts (Top 20), kalau tidak ada harusnya fetch single post (bisa ditambahkan nanti untuk robustness)
-    const post = allPosts.find(p => p.id === postId);
+    const [fetchedPost, setFetchedPost] = useState(null);
+    const [loading, setLoading] = useState(false);
     
-    // Fallback: Jika post tidak ada di feed (karena limit), kita bisa tampilkan skeleton atau fetch (di versi simple ini kita beri pesan)
+    // Cek apakah ada di feed (cache)
+    const postFromFeed = allPosts.find(p => p.id === postId);
+    const displayPost = postFromFeed || fetchedPost;
+
+    useEffect(() => {
+        if (!postFromFeed && postId) {
+            setLoading(true);
+            const fetchSingle = async () => {
+                try {
+                    const docRef = doc(db, getPublicCollection('posts'), postId);
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        // Fetch user data juga agar lengkap
+                        let userData = { username: 'User' };
+                        if (data.userId) {
+                            try {
+                                const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
+                                if (uSnap.exists()) userData = uSnap.data();
+                            } catch(e) {}
+                        }
+                        setFetchedPost({ id: docSnap.id, ...data, user: userData });
+                    }
+                } catch (e) {
+                    console.error("Gagal fetch post:", e);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchSingle();
+        }
+    }, [postId, postFromFeed]);
+    
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
-    if (!post) return <div className="p-10 text-center text-gray-400 mt-20">Postingan sedang dimuat atau tidak ditemukan.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    
+    if (loading) return <div className="p-10 text-center flex flex-col items-center justify-center h-60"><Loader2 className="animate-spin text-sky-500 mb-2"/> <span className="text-gray-400 text-xs">Mengunduh postingan...</span></div>;
+
+    if (!displayPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4 text-sm">Kembali ke Beranda</button></div>;
+    
     return (
         <div className="max-w-lg mx-auto p-4 pb-40 pt-6">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={post} {...props}/>
+            <PostItem post={displayPost} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Gaada lagi postingan di bawah</div>
         </div>
     );
