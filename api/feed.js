@@ -1,8 +1,8 @@
 import admin from "firebase-admin";
 
 // --- KONFIGURASI KEAMANAN ---
-// API Key yang harus dicocokkan dari request header
-const REQUIRED_API_KEY = process.env.FEED_API_KEY; 
+// 🚨 PERBAIKAN 1: Hapus spasi/new line dari ENV key saat dibaca (BEST PRACTICE)
+const REQUIRED_API_KEY = process.env.FEED_API_KEY ? process.env.FEED_API_KEY.trim() : null; 
 
 // Inisialisasi Firebase (Standard)
 if (!admin.apps.length) {
@@ -44,39 +44,55 @@ function calculatePopularityScore(p) {
 
 
 export default async function handler(req, res) {
-  // --- 0. VALIDASI API KEY (KEAMANAN) ---
-  const apiKey = req.headers['x-api-key'] || req.query.apiKey; // Bisa dari header atau query param (disarankan header)
   
-  // Jika API Key tidak disetel di environment atau tidak cocok dengan yang dikirim
-  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+  // --- 0. VALIDASI API KEY (KEAMANAN) ---
+  
+  // Ambil nilai dari header x-api-key atau query param apiKey
+  const rawApiKey = req.headers['x-api-key'] || req.query.apiKey; 
+  
+  // 🚨 PERBAIKAN 2 & 3: Trim dan Normalisasi Nilai Kunci yang Masuk
+  const clientApiKey = rawApiKey ? String(rawApiKey).trim() : null;
+
+  // Cek jika server tidak punya kunci rahasia (Setup error)
+  if (!REQUIRED_API_KEY) {
+      console.error("SERVER ERROR: REQUIRED_API_KEY tidak disetel di environment.");
+      return res.status(500).json({ error: true, message: "Akses Ditolak: Kunci API server tidak dikonfigurasi." });
+  }
+
+  // Cek jika kunci dari client tidak ada ATAU tidak cocok
+  if (!clientApiKey || clientApiKey !== REQUIRED_API_KEY) {
       // Menggunakan 401 Unauthorized untuk akses yang salah
       return res.status(401).json({
           error: true,
           message: "Akses Ditolak. API Key tidak valid atau hilang."
       });
   }
+  // VALIDASI SUKSES - Lanjutkan ke logika utama
 
   try {
     const mode = req.query.mode || "home";
     const requestedLimit = Math.min(Number(req.query.limit) || 10, 20);
+
+    // ... (sisa kode tetap sama)
     
     // ID User yang sedang login (untuk filtering Home)
     const viewerId = req.query.viewerId || null; 
-    
+
     // ID User yang postingannya akan difilter (untuk mode="user")
     const filterUserId = req.query.userId || null; 
     const q = (req.query.q || "").toLowerCase();
 
     // --- 1. MEMBANGUN QUERY (HEMAT LIMIT) ---
     let query = db.collection(POSTS_PATH);
-
+    // ... (sisa logika query dipertahankan)
+    
     // Kategori Meme / Filter User
     if (mode === "meme") {
       query = query.where("category", "==", "meme");
     } else if (mode === "user" && filterUserId) {
       query = query.where("userId", "==", filterUserId);
     } 
-    
+
     // Order By (Untuk semua mode, kecuali search)
     if (mode !== "search") {
       query = query.orderBy("timestamp", "desc");
@@ -105,7 +121,7 @@ export default async function handler(req, res) {
           p.content?.toLowerCase().includes(q)
       );
     }
-    
+
     // --- 4. FETCH INTERAKSI PENGGUNA (HANYA UNTUK MODE HOME) ---
     let interactionPostIds = new Set();
     if (mode === "home" && viewerId) {
@@ -113,10 +129,10 @@ export default async function handler(req, res) {
         const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
         if (viewerDoc.exists) {
             const data = viewerDoc.data();
-            
+
             const likedPosts = data.likedPosts || {}; 
             const commentedPosts = data.commentedPosts || {}; 
-            
+
             Object.keys(likedPosts).forEach(id => interactionPostIds.add(id));
             Object.keys(commentedPosts).forEach(id => interactionPostIds.add(id));
         }
@@ -156,7 +172,7 @@ export default async function handler(req, res) {
     if (mode === "home") {
         let newPosts = [];
         let oldPosts = [];
-        
+
         // 6a. PISAHKAN: Bagi postingan yang belum pernah diinteraksi dan yang sudah
         if (viewerId && interactionPostIds.size > 0) {
             posts.forEach(p => {
@@ -177,7 +193,7 @@ export default async function handler(req, res) {
         const shuffledOldPosts = shuffleArray(oldPosts);
 
         posts = [...shuffledNewPosts, ...shuffledOldPosts];
-            
+
     } else if (mode === "popular") {
         // 6c. MODE POPULAR: Hitung skor dan urutkan murni (TIDAK ACAK)
         posts = posts
@@ -186,7 +202,7 @@ export default async function handler(req, res) {
                 score: calculatePopularityScore(p) 
             }))
             .sort((a, b) => b.score - a.score);
-            
+
     } 
 
     // Potong sesuai limit asli permintaan user (misal 10)
@@ -203,6 +219,7 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error("FEED ERROR:", e);
+    // Catatan: Error 500 di sini berarti masalah pada Firebase Admin atau logic, BUKAN API Key.
     res.status(500).json({
       error: true,
       message: e.message,
