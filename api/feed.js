@@ -1,13 +1,11 @@
 import admin from "firebase-admin";
 
 // --- KONFIGURASI KEAMANAN ---
-// 🚨 PERBAIKAN 1: Hapus spasi/new line dari ENV key saat dibaca (BEST PRACTICE)
 const REQUIRED_API_KEY = process.env.FEED_API_KEY ? process.env.FEED_API_KEY.trim() : null; 
 
 // Inisialisasi Firebase (Standard)
 if (!admin.apps.length) {
   admin.initializeApp({
-    // Pastikan ini diisi di environment variables saat deployment
     credential: admin.credential.cert(
       JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
     ),
@@ -44,24 +42,17 @@ function calculatePopularityScore(p) {
 
 
 export default async function handler(req, res) {
-  
+
   // --- 0. VALIDASI API KEY (KEAMANAN) ---
-  
-  // Ambil nilai dari header x-api-key atau query param apiKey
   const rawApiKey = req.headers['x-api-key'] || req.query.apiKey; 
-  
-  // 🚨 PERBAIKAN 2 & 3: Trim dan Normalisasi Nilai Kunci yang Masuk
   const clientApiKey = rawApiKey ? String(rawApiKey).trim() : null;
 
-  // Cek jika server tidak punya kunci rahasia (Setup error)
   if (!REQUIRED_API_KEY) {
       console.error("SERVER ERROR: REQUIRED_API_KEY tidak disetel di environment.");
       return res.status(500).json({ error: true, message: "Akses Ditolak: Kunci API server tidak dikonfigurasi." });
   }
 
-  // Cek jika kunci dari client tidak ada ATAU tidak cocok
   if (!clientApiKey || clientApiKey !== REQUIRED_API_KEY) {
-      // Menggunakan 401 Unauthorized untuk akses yang salah
       return res.status(401).json({
           error: true,
           message: "Akses Ditolak. API Key tidak valid atau hilang."
@@ -73,8 +64,9 @@ export default async function handler(req, res) {
     const mode = req.query.mode || "home";
     const requestedLimit = Math.min(Number(req.query.limit) || 10, 20);
 
-    // ... (sisa kode tetap sama)
-    
+    // 💡 PERBAIKAN: Ambil kursor dari frontend untuk pagination
+    const cursor = Number(req.query.cursor) || null; 
+
     // ID User yang sedang login (untuk filtering Home)
     const viewerId = req.query.viewerId || null; 
 
@@ -84,8 +76,7 @@ export default async function handler(req, res) {
 
     // --- 1. MEMBANGUN QUERY (HEMAT LIMIT) ---
     let query = db.collection(POSTS_PATH);
-    // ... (sisa logika query dipertahankan)
-    
+
     // Kategori Meme / Filter User
     if (mode === "meme") {
       query = query.where("category", "==", "meme");
@@ -93,9 +84,16 @@ export default async function handler(req, res) {
       query = query.where("userId", "==", filterUserId);
     } 
 
-    // Order By (Untuk semua mode, kecuali search)
+    // Order By (Wajib sebelum startAfter)
     if (mode !== "search") {
       query = query.orderBy("timestamp", "desc");
+    }
+    
+    // 🚀 PERBAIKAN PAGINATION: Menggunakan kursor yang diterima
+    if (cursor) {
+        // Kursor adalah milidetik, konversi kembali menjadi objek Timestamp Firestore
+        const cursorTimestamp = admin.firestore.Timestamp.fromMillis(cursor);
+        query = query.startAfter(cursorTimestamp);
     }
 
     // --- 2. TENTUKAN BATAS AMBIL DATA (POOL SIZE) ---
@@ -111,6 +109,8 @@ export default async function handler(req, res) {
     let posts = snap.docs.map((d) => ({
       id: d.id,
       ...d.data(),
+      // 💡 PERBAIKAN NaNjam: Pastikan timestamp dikirim sebagai milidetik (angka)
+      timestamp: safeMillis(d.data().timestamp),
     }));
 
     // --- 3. FILTER SEARCH ---
@@ -125,14 +125,12 @@ export default async function handler(req, res) {
     // --- 4. FETCH INTERAKSI PENGGUNA (HANYA UNTUK MODE HOME) ---
     let interactionPostIds = new Set();
     if (mode === "home" && viewerId) {
-        // Hanya fetch 1 dokumen user, tetap hemat
+        // ... (Logika fetch interaksi dipertahankan)
         const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
         if (viewerDoc.exists) {
             const data = viewerDoc.data();
-
             const likedPosts = data.likedPosts || {}; 
             const commentedPosts = data.commentedPosts || {}; 
-
             Object.keys(likedPosts).forEach(id => interactionPostIds.add(id));
             Object.keys(commentedPosts).forEach(id => interactionPostIds.add(id));
         }
@@ -143,7 +141,7 @@ export default async function handler(req, res) {
     const userIds = [...new Set(posts.map((p) => p.userId).filter(Boolean))];
 
     if (userIds.length > 0) {
-      // Parallel fetch user profiles
+      // ... (Logika join user profiles dipertahankan)
       const userSnaps = await Promise.all(
         userIds.map((uid) => db.doc(`${USERS_PATH}/${uid}`).get())
       );
@@ -168,34 +166,29 @@ export default async function handler(req, res) {
     }
 
     // --- 6. FINAL SORTING & ALGORITMA DISCOVERY ---
-
+    // ... (Logika sorting dan shuffle dipertahankan)
     if (mode === "home") {
         let newPosts = [];
         let oldPosts = [];
 
-        // 6a. PISAHKAN: Bagi postingan yang belum pernah diinteraksi dan yang sudah
         if (viewerId && interactionPostIds.size > 0) {
             posts.forEach(p => {
                 if (interactionPostIds.has(p.id)) {
-                    oldPosts.push(p); // Sudah diinteraksi
+                    oldPosts.push(p); 
                 } else {
-                    newPosts.push(p); // Belum diinteraksi (PRIORITAS)
+                    newPosts.push(p); 
                 }
             });
         } else {
-            // Semua postingan dianggap "baru"
             newPosts = posts; 
         }
 
-        // 6b. ACAK DAN GABUNGKAN (FALLBACK): 
-        // Gabungkan: yang belum dilihat (shuffled) + yang sudah dilihat (shuffled)
         const shuffledNewPosts = shuffleArray(newPosts);
         const shuffledOldPosts = shuffleArray(oldPosts);
 
         posts = [...shuffledNewPosts, ...shuffledOldPosts];
 
     } else if (mode === "popular") {
-        // 6c. MODE POPULAR: Hitung skor dan urutkan murni (TIDAK ACAK)
         posts = posts
             .map(p => ({ 
                 ...p, 
@@ -210,16 +203,15 @@ export default async function handler(req, res) {
 
     res.json({
       posts: result,
-      // Cursor untuk pagination
+      // Kursor sekarang diambil langsung dari nilai timestamp (milidetik) yang sudah diformat
       nextCursor:
         result.length > 0
-          ? safeMillis(result[result.length - 1].timestamp)
+          ? result[result.length - 1].timestamp 
           : null,
     });
 
   } catch (e) {
     console.error("FEED ERROR:", e);
-    // Catatan: Error 500 di sini berarti masalah pada Firebase Admin atau logic, BUKAN API Key.
     res.status(500).json({
       error: true,
       message: e.message,
