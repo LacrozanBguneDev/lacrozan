@@ -36,8 +36,7 @@ function calcScore(post) {
 
   if (!post.timestamp) return 0;
 
-  const ageHours =
-    (Date.now() - post.timestamp.toMillis()) / 36e5;
+  const ageHours = (Date.now() - post.timestamp.toMillis()) / 36e5;
 
   let freshness = 0;
   if (ageHours < 6) freshness = 30;
@@ -82,11 +81,8 @@ export default async function handler(req, res) {
     }
 
     const snap = await ref.limit(50).get();
-    if (snap.empty) {
-      return res.json({ posts: [], nextCursor: null });
-    }
 
-    let posts = snap.docs.map(d => {
+    let posts = snap.empty ? [] : snap.docs.map(d => {
       const data = d.data();
 
       return {
@@ -104,14 +100,14 @@ export default async function handler(req, res) {
 
         // === USER (WAJIB UTUH) ===
         user: {
-          userId: data.user?.userId || "",
-          uid: data.user?.uid || "",
-          username: data.user?.username || "",
-          photoURL: data.user?.photoURL || null
+          userId: data.user?.userId || "unknown",
+          uid: data.user?.uid || "unknown",
+          username: data.user?.username || "Anonymous",
+          photoURL: data.user?.photoURL || "/default-profile.png"
         },
 
         // === TIME ===
-        timestamp: data.timestamp
+        timestamp: data.timestamp || admin.firestore.Timestamp.now()
       };
     });
 
@@ -127,18 +123,19 @@ export default async function handler(req, res) {
     /* ========= POPULAR / HOME ========= */
     if (mode === "popular" || mode === "home") {
       posts = posts
-        .map(p => ({ ...p, score: calcScore(p) }))
+        .map(p => ({ ...p, score: calcScore(p) + Math.random() * 5 }))
         .sort((a, b) => b.score - a.score);
     }
 
+    // Ambil slice sesuai limit
     const result = posts.slice(0, Number(limit));
     const nextCursor =
-      result[result.length - 1]?.timestamp?.toMillis() || null;
+      result.length > 0 ? result[result.length - 1].timestamp.toMillis() : null;
 
     res.json({
       posts: result.map(p => ({
         ...p,
-        timestamp: p.timestamp.toMillis() // 🔥 FIX NaN
+        timestamp: p.timestamp.toMillis()
       })),
       nextCursor
     });
