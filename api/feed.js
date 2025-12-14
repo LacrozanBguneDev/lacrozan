@@ -1,8 +1,13 @@
 import admin from "firebase-admin";
 
+// --- KONFIGURASI KEAMANAN ---
+// API Key yang harus dicocokkan dari request header
+const REQUIRED_API_KEY = process.env.FEED_API_KEY; 
+
 // Inisialisasi Firebase (Standard)
 if (!admin.apps.length) {
   admin.initializeApp({
+    // Pastikan ini diisi di environment variables saat deployment
     credential: admin.credential.cert(
       JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
     ),
@@ -22,7 +27,6 @@ function safeMillis(ts) {
 
 // Helper untuk mengacak array (Fisher-Yates Shuffle)
 function shuffleArray(array) {
-  // Buat salinan agar array asli tidak berubah jika ada kebutuhan lain
   const shuffled = [...array]; 
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -35,12 +39,23 @@ function shuffleArray(array) {
 function calculatePopularityScore(p) {
     const likes = Array.isArray(p.likes) ? p.likes.length : 0;
     const comments = p.commentsCount || 0;
-    // Berat like 2x, komen 3x
     return likes * 2 + comments * 3;
 }
 
 
 export default async function handler(req, res) {
+  // --- 0. VALIDASI API KEY (KEAMANAN) ---
+  const apiKey = req.headers['x-api-key'] || req.query.apiKey; // Bisa dari header atau query param (disarankan header)
+  
+  // Jika API Key tidak disetel di environment atau tidak cocok dengan yang dikirim
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+      // Menggunakan 401 Unauthorized untuk akses yang salah
+      return res.status(401).json({
+          error: true,
+          message: "Akses Ditolak. API Key tidak valid atau hilang."
+      });
+  }
+
   try {
     const mode = req.query.mode || "home";
     const requestedLimit = Math.min(Number(req.query.limit) || 10, 20);
@@ -57,10 +72,8 @@ export default async function handler(req, res) {
 
     // Kategori Meme / Filter User
     if (mode === "meme") {
-      // Memerlukan Indeks: category (asc), timestamp (desc)
       query = query.where("category", "==", "meme");
     } else if (mode === "user" && filterUserId) {
-      // Memerlukan Indeks: userId (asc), timestamp (desc)
       query = query.where("userId", "==", filterUserId);
     } 
     
@@ -70,7 +83,6 @@ export default async function handler(req, res) {
     }
 
     // --- 2. TENTUKAN BATAS AMBIL DATA (POOL SIZE) ---
-    // Ambil 5x lipat dari limit untuk pool yang bagus (untuk shuffle dan popularitas)
     const poolMultiplier = (mode === "home" || mode === "popular") ? 5 : 3;
     const fetchLimit = mode === "search" ? 50 : requestedLimit * poolMultiplier;
 
@@ -80,13 +92,12 @@ export default async function handler(req, res) {
       return res.json({ posts: [], nextCursor: null });
     }
 
-    // Mapping awal data posts
     let posts = snap.docs.map((d) => ({
       id: d.id,
       ...d.data(),
     }));
 
-    // --- 3. FILTER SEARCH (Hanya jika mode search) ---
+    // --- 3. FILTER SEARCH ---
     if (mode === "search" && q) {
       posts = posts.filter(
         (p) =>
@@ -98,15 +109,14 @@ export default async function handler(req, res) {
     // --- 4. FETCH INTERAKSI PENGGUNA (HANYA UNTUK MODE HOME) ---
     let interactionPostIds = new Set();
     if (mode === "home" && viewerId) {
+        // Hanya fetch 1 dokumen user, tetap hemat
         const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
         if (viewerDoc.exists) {
             const data = viewerDoc.data();
             
-            // Asumsi field data interaksi ada di dokumen user
             const likedPosts = data.likedPosts || {}; 
             const commentedPosts = data.commentedPosts || {}; 
             
-            // Gabungkan semua ID interaksi
             Object.keys(likedPosts).forEach(id => interactionPostIds.add(id));
             Object.keys(commentedPosts).forEach(id => interactionPostIds.add(id));
         }
@@ -117,6 +127,7 @@ export default async function handler(req, res) {
     const userIds = [...new Set(posts.map((p) => p.userId).filter(Boolean))];
 
     if (userIds.length > 0) {
+      // Parallel fetch user profiles
       const userSnaps = await Promise.all(
         userIds.map((uid) => db.doc(`${USERS_PATH}/${uid}`).get())
       );
@@ -150,24 +161,21 @@ export default async function handler(req, res) {
         if (viewerId && interactionPostIds.size > 0) {
             posts.forEach(p => {
                 if (interactionPostIds.has(p.id)) {
-                    oldPosts.push(p); // Sudah di-like/comment
+                    oldPosts.push(p); // Sudah diinteraksi
                 } else {
-                    newPosts.push(p); // Belum di-like/comment (PRIORITAS)
+                    newPosts.push(p); // Belum diinteraksi (PRIORITAS)
                 }
             });
         } else {
-            // Jika user belum login/belum ada interaksi, semua dianggap "baru"
+            // Semua postingan dianggap "baru"
             newPosts = posts; 
         }
 
         // 6b. ACAK DAN GABUNGKAN (FALLBACK): 
-        // 1. Acak yang belum dilihat (Prioritas)
-        // 2. Acak yang sudah dilihat (Fallback)
+        // Gabungkan: yang belum dilihat (shuffled) + yang sudah dilihat (shuffled)
         const shuffledNewPosts = shuffleArray(newPosts);
         const shuffledOldPosts = shuffleArray(oldPosts);
 
-        // Gabungkan: yang belum dilihat (shuffled) + yang sudah dilihat (shuffled)
-        // Ini memastikan feed tidak akan kosong, tetapi konten baru selalu di atas.
         posts = [...shuffledNewPosts, ...shuffledOldPosts];
             
     } else if (mode === "popular") {
