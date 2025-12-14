@@ -11,14 +11,13 @@ if (!admin.apps.length) {
     });
   } catch (error) {
     console.error("Firebase initialization failed:", error);
-    // Hentikan proses jika gagal inisialisasi
     throw new Error("Failed to initialize Firebase Admin SDK.");
   }
 }
 
 const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
-const USER_PROFILES_PATH = "userProfiles"; // Asumsi path user profile
+const USER_PROFILES_PATH = "userProfiles"; 
 
 // --- HELPER FUNCTIONS ---
 
@@ -28,16 +27,14 @@ function safeMillis(ts) {
 }
 
 /**
- * MENGAMBIL FOTO PROFIL
- * ⚠️ PERINGATAN KERAS: Fungsi ini akan memicu 1 READ PER POST.
- * Jika Anda mengizinkan 20 postingan, Anda memicu 20 reads.
- * SOLUSI: Simpan photoURL di dalam dokumen POST saat dibuat/diupdate.
+ * ⛔ FUNGSI PENGAMBILAN FOTO PROFIL BOROS LIMIT ⛔
+ * Fungsi ini digunakan sebagai fallback, tapi sangat dianjurkan 
+ * untuk menyimpan userPhotoURL langsung di dokumen POST.
  */
 async function fetchUserProfile(userId) {
     if (!userId) return null;
     try {
         const userRef = db.collection(USER_PROFILES_PATH).doc(userId); 
-        // Menggunakan get() memicu 1 read per user
         const userSnap = await userRef.get(); 
         if (userSnap.exists) {
             return userSnap.data().photoURL || null;
@@ -56,32 +53,41 @@ export default async function handler(req, res) {
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const userId = req.query.userId || null;
     
-    // Ambil data lebih banyak dari Firestore untuk di-ranking ulang (Diversity/Keragaman)
-    // Ini meningkatkan biaya read sedikit, tapi meningkatkan kualitas feed.
+    // Ambil data lebih banyak dari Firestore untuk re-ranking dan diversity
     const initialFetchCount = Math.max(limit * 2, 30); 
     
-    // Kursor untuk Pagination (menggunakan nilai 'boostScore' dari postingan sebelumnya)
+    // Kursor: Gunakan nilai 'boostScore' dari postingan sebelumnya
     const startAfterValue = req.query.cursor ? Number(req.query.cursor) : null; 
 
-    // 1. Definisikan Query Firestore (Hemat Limit)
+    // 1. Definisikan Query Firestore (EFISIENSI MAKSIMAL)
     let query = db.collection(POSTS_PATH);
     
-    // Terapkan Filter di Firestore (Memastikan kategori 'meme' muncul)
-    if (mode === "meme") {
-      query = query.where("category", "==", "meme");
-    } else if (mode === "user" && userId) {
-      query = query.where("userId", "==", userId);
-    } 
+    // --- PENYESUAIAN QUERY BERDASARKAN ENDPOINT (MODE) ---
 
-    // Terapkan Sorting Acak/Prioritas (Algoritma Cepat)
-    // ASUMSI: Postingan memiliki field 'boostScore' (timestamp + randomness)
+    if (mode === "meme") {
+      // Endpoint Khusus Kategori Meme: Hanya ambil postingan kategori 'meme'
+      query = query.where("category", "==", "meme");
+      
+    } else if (mode === "user" && userId) {
+      // Endpoint Postingan Profile User: Hanya ambil postingan dari userId tertentu
+      query = query.where("userId", "==", userId);
+      
+    } else if (mode === "search") {
+      // Endpoint Search: Firestore tidak mendukung pencarian teks penuh yang kuat.
+      // Kami mengembalikan postingan home (berdasarkan boostScore) sebagai fallback 
+      // untuk menghemat limit, karena pencarian teks penuh harus menggunakan Algolia/Elasticsearch.
+      // Jika Anda ingin filter di sini, Anda harus menggunakan where() pada field yang diindeks.
+      // Contoh filter title: query = query.where("titleKeywords", "array-contains", q); 
+    } 
+    
+    // Terapkan Sorting: Selalu berdasarkan boostScore untuk Aktualitas dan Randomness
     query = query.orderBy("boostScore", "desc");
 
     if (startAfterValue) {
         query = query.startAfter(startAfterValue); 
     }
 
-    // Ambil data dari Firestore
+    // Ambil sejumlah data dari Firestore (hanya yang diperlukan untuk diversity filter)
     query = query.limit(initialFetchCount);
     
     let snap = await query.get();
@@ -97,68 +103,77 @@ export default async function handler(req, res) {
 
     // --- ALGORITMA RANKING DAN DIVERSITY (DI SISI BACKEND) ---
 
-    // 2. Kalkulasi Final Score (Menggabungkan Aktualitas dan Popularitas)
-    posts = posts.map(p => {
-        // Fallback untuk Popularitas: (likes * 2) + (comments * 3)
-        const engagementScore = p.engagementScore || 
-                                ((Array.isArray(p.likes) ? p.likes.length : 0) * 2) + 
-                                (p.commentsCount || 0) * 3;
-        
-        const boostScore = p.boostScore || safeMillis(p.timestamp); 
-        
-        // Bobot: 70% BoostScore (Recency/Random), 30% Popularitas
-        const FINAL_SCORE_BOOST = 0.7; 
-        const finalScore = (boostScore * FINAL_SCORE_BOOST) + (engagementScore * (1 - FINAL_SCORE_BOOST)); 
-
-        return { 
-            ...p, 
-            finalScore: finalScore,
-        };
-    });
-
-    // 3. Re-Ranking Awal (Berdasarkan Final Score)
-    posts.sort((a, b) => b.finalScore - a.finalScore);
-
-    // 4. Keragaman (Diversity Filter - Mencegah Monoton)
-    const finalResult = [];
-    const recentCategories = [];
-    const recentUserIds = [];
-    const DIVERSITY_WINDOW = 3; // Hanya izinkan 1 post per kategori/user dalam 3 post terakhir
-
-    for (const post of posts) {
-        if (finalResult.length >= limit) break;
-
-        const isCategoryMonotonous = recentCategories.includes(post.category);
-        const isUserMonotonous = recentUserIds.includes(post.userId);
-
-        // Jika postingan ini TIDAK membuat feed monoton
-        if (!isCategoryMonotonous && !isUserMonotonous) {
-            finalResult.push(post);
+    // 2. Kalkulasi Final Score (Hanya di mode 'home' atau 'popular')
+    if (mode === "home" || mode === "popular") {
+        posts = posts.map(p => {
+            // Gunakan engagementScore yang sudah dihitung oleh Cloud Functions
+            const engagementScore = p.engagementScore || 
+                                    ((Array.isArray(p.likes) ? p.likes.length : 0) * 2) + 
+                                    (p.commentsCount || 0) * 3;
             
-            // Tambahkan ke window diversity
-            recentCategories.push(post.category);
-            recentUserIds.push(post.userId);
+            const boostScore = p.boostScore || safeMillis(p.timestamp); 
+            
+            // Bobot: 70% BoostScore (Aktualitas/Random), 30% Popularitas
+            const FINAL_SCORE_BOOST = 0.7; 
+            const finalScore = (boostScore * FINAL_SCORE_BOOST) + (engagementScore * (1 - FINAL_SCORE_BOOST)); 
+    
+            return { 
+                ...p, 
+                finalScore: finalScore,
+            };
+        });
+    
+        // 3. Re-Ranking Awal (Berdasarkan Final Score)
+        posts.sort((a, b) => b.finalScore - a.finalScore);
+    }
 
-            // Jaga agar window hanya berukuran DIVERSITY_WINDOW
-            if (recentCategories.length > DIVERSITY_WINDOW) {
-                recentCategories.shift();
-                recentUserIds.shift();
+
+    // 4. Keragaman (Diversity Filter - Mencegah Monoton pada mode 'home')
+    const finalResult = [];
+    if (mode === "home") {
+        const recentCategories = [];
+        const recentUserIds = [];
+        const DIVERSITY_WINDOW = 3; 
+
+        for (const post of posts) {
+            if (finalResult.length >= limit) break;
+
+            const isCategoryMonotonous = recentCategories.includes(post.category);
+            const isUserMonotonous = recentUserIds.includes(post.userId);
+
+            if (!isCategoryMonotonous && !isUserMonotonous) {
+                finalResult.push(post);
+                
+                recentCategories.push(post.category);
+                recentUserIds.push(post.userId);
+
+                if (recentCategories.length > DIVERSITY_WINDOW) {
+                    recentCategories.shift();
+                    recentUserIds.shift();
+                }
             }
         }
+    } else {
+        // Untuk mode 'meme' atau 'user', tidak perlu diversity filter, cukup ambil 'limit' teratas
+        finalResult.push(...posts.slice(0, limit));
     }
     
-    // --- AKHIR ALGORITMA RANKING DAN DIVERSITY ---
+    // --- AKHIR ALGORITMA ---
 
-    // Tentukan nextCursor: Ambil boostScore dari item TERAKHIR dari snap.docs 
-    // agar kursor konsisten untuk permintaan berikutnya.
+    // Tentukan nextCursor: Ambil boostScore/timestamp dari dokumen TERAKHIR yang dibaca dari Firestore
     const lastDoc = snap.docs[snap.docs.length - 1];
     let nextCursor = lastDoc ? lastDoc.data().boostScore || safeMillis(lastDoc.data().timestamp) : null;
 
-    // 5. Ambil Data Profil User (Langkah Boros - HARUS DIOPTIMALKAN!)
+    // 5. Ambil Data Profil User (Dioptimalkan jika userPhotoURL sudah ada di dokumen post)
     const postsWithProfiles = await Promise.all(
         finalResult.map(async post => {
-            // Ini memicu banyak read!
-            const userPhotoURL = await fetchUserProfile(post.userId); 
+            // Cek dulu apakah userPhotoURL sudah ada di dokumen post (Optimal)
+            let userPhotoURL = post.userPhotoURL; 
+            
+            if (!userPhotoURL) {
+                // FALLBACK: Ambil dari userProfiles (BOROS LIMIT)
+                userPhotoURL = await fetchUserProfile(post.userId); 
+            }
             return { ...post, userPhotoURL: userPhotoURL };
         })
     );
@@ -167,13 +182,12 @@ export default async function handler(req, res) {
     // 6. Kirim Respons
     res.json({
       posts: postsWithProfiles,
-      // nextCursor akan menjadi 'boostScore' terakhir yang akan digunakan 
-      // di permintaan berikutnya sebagai 'startAfterValue'
       nextCursor: nextCursor,
     });
 
   } catch (e) {
     console.error("FEED ERROR:", e);
+    // Penanganan error yang lebih baik untuk mencegah crash
     res.status(500).json({
       error: true,
       message: e.message,
