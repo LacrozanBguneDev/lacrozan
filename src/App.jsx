@@ -71,8 +71,14 @@ const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744"
 
 // --- KONFIGURASI API FEED BARU (MIGRASI) ---
 // Variabel Lingkungan Wajib:
-const API_ENDPOINT = typeof process !== 'undefined' && process.env.REACT_APP_API_ENDPOINT ? process.env.REACT_APP_API_ENDPOINT : 'https://app.bgunenet.my.id/api/feed';
-const API_KEY = typeof process !== 'undefined' && process.env.REACT_APP_FEED_API_KEY ? process.env.REACT_APP_FEED_API_KEY : 'bgune-public-key'; // Fallback key jika env tidak ada
+const API_ENDPOINT = typeof process !== 'undefined' && process.env.REACT_APP_API_ENDPOINT
+  ? process.env.REACT_APP_API_ENDPOINT
+  : 'https://app.bgunenet.my.id/api/feed';
+
+// ⚠️ Ganti supaya cocok dengan backend yang pakai FEED_API_KEY
+const API_KEY = typeof process !== 'undefined' && process.env.FEED_API_KEY
+  ? process.env.FEED_API_KEY
+  : 'bgune-public-key'; // fallback key yang sama dengan backend
 
 // --- KUNCI VAPID BARU (FIX) ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
