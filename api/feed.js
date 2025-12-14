@@ -22,46 +22,58 @@ function safeMillis(ts) {
 
 // Helper untuk mengacak array (Fisher-Yates Shuffle)
 function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
+  // Buat salinan agar array asli tidak berubah jika ada kebutuhan lain
+  const shuffled = [...array]; 
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return array;
+  return shuffled;
 }
+
+// Helper untuk menghitung skor popularitas
+function calculatePopularityScore(p) {
+    const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+    const comments = p.commentsCount || 0;
+    // Berat like 2x, komen 3x
+    return likes * 2 + comments * 3;
+}
+
 
 export default async function handler(req, res) {
   try {
     const mode = req.query.mode || "home";
     const requestedLimit = Math.min(Number(req.query.limit) || 10, 20);
-    const userId = req.query.userId || null;
+    
+    // ID User yang sedang login (untuk filtering Home)
+    const viewerId = req.query.viewerId || null; 
+    
+    // ID User yang postingannya akan difilter (untuk mode="user")
+    const filterUserId = req.query.userId || null; 
     const q = (req.query.q || "").toLowerCase();
 
     // --- 1. MEMBANGUN QUERY (HEMAT LIMIT) ---
-    // Kita filter LANGSUNG di database, bukan di javascript.
-    // Ini menghemat read operation.
-
     let query = db.collection(POSTS_PATH);
 
     // Kategori Meme / Filter User
     if (mode === "meme") {
+      // Memerlukan Indeks: category (asc), timestamp (desc)
       query = query.where("category", "==", "meme");
-    } else if (mode === "user" && userId) {
-      query = query.where("userId", "==", userId);
-    }
-
-    // Untuk search, Firestore terbatas. Kita terpaksa fetch agak banyak lalu filter manual.
-    // Tapi untuk mode lain, kita sorting berdasarkan waktu dulu.
+    } else if (mode === "user" && filterUserId) {
+      // Memerlukan Indeks: userId (asc), timestamp (desc)
+      query = query.where("userId", "==", filterUserId);
+    } 
+    
+    // Order By (Untuk semua mode, kecuali search)
     if (mode !== "search") {
       query = query.orderBy("timestamp", "desc");
     }
 
-    // --- 2. ALGORITMA "FRESH POOL" ---
-    // Agar tidak monoton, kita ambil data LEBIH BANYAK dari limit yang diminta (multiplier 3x).
-    // Contoh: User minta 10, kita ambil 30 teratas.
-    // Nanti 30 itu kita acak, lalu ambil 10.
-    // Efek: Tetap postingan baru (fresh), tapi urutannya acak (tidak membosankan).
-    const fetchLimit = mode === "search" ? 50 : requestedLimit * 3;
-    
+    // --- 2. TENTUKAN BATAS AMBIL DATA (POOL SIZE) ---
+    // Ambil 5x lipat dari limit untuk pool yang bagus (untuk shuffle dan popularitas)
+    const poolMultiplier = (mode === "home" || mode === "popular") ? 5 : 3;
+    const fetchLimit = mode === "search" ? 50 : requestedLimit * poolMultiplier;
+
     const snap = await query.limit(fetchLimit).get();
 
     if (snap.empty) {
@@ -82,18 +94,33 @@ export default async function handler(req, res) {
           p.content?.toLowerCase().includes(q)
       );
     }
+    
+    // --- 4. FETCH INTERAKSI PENGGUNA (HANYA UNTUK MODE HOME) ---
+    let interactionPostIds = new Set();
+    if (mode === "home" && viewerId) {
+        const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+        if (viewerDoc.exists) {
+            const data = viewerDoc.data();
+            
+            // Asumsi field data interaksi ada di dokumen user
+            const likedPosts = data.likedPosts || {}; 
+            const commentedPosts = data.commentedPosts || {}; 
+            
+            // Gabungkan semua ID interaksi
+            Object.keys(likedPosts).forEach(id => interactionPostIds.add(id));
+            Object.keys(commentedPosts).forEach(id => interactionPostIds.add(id));
+        }
+    }
 
-    // --- 4. JOIN USER PROFILES (Efisien) ---
-    // Ambil semua userId unik dari postingan yang sudah didapat
+
+    // --- 5. JOIN USER PROFILES (Efisien) ---
     const userIds = [...new Set(posts.map((p) => p.userId).filter(Boolean))];
 
     if (userIds.length > 0) {
-      // Fetch semua user sekaligus (Parallel) untuk hemat waktu
       const userSnaps = await Promise.all(
         userIds.map((uid) => db.doc(`${USERS_PATH}/${uid}`).get())
       );
 
-      // Buat "Kamus" User: { userId: { photoURL: '...', name: '...' } }
       const userMap = {};
       userSnaps.forEach((doc) => {
         if (doc.exists) {
@@ -101,53 +128,65 @@ export default async function handler(req, res) {
         }
       });
 
-      // Tempelkan data user ke postingan
       posts = posts.map((p) => {
         const userData = userMap[p.userId] || {};
         return {
           ...p,
           user: {
-            photoURL: userData.photoURL || null, // Ambil foto
-            username: userData.username || "Unknown", // Ambil nama jika ada
-            // Tambahkan field user lain jika perlu
+            photoURL: userData.photoURL || null, 
+            username: userData.username || "Unknown", 
           },
         };
       });
     }
 
-    // --- 5. FINAL SORTING & ALGORITMA ---
+    // --- 6. FINAL SORTING & ALGORITMA DISCOVERY ---
 
-    if (mode === "home" || mode === "popular" || mode === "meme") {
-      // Di sini logikanya: Kita punya kolam postingan baru (misal 30 biji).
-      // Kita acak posisinya agar tidak monoton.
-      // Jika ingin logic "score" (likes/comments) tetap ada tapi ada faktor acak:
-      
-      posts = posts.map(p => {
-          const likes = Array.isArray(p.likes) ? p.likes.length : 0;
-          const comments = p.commentsCount || 0;
-          // Score dasar
-          let score = likes * 2 + comments * 3;
-          
-          // FAKTOR ACAK: Tambahkan angka random besar agar urutan berubah-ubah
-          // tapi postingan dengan like SANGAT banyak tetap punya peluang di atas.
-          const randomBoost = Math.random() * 20; 
-          
-          return { ...p, finalScore: score + randomBoost };
-      });
+    if (mode === "home") {
+        let newPosts = [];
+        let oldPosts = [];
+        
+        // 6a. PISAHKAN: Bagi postingan yang belum pernah diinteraksi dan yang sudah
+        if (viewerId && interactionPostIds.size > 0) {
+            posts.forEach(p => {
+                if (interactionPostIds.has(p.id)) {
+                    oldPosts.push(p); // Sudah di-like/comment
+                } else {
+                    newPosts.push(p); // Belum di-like/comment (PRIORITAS)
+                }
+            });
+        } else {
+            // Jika user belum login/belum ada interaksi, semua dianggap "baru"
+            newPosts = posts; 
+        }
 
-      // Sort berdasarkan score campuran tadi
-      posts.sort((a, b) => b.finalScore - a.finalScore);
-      
-      // Opsi alternatif: Murni acak (Shuffle) dari kolam data terbaru
-      // posts = shuffleArray(posts); 
-    }
+        // 6b. ACAK DAN GABUNGKAN (FALLBACK): 
+        // 1. Acak yang belum dilihat (Prioritas)
+        // 2. Acak yang sudah dilihat (Fallback)
+        const shuffledNewPosts = shuffleArray(newPosts);
+        const shuffledOldPosts = shuffleArray(oldPosts);
+
+        // Gabungkan: yang belum dilihat (shuffled) + yang sudah dilihat (shuffled)
+        // Ini memastikan feed tidak akan kosong, tetapi konten baru selalu di atas.
+        posts = [...shuffledNewPosts, ...shuffledOldPosts];
+            
+    } else if (mode === "popular") {
+        // 6c. MODE POPULAR: Hitung skor dan urutkan murni (TIDAK ACAK)
+        posts = posts
+            .map(p => ({ 
+                ...p, 
+                score: calculatePopularityScore(p) 
+            }))
+            .sort((a, b) => b.score - a.score);
+            
+    } 
 
     // Potong sesuai limit asli permintaan user (misal 10)
     const result = posts.slice(0, requestedLimit);
 
     res.json({
       posts: result,
-      // Cursor untuk pagination (ambil timestamp dari item terakhir)
+      // Cursor untuk pagination
       nextCursor:
         result.length > 0
           ? safeMillis(result[result.length - 1].timestamp)
