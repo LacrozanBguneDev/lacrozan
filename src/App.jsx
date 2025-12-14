@@ -68,10 +68,6 @@ const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029VbCftn6Dp2QEbNHkm744";
 
-// --- KONFIGURASI BACKEND API (NEW) ---
-const API_KEY = "AljdkanMxbkkrsrsfssfktkkgkfkfkgkfzkfzkfgdfkkwotstosmgsmfxlgclhdjdlgxkfkfzkflflr";
-const API_BASE_URL = "https://app.bgunenet.my.id/api/feed";
-
 // --- KUNCI VAPID BARU (FIX) ---
 const VAPID_KEY = "BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE"; 
 
@@ -106,42 +102,6 @@ try {
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
-
-// --- FUNGSI FETCH API BACKEND (NEW) ---
-const fetchApi = async (mode, params = {}, cursor = null) => {
-    try {
-        const url = new URL(API_BASE_URL);
-        url.searchParams.append("mode", mode);
-        url.searchParams.append("limit", "10");
-        
-        if (cursor) {
-            url.searchParams.append("cursor", cursor);
-        }
-
-        Object.keys(params).forEach(key => {
-            if (params[key]) url.searchParams.append(key, params[key]);
-        });
-
-        // console.log(`[API] Fetching ${mode}...`, url.toString());
-
-        const response = await fetch(url.toString(), {
-            method: "GET",
-            headers: {
-                "x-api-key": API_KEY
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error(`API Error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        return data; // Expected: { posts: [], nextCursor: "..." }
-    } catch (error) {
-        console.error("[API] Fetch Failed:", error);
-        throw error;
-    }
-};
 
 // 0. SYSTEM LOGGER (FIX: Menangani null user properties agar tidak crash)
 const logSystemError = async (error, context = 'general', user = null) => {
@@ -1435,7 +1395,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     );
 };
 
-// --- PROFILE SCREEN (MIGRATED TO API) ---
+// --- PROFILE SCREEN (DENGAN VISUAL RANK BARU & PERBAIKAN LOADING) ---
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData.username); 
@@ -1446,7 +1406,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const [mood, setMood] = useState(profileData.mood || '');
     const [isEditingMood, setIsEditingMood] = useState(false);
     
-    // NEW: Local Posts via API
+    // NEW: Local Posts khusus untuk Profile ini (Solusi "Postingan Hilang")
     const [localPosts, setLocalPosts] = useState([]);
     const [loadingLocal, setLoadingLocal] = useState(true);
 
@@ -1454,29 +1414,34 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const isSelf = viewerUid === profileData.uid; 
     const isDev = profileData.email === DEVELOPER_EMAIL;
 
-    // FETCH KHUSUS: Menggunakan API /api/feed?mode=profile&userId=UID
+    // FETCH KHUSUS: Perbaikan - Menghapus orderBy('timestamp') di Query untuk menghindari Index Error
     useEffect(() => {
         setLoadingLocal(true);
-        const fetchProfilePosts = async () => {
-            try {
-                // MENGGUNAKAN API BACKEND
-                const data = await fetchApi('profile', { userId: profileData.uid });
-                
-                // Jika API sudah mengembalikan posts, gunakan langsung
-                let fetched = (data.posts || []).map(p => ({
-                    ...p, 
-                    user: profileData // Attach user data manual agar aman
-                }));
-                
-                setLocalPosts(fetched);
-            } catch (err) {
-                console.error("Gagal load profile posts:", err);
-            } finally {
-                setLoadingLocal(false);
-            }
-        };
+        // FIX: Hanya ambil berdasarkan userId, urutkan manual di client agar tidak perlu Composite Index
+        const q = query(
+            collection(db, getPublicCollection('posts')), 
+            where('userId', '==', profileData.uid), 
+            limit(50)
+        );
+        
+        const unsub = onSnapshot(q, (snap) => {
+            let fetched = snap.docs.map(d => ({id: d.id, ...d.data(), user: profileData}));
+            
+            // Urutkan manual (Client-Side Sorting) untuk mengatasi masalah Index Firestore
+            fetched.sort((a, b) => {
+                const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                return timeB - timeA; // Descending (Terbaru di atas)
+            });
 
-        fetchProfilePosts();
+            setLocalPosts(fetched);
+            setLoadingLocal(false);
+        }, (error) => {
+            console.error("Profile Fetch Error:", error);
+            setLoadingLocal(false); // Pastikan loading mati meskipun error
+        });
+        
+        return () => unsub();
     }, [profileData.uid]);
 
     const followersCount = (profileData.followers || []).length;
@@ -1587,7 +1552,6 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 // --- TRENDING TAGS ---
 const TrendingTags = ({ posts, onTagClick }) => {
     const tags = useMemo(() => { 
-        if(!posts || posts.length === 0) return [];
         const tagCounts = {}; 
         posts.forEach(p => { 
             // SECURITY UPDATE: Cegah satu postingan spam tag yang sama
@@ -1605,85 +1569,160 @@ const TrendingTags = ({ posts, onTagClick }) => {
     );
 };
 
-// --- HOME SCREEN (MIGRATED TO API) ---
+// --- HOME SCREEN (REFACTORED: MEME SEPARATE FETCH LOGIC) ---
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
-    const [sortType, setSortType] = useState('random'); // random=Home
+    const [sortType, setSortType] = useState('random'); 
     const [stableFeed, setStableFeed] = useState([]);
+    const [memeFeed, setMemeFeed] = useState([]); // Separate Feed for Meme
+    const [isLoadingMeme, setIsLoadingMeme] = useState(false);
+    
+    const [isFirstLoad, setIsFirstLoad] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const bottomRef = useRef(null);
-    const [cursor, setCursor] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const isMemeMode = sortType === 'meme';
 
-    // MENGGANTI ON_SNAPSHOT DENGAN FETCH API BERDASARKAN SORT_TYPE
-    useEffect(() => {
-        const loadFeed = async () => {
-            setIsLoading(true);
-            setStableFeed([]);
-            setCursor(null);
-            
-            let mode = 'home';
-            if (sortType === 'popular') mode = 'popular';
-            if (sortType === 'meme') mode = 'meme';
-
-            try {
-                // FETCH UTAMA DARI BACKEND
-                const data = await fetchApi(mode);
-                setStableFeed(data.posts || []);
-                setCursor(data.nextCursor);
-            } catch (e) {
-                console.error("Feed API Error:", e);
-                // Biarkan UI menampilkan error jika perlu, atau gunakan retry
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        loadFeed();
-    }, [sortType, retryFeed]); // Trigger saat tab berubah atau tombol retry ditekan
-
-    // LOAD MORE DENGAN CURSOR API
-    const loadMorePosts = async () => {
-        if (loadingMore || !cursor) return;
-        setLoadingMore(true);
-
-        let mode = 'home';
-        if (sortType === 'popular') mode = 'popular';
-        if (sortType === 'meme') mode = 'meme';
-
+    // 1. Logic Fetch KHUSUS Meme (PERBAIKAN: Client-side Sorting)
+    const fetchInitialMemes = async () => {
+        setIsLoadingMeme(true);
+        setMemeFeed([]);
         try {
-            const data = await fetchApi(mode, {}, cursor); // Kirim cursor ke backend
-            if (data.posts && data.posts.length > 0) {
-                setStableFeed(prev => [...prev, ...data.posts]);
-                setCursor(data.nextCursor); // Update cursor untuk page berikutnya
-            } else {
-                setCursor(null); // End of list
+            // FIX: Hapus orderBy('timestamp') dan startAfter() agar tidak perlu Composite Index
+            // Kita ambil batch agak besar (50), lalu filter dan urutkan di client.
+            const q = query(
+                collection(db, getPublicCollection('posts')), 
+                where('category', '==', 'meme'), 
+                limit(50)
+            );
+            
+            const snapshot = await getDocs(q);
+            let fetchedMemes = await Promise.all(snapshot.docs.map(async d => {
+                const data = d.data();
+                // Fetch user data sederhana untuk meme ini
+                const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
+                return { id: d.id, ...data, user: userSnap.exists() ? userSnap.data() : {username: 'User'} };
+            }));
+
+            // Client-side Sorting (Terbaru paling atas)
+            fetchedMemes.sort((a, b) => {
+                 const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+                 const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+                 return timeB - timeA;
+            });
+
+            setMemeFeed(fetchedMemes);
+        } catch (e) {
+            console.error("Gagal load meme:", e);
+        }
+        setIsLoadingMeme(false);
+    };
+
+    // Trigger Fetch Meme saat tombol diklik
+    useEffect(() => {
+        if (sortType === 'meme') {
+            fetchInitialMemes();
+        } else {
+            // Reset state meme jika keluar mode meme (opsional, untuk hemat memori)
+            setMemeFeed([]); 
+        }
+    }, [sortType]);
+
+    // 2. Logic Feed Utama (Beranda)
+    useEffect(() => {
+        if (isLoadingFeed || isMemeMode) return; // Jangan jalankan jika sedang loading awal atau mode meme
+        
+        let basePosts = [...allPosts]; 
+        let pinnedPost = null;
+        if (newPostId) {
+            const idx = basePosts.findIndex(p => p.id === newPostId);
+            if (idx > -1) { pinnedPost = basePosts[idx]; basePosts.splice(idx, 1); }
+        }
+
+        let processedPosts = [];
+        if (sortType === 'latest') processedPosts = basePosts.sort((a, b) => (b.timestamp?.toMillis || 0) - (a.timestamp?.toMillis || 0));
+        else if (sortType === 'popular') processedPosts = basePosts.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+        else {
+            // Random / Default
+            if (isFirstLoad || stableFeed.length === 0) processedPosts = shuffleArray([...basePosts]);
+            else processedPosts = stableFeed.map(oldPost => basePosts.find(p => p.id === oldPost.id)).filter(p => p !== undefined);
+            
+            // Tambahkan posts baru yang mungkin masuk lewat pagination normal (bukan meme)
+            const loadedOldPosts = stableFeed.filter(old => !basePosts.find(bp => bp.id === old.id));
+            processedPosts = [...processedPosts, ...loadedOldPosts];
+        }
+
+        if (pinnedPost) processedPosts.unshift(pinnedPost);
+        
+        const uniquePosts = Array.from(new Set(processedPosts.map(a => a.id)))
+             .map(id => processedPosts.find(a => a.id === id));
+             
+        setStableFeed(uniquePosts);
+        setIsFirstLoad(false);
+    }, [allPosts, sortType, newPostId, isLoadingFeed]); // Hapus dependensi 'isMemeMode' agar tidak loop, ditangani logic if di atas
+
+    // 3. Load More Logic (Berbeda utk Meme & Beranda)
+    const loadMorePosts = async () => {
+        if (loadingMore) return;
+        setLoadingMore(true);
+        try {
+            if (isMemeMode) {
+                // --- LOGIC LOAD MORE MEME (OFF untuk sementara agar stabil) ---
+                // Karena kita menghapus orderBy di query utama, pagination dengan startAfter(timestamp) tidak akan valid
+                // Solusinya: Load 50 sekaligus di awal (sudah cukup banyak untuk MVP).
+                // Jika ingin load more, perlu client-side pagination yang kompleks. 
+                // Kita biarkan kosong agar tidak error.
+                setLoadingMore(false);
+                return;
+
+            } else if (sortType === 'random') {
+                // --- LOGIC LOAD MORE BERANDA ---
+                const lastPost = stableFeed[stableFeed.length - 1];
+                if (!lastPost || !lastPost.timestamp) { setLoadingMore(false); return; }
+
+                const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), startAfter(lastPost.timestamp), limit(10));
+                const snapshot = await getDocs(q);
+                
+                if (!snapshot.empty) {
+                    const newPosts = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+                    const enrichedPosts = await Promise.all(newPosts.map(async (p) => {
+                        const uSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), p.userId));
+                        return { ...p, user: uSnap.exists() ? uSnap.data() : {username: 'User'} };
+                    }));
+                    setStableFeed(prev => [...prev, ...enrichedPosts]);
+                }
             }
         } catch (e) {
-            console.error("Load More Failed:", e);
-        } finally {
-            setLoadingMore(false);
+            console.error("Gagal load more:", e);
         }
+        setLoadingMore(false);
     };
 
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
             const first = entries[0];
-            if (first.isIntersecting && !loadingMore && !isLoading && cursor) {
+            // Load more jika terlihat DAN (bukan loading feed awal ATAU mode meme sudah selesai loading awal)
+            if (first.isIntersecting && !loadingMore && (!isLoadingFeed || (isMemeMode && !isLoadingMeme))) {
                 loadMorePosts();
             }
         }, { threshold: 0.5 });
         const currentBottom = bottomRef.current;
         if (currentBottom) observer.observe(currentBottom);
         return () => { if (currentBottom) observer.unobserve(currentBottom); };
-    }, [stableFeed, loadingMore, isLoading, cursor, sortType]);
+    }, [stableFeed, memeFeed, loadingMore, isLoadingFeed, isLoadingMeme, sortType]);
 
     const manualRefresh = () => { 
-        retryFeed(); // Ini akan memicu useEffect utama untuk fetch ulang
+        if (isMemeMode) {
+            fetchInitialMemes();
+        } else {
+            setIsFirstLoad(true); 
+            setSortType('random'); 
+            setStableFeed([]); 
+            clearNewPost(); 
+            retryFeed(); 
+        }
     };
 
-    // Rendering Logic
-    // Gunakan 'stableFeed' yang diisi dari API, bukan 'allPosts' (kecuali untuk tags)
-    const postsToRender = stableFeed;
+    // Tentukan data mana yang dirender
+    const postsToRender = isMemeMode ? memeFeed : stableFeed;
     
     return (
         <div className="max-w-lg mx-auto pb-24 px-4">
@@ -1696,10 +1735,9 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                 <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={20}/></button>
             </div>
 
-            {/* TrendingTags tetap menggunakan allPosts (data awal yang di-fetch di App) agar tidak kosong total */}
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
 
-            {feedError && (
+            {feedError && !isMemeMode && (
                 <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 rounded-3xl mb-4 text-center">
                     <WifiOff size={48} className="text-red-400 mb-2"/>
                     <h3 className="text-red-600 dark:text-red-400 font-bold">Koneksi Bermasalah</h3>
@@ -1708,9 +1746,9 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                 </div>
             )}
 
-            {isLoading ? <><SkeletonPost/><SkeletonPost/></> : postsToRender.length === 0 && !feedError ? (
+            {(isLoadingFeed && !isMemeMode) || (isLoadingMeme && isMemeMode) ? <><SkeletonPost/><SkeletonPost/></> : postsToRender.length === 0 && !feedError ? (
                 <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700">
-                    <p className="text-gray-400 font-bold">Belum ada postingan.</p>
+                    <p className="text-gray-400 font-bold">{isMemeMode ? "Belum ada meme lucu nih." : "Belum ada postingan."}</p>
                 </div>
             ) : (
                 <>
@@ -1757,7 +1795,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
             return;
         }
         
-        // Jika tidak ada (misal dari link share), FETCH manual via Firestore (Fallback karena API Single Post belum ada)
+        // Jika tidak ada (misal dari link share), FETCH manual
         const fetchSinglePost = async () => {
             setLoading(true);
             try {
@@ -1807,13 +1845,13 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     );
 };
 
-// --- SEARCH SCREEN (MIGRATED TO API) ---
+// --- SEARCH SCREEN (REFACTORED: INDEPENDENT SEARCH) ---
 const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
     const [isSearching, setIsSearching] = useState(false);
 
-    // Effect khusus untuk search yang MENGGUNAKAN BACKEND API
+    // Effect khusus untuk search yang LEBIH LUAS dan TIDAK BERGANTUNG pada Home Feed
     useEffect(() => {
         if (!queryTerm.trim()) { setResults({ users: [], posts: [] }); return; }
         
@@ -1821,25 +1859,33 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
             setIsSearching(true);
             const lower = queryTerm.toLowerCase();
 
-            // 1. Search User (Masih dari client cache karena list user kecil)
+            // 1. Search User (Tetap dari list user global yang di-cache di App, karena user list tidak terlalu besar)
             const foundUsers = allUsers.filter(u => u.username?.toLowerCase().includes(lower));
             
-            // 2. Search Post - GUNAKAN API BACKEND /api/feed?mode=search
+            // 2. Search Post - FETCH BARU yang lebih banyak (misal 50-100 terakhir) untuk difilter
+            // Firestore tidak support native text search, jadi kita fetch batch terbaru lalu filter client-side
+            // Ini memenuhi syarat "tanpa berpatokan sama postingan yang dimuat di beranda"
             try {
-                const data = await fetchApi('search', { q: queryTerm });
+                const q = query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(100)); // Ambil 100 post terakhir
+                const snap = await getDocs(q);
                 
-                // Set hasil search
-                setResults({ 
-                    users: foundUsers, 
-                    posts: data.posts || [] 
-                });
+                const foundPosts = snap.docs
+                    .map(d => ({id: d.id, ...d.data()}))
+                    .filter(p => 
+                        (p.content && p.content.toLowerCase().includes(lower)) || 
+                        (p.title && p.title.toLowerCase().includes(lower)) ||
+                        (p.category === 'meme' && lower.includes('meme')) // Support keyword "meme"
+                    );
+
+                setResults({ users: foundUsers, posts: foundPosts });
             } catch (e) {
-                console.error("Search API error", e);
+                console.error("Search error", e);
             } finally {
                 setIsSearching(false);
             }
         };
 
+        // Debounce sedikit agar tidak spam request
         const timeout = setTimeout(doSearch, 500);
         return () => clearTimeout(timeout);
         
@@ -1890,7 +1936,7 @@ const App = () => {
     const [user, setUser] = useState(undefined); 
     const [profile, setProfile] = useState(null); 
     const [page, setPage] = useState('home'); 
-    const [posts, setPosts] = useState([]); // Ini akan diisi API Home awal untuk kebutuhan Tags
+    const [posts, setPosts] = useState([]); 
     const [users, setUsers] = useState([]); 
     const [targetUid, setTargetUid] = useState(null); 
     const [targetPid, setTargetPid] = useState(null); 
@@ -2076,32 +2122,44 @@ const App = () => {
     }, [user]);
 
     useEffect(() => {
-        // --- MIGRASI BACKEND: GANTI ONSNAPSHOT DENGAN FETCH API UNTUK DATA AWAL ---
-        // Kita hanya fetch sekali untuk mengisi data awal (misal untuk tags). 
-        // Feed utama sekarang dihandle mandiri oleh HomeScreen.
-        
+        // Fetch Feed Beranda (Tetap berjalan di background tapi tidak menghambat UI lain)
+        // Kita batasi 20 untuk performa
         setIsLoadingFeed(true);
         setFeedError(false);
         
-        const fetchInitialData = async () => {
+        const unsubPosts = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), async s => {
             try {
-                // Fetch Mode Home (Default)
-                const data = await fetchApi('home');
-                const apiPosts = data.posts || [];
-                setPosts(apiPosts); // Disimpan di state App agar bisa dipakai TrendingTags
+                const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+                const postsWithFallback = raw.map(p => ({
+                    ...p,
+                    user: p.user || { username: 'Pengguna', photoURL: '' } 
+                }));
+                setPosts(postsWithFallback); 
+                try {
+                    const uids = [...new Set(raw.map(r=>r.userId))];
+                    const userPromises = uids.map(uid => 
+                        getDoc(doc(db, getPublicCollection('userProfiles'), uid))
+                        .then(snap => ({ id: uid, data: snap.exists() ? snap.data() : null }))
+                        .catch(() => ({ id: uid, data: null }))
+                    );
+                    const userResults = await Promise.all(userPromises);
+                    const userMap = {};
+                    userResults.forEach(res => { if(res.data) userMap[res.id] = res.data; });
+                    if (Object.keys(userMap).length > 0) {
+                        setPosts(prevPosts => prevPosts.map(p => ({
+                            ...p,
+                            user: userMap[p.userId] || p.user
+                        })));
+                    }
+                } catch (backgroundError) {}
                 setIsLoadingFeed(false);
             } catch (err) {
-                console.error("Initial Fetch Error:", err);
                 setFeedError(true);
                 setIsLoadingFeed(false);
             }
-        };
-
-        fetchInitialData();
-
-        // Listener Users tetap dipertahankan karena ringan dan dibutuhkan untuk Leaderboard/Profile lookup
+        }); 
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
-        return () => { unsubUsers(); };
+        return () => { unsubPosts(); unsubUsers(); };
     }, [refreshTrigger]); 
 
     const handleFollow = async (uid, isFollowing) => { 
