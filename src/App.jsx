@@ -135,10 +135,10 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         });
 
         // 4. Tangani Error dan Kembalikan Data
+        // 🚨 PERBAIKAN KRUSIAL: Jika respons tidak OK (e.g., 500, 401), Lemparkan Error!
         if (!response.ok) {
-             // Fallback handling jika API belum siap/error, return empty agar app tidak crash
-             console.warn("API Error, falling back to empty:", response.status);
-             return { posts: [], nextCursor: null };
+             const errorData = await response.json().catch(() => ({ message: `Server error ${response.status}` }));
+             throw new Error(`API Gagal: ${errorData.message || response.statusText}`);
         }
 
         const data = await response.json();
@@ -148,7 +148,8 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         };
     } catch (err) {
         console.error("Fetch Feed Error:", err);
-        throw new Error("Gagal mengambil data dari server.");
+        // Penting: Throw error agar fungsi pemanggil bisa menangkapnya
+        throw err; 
     }
 };
 
@@ -1698,8 +1699,9 @@ const HomeScreen = ({ currentUserId, profile, handleFollow, goToProfile, newPost
             }
 
         } catch (e) {
-            console.error("Feed Load Error:", e);
-            setError(true);
+            // 🚨 PERBAIKAN: Jika fetchFeedData melempar error, kita tangkap di sini
+            console.error("Gagal memuat feed:", e.message);
+            setError(true); // <--- INI YANG AKAN MEMUNCULKAN PESAN ERROR DI UI
         } finally {
             setIsLoading(false);
         }
@@ -1797,7 +1799,7 @@ const HomeScreen = ({ currentUserId, profile, handleFollow, goToProfile, newPost
                     {feedPosts.map(p => (
                         <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
-                            <PostItem post={p} currentUserId={currentUserId} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick}/>
+                            <PostItem post={p} currentUserId={currentUserId} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={onHashtagClick}/>
                         </div>
                     ))}
                     <div ref={bottomRef} className="h-20 w-full flex items-center justify-center">
@@ -1842,8 +1844,15 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         const fetchSinglePost = async () => {
             setLoading(true);
             try {
+                // KODE LAMA (MASIH MENGGUNAKAN FIRESTORE):
                 const docRef = doc(db, getPublicCollection('posts'), postId);
                 const docSnap = await getDoc(docRef);
+
+                // 💡 SARAN MIGRASI: Ganti dengan API (jika server mendukung)
+                // Cek dengan tim Backend, apakah ada endpoint GET /api/feed?mode=single&postId=...
+                
+                // UNTUK SEMENTARA: BIARKAN KODE INI DULU
+                // JIKA MIGRASI BACKEND SUDAH FINAL, GANTI DENGAN FETCH API!
                 
                 if (docSnap.exists()) {
                     const data = docSnap.data();
