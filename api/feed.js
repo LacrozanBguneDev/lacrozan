@@ -16,7 +16,7 @@ const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
 /* ================== CACHE USER PROFILE ================== */
-const userCache = new Map(); // cache in-memory per server session
+const userCache = new Map();
 const getUserProfile = async (userId) => {
   if (!userId) return { username: "Unknown", photoURL: null };
   if (userCache.has(userId)) return userCache.get(userId);
@@ -49,14 +49,6 @@ const discoveryScore = p => {
   return likes * 2 + comments * 3 + freshness + decay;
 };
 
-const limitPerUser = (posts, max = 2) => {
-  const count = {};
-  return posts.filter(p => {
-    count[p.userId] = (count[p.userId] || 0) + 1;
-    return count[p.userId] <= max;
-  });
-};
-
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
@@ -69,6 +61,7 @@ export default async function handler(req, res) {
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
+    const q = (req.query.q || "").toLowerCase();
     const nextCursor = Number(req.query.nextCursor) || null;
 
     /* ================== QUERY POSTS ================== */
@@ -88,6 +81,14 @@ export default async function handler(req, res) {
       timestamp: safeMillis(d.data().timestamp),
     }));
 
+    /* ================== SEARCH ================== */
+    if (mode === "search" && q) {
+      posts = posts.filter(p =>
+        p.title?.toLowerCase().includes(q) ||
+        p.content?.toLowerCase().includes(q)
+      );
+    }
+
     /* ================== JOIN USER PROFILES ================== */
     const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
     const userProfiles = await Promise.all(userIds.map(getUserProfile));
@@ -103,21 +104,34 @@ export default async function handler(req, res) {
         seenIds = new Set(viewerDoc.data().seenPosts || []);
       }
     }
-
-    posts = posts.filter(p => !seenIds.has(p.id)); // hilangkan post yang sudah dilihat
+    posts = posts.filter(p => !seenIds.has(p.id));
 
     /* ================== SCORE & ALGORITMA ================== */
     if (mode === "home") {
       posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));
       posts.sort((a, b) => b._score - a._score);
 
-      // boost 3 post terbaru
-      const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12).slice(0, 3);
-      const rest = posts.filter(p => !newPosts.includes(p));
-      posts = shuffleArray(newPosts).concat(limitPerUser(rest));
+      // Pisahkan post terbaru (<12 jam) dan sisanya
+      const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12);
+      let rest = posts.filter(p => !newPosts.includes(p));
+
+      // Shuffle rest untuk variasi
+      rest = shuffleArray(rest);
+
+      // Gabungkan tapi batasi max 2 post per user
+      const finalPosts = [];
+      const count = {};
+      const allPosts = [...newPosts, ...rest];
+      for (const p of allPosts) {
+        count[p.userId] = (count[p.userId] || 0) + 1;
+        if (count[p.userId] <= 2) finalPosts.push(p);
+        if (finalPosts.length >= limit) break;
+      }
+
+      posts = finalPosts;
     }
 
-    const result = posts.slice(0, limit);
+    const result = posts;
 
     /* ================== UPDATE HISTORY USER ================== */
     if (viewerId && result.length) {
