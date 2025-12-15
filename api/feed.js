@@ -49,13 +49,6 @@ const discoveryScore = p => {
   return likes * 2 + comments * 3 + freshness + decay;
 };
 
-const popularScore = p => {
-  const ageHours = (Date.now() - p.timestamp) / 3600000;
-  const likes = Array.isArray(p.likes) ? p.likes.length : 0;
-  const comments = p.commentsCount || 0;
-  return likes * 3 + comments * 4 - ageHours * 0.2;
-};
-
 const limitPerUser = (posts, max = 2) => {
   const count = {};
   return posts.filter(p => {
@@ -76,20 +69,17 @@ export default async function handler(req, res) {
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
-    const q = (req.query.q || "").toLowerCase();
-    const nextCursor = Number(req.query.nextCursor) || null; // cursor untuk pagination
+    const nextCursor = Number(req.query.nextCursor) || null;
 
     /* ================== QUERY POSTS ================== */
     let query = db.collection(POSTS_PATH);
     if (mode === "meme") query = query.where("category", "==", "meme");
     if (mode === "user" && userId) query = query.where("userId", "==", userId);
     query = query.orderBy("timestamp", "desc");
-
     if (nextCursor) query = query.startAfter(nextCursor);
 
     const poolMultiplier = mode === "home" || mode === "popular" ? 10 : 8;
     const snap = await query.limit(limit * poolMultiplier).get();
-
     if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
     let posts = snap.docs.map(d => ({
@@ -98,20 +88,11 @@ export default async function handler(req, res) {
       timestamp: safeMillis(d.data().timestamp),
     }));
 
-    /* ================== SEARCH ================== */
-    if (mode === "search" && q) {
-      posts = posts.filter(p =>
-        p.title?.toLowerCase().includes(q) ||
-        p.content?.toLowerCase().includes(q)
-      );
-    }
-
     /* ================== JOIN USER PROFILES ================== */
     const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
     const userProfiles = await Promise.all(userIds.map(getUserProfile));
     const userMap = {};
     userIds.forEach((uid, i) => userMap[uid] = userProfiles[i]);
-
     posts = posts.map(p => ({ ...p, user: userMap[p.userId] || { username: "Unknown", photoURL: null } }));
 
     /* ================== HISTORY USER ================== */
@@ -119,12 +100,11 @@ export default async function handler(req, res) {
     if (viewerId) {
       const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
       if (viewerDoc.exists) {
-        const data = viewerDoc.data();
-        seenIds = new Set(data.seenPosts || []);
+        seenIds = new Set(viewerDoc.data().seenPosts || []);
       }
     }
 
-    posts = posts.filter(p => !seenIds.has(p.id));
+    posts = posts.filter(p => !seenIds.has(p.id)); // hilangkan post yang sudah dilihat
 
     /* ================== SCORE & ALGORITMA ================== */
     if (mode === "home") {
@@ -135,9 +115,6 @@ export default async function handler(req, res) {
       const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12).slice(0, 3);
       const rest = posts.filter(p => !newPosts.includes(p));
       posts = shuffleArray(newPosts).concat(limitPerUser(rest));
-    } else if (mode === "popular") {
-      posts = posts.map(p => ({ ...p, _score: popularScore(p) }))
-                   .sort((a, b) => b._score - a._score);
     }
 
     const result = posts.slice(0, limit);
@@ -153,10 +130,7 @@ export default async function handler(req, res) {
     /* ================== NEXT CURSOR ================== */
     const newCursor = result.length ? result[result.length - 1].timestamp : null;
 
-    res.json({
-      posts: result,
-      nextCursor: newCursor,
-    });
+    res.json({ posts: result, nextCursor: newCursor });
 
   } catch (e) {
     console.error("FEED ERROR:", e);
