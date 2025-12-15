@@ -48,7 +48,7 @@ import {
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
-    Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw
+    Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid
 } from 'lucide-react';
 
 setLogLevel('silent'); 
@@ -436,8 +436,8 @@ const OfflinePage = ({ onRetry }) => (
 );
 
 const SkeletonPost = () => (
-    <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-5 mb-6 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
-        <div className="flex items-center gap-3 mb-4"><div className="w-11 h-11 rounded-full bg-gray-200 dark:bg-gray-700"></div><div className="flex-1"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 dark:bg-gray-600 rounded w-1/4"></div></div></div>
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 mb-4 border border-gray-100 dark:border-gray-700 shadow-sm animate-pulse">
+        <div className="flex items-center gap-3 mb-4"><div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700"></div><div className="flex-1"><div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-2"></div><div className="h-3 bg-gray-100 dark:bg-gray-600 rounded w-1/4"></div></div></div>
         <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3"></div><div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-4"></div>
     </div>
 );
@@ -450,7 +450,7 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[0.93rem] md:text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
+    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[0.93rem] md:text-sm line-clamp-5 md:line-clamp-none" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
 };
 
 // ==========================================
@@ -584,7 +584,7 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
     const isMeInTop50 = myRankIndex !== -1 && myRankIndex < 50;
 
     return (
-        <div className="max-w-md md:max-w-3xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
             <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top 50 Kreator Viral</h1>
             <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden mb-6">
                 {top50.map((u, index) => {
@@ -623,8 +623,8 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
 const MediaGrid = ({ mediaUrls, onImageClick }) => {
     const count = mediaUrls.length;
     if (count === 0) return null;
-    if (count === 1) { return ( <div className="mb-3 rounded-xl md:rounded-2xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative" onClick={() => onImageClick(0)}><img src={mediaUrls[0]} className="w-full h-auto max-h-[500px] object-cover cursor-pointer hover:scale-105 transition duration-500"/></div> ); }
-    return ( <div className={`mb-3 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-xl md:rounded-2xl overflow-hidden`}>{mediaUrls.slice(0, 9).map((url, i) => ( <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}><img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />{i === 8 && count > 9 && ( <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">+{count - 9}</div> )}</div> ))}</div> );
+    if (count === 1) { return ( <div className="mb-4 rounded-xl overflow-hidden bg-black/5 dark:bg-black/20 border border-gray-100 dark:border-gray-700 relative" onClick={() => onImageClick(0)}><img src={mediaUrls[0]} className="w-full h-auto max-h-[500px] object-cover cursor-pointer hover:scale-105 transition duration-500"/></div> ); }
+    return ( <div className={`mb-4 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-xl overflow-hidden`}>{mediaUrls.slice(0, 9).map((url, i) => ( <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}><img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />{i === 8 && count > 9 && ( <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">+{count - 9}</div> )}</div> ))}</div> );
 };
 
 const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick }) => {
@@ -721,48 +721,49 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-none md:rounded-[2.5rem] p-3 md:p-6 mb-2 md:mb-8 border-b-4 md:border border-gray-100 dark:border-gray-800 md:shadow-[0_10px_40px_-15px_rgba(0,0,0,0.05)] relative overflow-hidden group transition md:hover:shadow-lg">
+        <div className="bg-white dark:bg-gray-800 rounded-xl md:rounded-2xl p-4 mb-2 md:mb-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg h-full flex flex-col">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
             {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 dark:border-orange-800 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
             {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 dark:border-yellow-800 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
-            <div className="flex items-center justify-between mb-2 md:mb-4">
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                    <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px]"><div className="w-full h-full rounded-full bg-white overflow-hidden"><Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full"/></div></div>
-                    <div><h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight flex items-center gap-1">{post.user?.username || 'Pengguna'} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100"/>}</h4><div className="flex items-center gap-2"><span className="text-xs text-gray-400">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}</div></div>
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => goToProfile(post.userId)}>
+                    <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px] flex-shrink-0"><div className="w-full h-full rounded-full bg-white overflow-hidden"><Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full"/></div></div>
+                    <div className="min-w-0"><h4 className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight flex items-center gap-1 truncate">{post.user?.username || 'Pengguna'} {isDeveloper && <ShieldCheck size={14} className="text-blue-500 fill-blue-100 flex-shrink-0"/>}</h4><div className="flex items-center gap-2"><span className="text-[10px] text-gray-400 whitespace-nowrap">{formatTimeAgo(post.timestamp).relative}</span>{isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color} whitespace-nowrap scale-90 origin-left`}>{userBadge.label}</span>}</div></div>
                 </div>
-                <div className="flex gap-2">
-                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md'}`}>{isFriend ? <><UserCheck size={12}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
-                    {(isOwner || isMeDeveloper) && !isGuest && ( <div className="flex gap-2">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-2 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={16}/></button>}<button onClick={handleDelete} className={`p-2 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={16}/> : <Trash2 size={16}/>}</button></div> )}
+                <div className="flex gap-1">
+                    {!isOwner && post.userId !== currentUserId && ( <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-sm'}`}>{isFriend ? <><UserCheck size={10}/> Teman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                    {(isOwner || isMeDeveloper) && !isGuest && ( <div className="flex gap-1">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-1.5 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={14}/></button>}<button onClick={handleDelete} className={`p-1.5 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={14}/> : <Trash2 size={14}/>}</button></div> )}
                 </div>
             </div>
             {isEditing ? (
                 <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg font-bold text-sm dark:text-white"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg text-sm resize-none dark:text-white" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
             ) : (
-                <>
-                    {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-1.5 md:mb-2 text-[0.95rem] md:text-lg">{post.title}</h3>}
-                    <div className="mb-3 md:mb-4">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
-                    <div onDoubleClick={handleDoubleTap} className="relative">
+                <div className="flex-1 flex flex-col">
+                    {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-1.5 text-base line-clamp-1">{post.title}</h3>}
+                    <div className="text-sm text-gray-600 dark:text-gray-300 mb-3 leading-relaxed flex-1">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca'}</button>}</div>
+                    <div onDoubleClick={handleDoubleTap} className="relative mt-auto">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                          {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
-                         {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black rounded-xl md:rounded-2xl mb-3"/>}
-                         {embed?.type === 'youtube' && <div className="aspect-video mb-3 rounded-xl md:rounded-2xl overflow-hidden"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
-                         {embed?.type === 'instagram' && ( <div className="aspect-square mb-3 rounded-xl md:rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={embed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
-                         {embed?.type === 'tiktok' && ( <div className="aspect-[9/16] mb-3 rounded-xl md:rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black"><iframe src={embed.embedUrl} className="w-full h-full border-0"></iframe></div>)}
-                         {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-4 md:p-6 text-center bg-sky-50 dark:bg-gray-900 text-sky-600 font-bold text-sm hover:underline mb-3 rounded-xl md:rounded-2xl">Buka Tautan Eksternal <ExternalLink size={14} className="inline ml-1"/></a>}
+                         {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[300px] bg-black rounded-xl mb-2"/>}
+                         {embed?.type === 'youtube' && <div className="aspect-video mb-2 rounded-xl overflow-hidden"><iframe src={embed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
+                         {embed?.type === 'instagram' && ( <div className="aspect-square mb-2 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={embed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
+                         {embed?.type === 'tiktok' && ( <div className="aspect-[9/16] mb-2 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black"><iframe src={embed.embedUrl} className="w-full h-full border-0"></iframe></div>)}
+                         {embed?.type === 'link' && <a href={embed.displayUrl} target="_blank" rel="noopener noreferrer" className="block p-4 text-center bg-sky-50 dark:bg-gray-900 text-sky-600 font-bold text-xs hover:underline mb-2 rounded-xl">Buka Tautan <ExternalLink size={12} className="inline ml-1"/></a>}
                          {!isAudio && !isVideo && !embed && mediaList.length > 0 && ( <MediaGrid mediaUrls={mediaList} onImageClick={(idx) => {setLightboxIndex(idx); setLightboxOpen(true);}} /> )}
                     </div>
-                </>
+                </div>
             )}
-            <div className="flex items-center gap-6 pt-1 md:pt-2">
-                <button onClick={handleLike} className={`flex items-center gap-2 text-sm font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={20} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
-                <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={20}/> {post.commentsCount || 0}</button>
-                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={20}/></button>
-                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Bookmark size={20} fill={isSaved ? 'currentColor' : 'none'} /></button>
+            <div className="flex items-center gap-6 pt-3 border-t border-gray-50 dark:border-gray-700 mt-2">
+                <button onClick={handleLike} className={`flex items-center gap-1.5 text-xs font-bold transition ${liked ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Heart size={18} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount}</button>
+                <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-sky-500"><MessageSquare size={18}/> {post.commentsCount || 0}</button>
+                <button onClick={sharePost} className="text-gray-400 hover:text-sky-500"><Share2 size={18}/></button>
+                <button onClick={handleSave} className={`ml-auto transition ${isSaved ? 'text-sky-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}><Bookmark size={18} fill={isSaved ? 'currentColor' : 'none'} /></button>
             </div>
             {showComments && (
-                <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
-                    <div className="max-h-60 overflow-y-auto space-y-3 mb-3 custom-scrollbar pr-1">{comments.length === 0 ? ( <p className="text-xs text-center text-gray-400">Belum ada komentar.</p> ) : ( <CommentList commentList={rootComments} /> )}</div>
-                    <form onSubmit={handleComment} className="relative">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>: "{replyTo.text.substring(0,20)}..."</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2"><input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder={isGuest ? "Login untuk komentar..." : "Tulis komentar..."} disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-xl shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button></div></form>
+                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 animate-in fade-in absolute inset-0 bg-white dark:bg-gray-800 z-20 flex flex-col">
+                    <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-50 dark:border-gray-700"><h5 className="font-bold text-xs">Komentar</h5><button onClick={()=>setShowComments(false)}><X size={14}/></button></div>
+                    <div className="flex-1 overflow-y-auto space-y-3 mb-2 custom-scrollbar pr-1">{comments.length === 0 ? ( <p className="text-xs text-center text-gray-400 mt-10">Belum ada komentar.</p> ) : ( <CommentList commentList={rootComments} /> )}</div>
+                    <form onSubmit={handleComment} className="relative mt-auto">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>...</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2"><input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Tulis..." disabled={isGuest || !profile} className={`flex-1 bg-gray-100 dark:bg-gray-700 dark:text-white px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-sky-200 ${replyTo ? 'rounded-b-xl' : 'rounded-xl'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2 bg-sky-500 text-white rounded-xl shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={14}/></button></div></form>
                 </div>
             )}
             {lightboxOpen && <Lightbox images={mediaList} initialIndex={lightboxIndex} onClose={() => setLightboxOpen(false)} />}
@@ -790,7 +791,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     };
 
     return (
-        <div className="max-w-xl md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto p-4 pb-24 pt-20">
             <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div><h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
@@ -869,25 +870,33 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const rankProgress = getNextRankData(profileData.reputation || 0);
 
     return (
-        <div className="max-w-lg md:max-w-3xl lg:max-w-5xl mx-auto pb-24 pt-20">
+        <div className="max-w-lg md:max-w-4xl lg:max-w-6xl mx-auto pb-24 pt-20">
             <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
                 {rank && rank <= 3 && ( <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>#{rank} VIRAL</div> )}
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${rank===1 ? 'border-yellow-400' : isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
-                {badge.label && <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>}
+                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
                 <div className="px-8 mt-2 mb-4 w-full"><div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1"><span>{profileData.reputation || 0} XP</span><span>{rankProgress.next ? `${rankProgress.next} XP` : 'MAX'}</span></div><div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div></div><p className="text-[10px] text-center mt-1 text-sky-500 font-bold">{rankProgress.next ? `Butuh ${rankProgress.next - (profileData.reputation||0)} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}</p></div>
                 {!isSelf && !isGuest && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
                 <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
             {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Disimpan</button></div> )}
-            <div className="md:px-4 space-y-6">
+            <div className="px-4">
                 {activeTab === 'posts' ? (
                     loadingLocal ? <SkeletonPost /> :
-                    localPosts.length > 0 ? ( localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
+                    localPosts.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"> 
+                            {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                        </div>
+                    ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
                 ) : ( 
-                    savedPostsData.length > 0 ? savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
+                    savedPostsData.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                             {savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                        </div>
+                    ) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
                 )}
             </div>
             {showDev && <DeveloperDashboard onClose={()=>setShowDev(false)} />}
@@ -905,7 +914,7 @@ const TrendingTags = ({ posts, onTagClick }) => {
         return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); 
     }, [posts]);
     if (tags.length === 0) return null;
-    return ( <div className="mb-2 overflow-x-auto no-scrollbar py-2 px-4 md:px-0"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} onClick={()=>onTagClick(tag)} className="px-3 py-1 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-600 dark:text-gray-300 shadow-sm whitespace-nowrap flex items-center gap-1 cursor-pointer hover:bg-sky-50">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div> );
+    return ( <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} onClick={()=>onTagClick(tag)} className="px-3 py-1 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-600 dark:text-gray-300 shadow-sm whitespace-nowrap flex items-center gap-1 cursor-pointer hover:bg-sky-50">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div> );
 };
 
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
@@ -936,7 +945,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
             if (reset) {
                 setFeedPosts(enrichedPosts);
-                window.scrollTo({ top: 0, behavior: 'smooth' }); // FIX: Auto Scroll Up
+                window.scrollTo({ top: 0, behavior: 'smooth' }); 
             } else {
                 setFeedPosts(prev => [...prev, ...enrichedPosts]);
             }
@@ -949,7 +958,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         }
     };
 
-    // FIX: Trigger refresh saat component di-mount (kembali ke beranda)
     useEffect(() => {
         loadFeed(true);
     }, [sortType, currentUserId]); 
@@ -975,14 +983,14 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     }
 
     return (
-        <div className="w-full max-w-full md:max-w-3xl lg:max-w-5xl mx-auto pb-24 md:px-4 pt-0 md:pt-4">
-            <div className="flex items-center justify-between mb-2 md:mb-4 pt-2 md:pt-4 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/80 dark:bg-[#111827]/80 backdrop-blur-xl py-1.5 -mx-0 md:-mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all">
-                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <div className="w-full max-w-[1400px] mx-auto pb-24 px-4 md:px-8 pt-4"> {/* FIX: Ultra Wide Width */}
+            <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all">
+                <div className="flex gap-2 overflow-x-auto no-scrollbar">
                      <button onClick={() => setSortType('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
                      <button onClick={() => setSortType('meme')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
                      <button onClick={() => setSortType('popular')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
                 </div>
-                <button onClick={manualRefresh} className="p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={18}/></button>
+                <button onClick={manualRefresh} className="ml-auto p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={18}/></button>
             </div>
 
             <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
@@ -995,23 +1003,23 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                 </div>
             )}
 
-            {loading && finalPosts.length === 0 ? <div className="px-4 md:px-0"><SkeletonPost/><SkeletonPost/></div> : finalPosts.length === 0 && !feedError ? (
-                <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700 mx-4 md:mx-0">
+            {loading && finalPosts.length === 0 ? <><SkeletonPost/><SkeletonPost/></> : finalPosts.length === 0 && !feedError ? (
+                <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-dashed border-gray-200 dark:border-gray-700">
                     <p className="text-gray-400 font-bold">Belum ada postingan.</p>
                 </div>
             ) : (
-                <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 auto-rows-fr"> {/* FIX: Grid Layout 2-4 cols */}
                     {finalPosts.map(p => (
-                        <div key={p.id} className={p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}>
+                        <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700 col-span-full md:col-span-1" : ""} h-full`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
                             <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick}/>
                         </div>
                     ))}
-                    <div ref={bottomRef} className="h-20 w-full flex items-center justify-center">
-                        {loading && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat lebih banyak...</span></div>}
-                    </div>
-                </>
+                </div>
             )}
+            <div ref={bottomRef} className="h-20 w-full flex items-center justify-center col-span-full">
+                 {loading && <div className="flex flex-col items-center"><Loader2 className="animate-spin text-sky-500 mb-2"/><span className="text-xs text-gray-400">Memuat lebih banyak...</span></div>}
+            </div>
         </div>
     );
 };
@@ -1020,7 +1028,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     const [notifs, setNotifs] = useState([]);
     useEffect(() => { const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50)); return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
-    return <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
+    return <div className="max-w-lg md:max-w-4xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
@@ -1050,7 +1058,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
     if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     return (
-        <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto p-4 pb-40 pt-24">
+        <div className="max-w-lg md:max-w-2xl mx-auto p-4 pb-40 pt-24">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
             <PostItem post={fetchedPost} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
@@ -1094,12 +1102,12 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
     }, [queryTerm, allUsers]);
 
     return (
-        <div className="max-w-md md:max-w-3xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-lg md:max-w-4xl mx-auto p-4 pb-24 pt-20">
             <div className="bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-2 mb-6"><Search className="ml-2 text-gray-400"/><input value={queryTerm} onChange={e=>setQueryTerm(e.target.value)} placeholder="Cari orang, hashtag, atau postingan..." className="flex-1 p-2 outline-none bg-transparent dark:text-white"/></div>
             {isSearching ? ( <div className="text-center py-10"><Loader2 className="animate-spin text-sky-500 mx-auto"/></div> ) : queryTerm && (
                 <div className="space-y-6">
-                    {results.users.length > 0 && ( <div><h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Pengguna</h3><div className="space-y-3">{results.users.map(u => ( <div key={u.uid} className="bg-white dark:bg-gray-800 p-3 rounded-xl flex justify-between items-center shadow-sm"> <div className="flex items-center gap-3" onClick={()=>goToProfile(u.uid)}> <img src={u.photoURL||APP_LOGO} className="w-10 h-10 rounded-full bg-gray-200 object-cover"/> <div><p className="font-bold text-sm dark:text-white">{u.username}</p><p className="text-[10px] text-gray-500">{u.followers?.length} Pengikut</p></div> </div> <button onClick={()=>isGuest ? onRequestLogin() : handleFollow(u.uid, (profile?.following||[]).includes(u.uid))} className="bg-sky-50 text-sky-600 px-3 py-1 rounded-full text-xs font-bold">{(profile?.following||[]).includes(u.uid) ? 'Mengikuti' : 'Ikuti'}</button> </div> ))}</div></div> )}
-                    {results.posts.length > 0 && ( <div><h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan Hasil Pencarian</h3><div className="space-y-3">{results.posts.map(p => ( <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex gap-3 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition" onClick={()=>{ setTargetPostId(p.id); setPage('view_post'); }}> <div className="flex-1"> <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> <p className="text-xs text-gray-500 line-clamp-2 mb-2">{p.content}</p> {p.mediaUrl && <div className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded inline-block text-gray-500"><ImageIcon size={10} className="inline mr-1"/>Ada Media</div>}</div> </div> ))}</div></div> )}
+                    {results.users.length > 0 && ( <div><h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Pengguna</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{results.users.map(u => ( <div key={u.uid} className="bg-white dark:bg-gray-800 p-3 rounded-xl flex justify-between items-center shadow-sm border border-gray-50 dark:border-gray-700"> <div className="flex items-center gap-3" onClick={()=>goToProfile(u.uid)}> <img src={u.photoURL||APP_LOGO} className="w-10 h-10 rounded-full bg-gray-200 object-cover"/> <div><p className="font-bold text-sm dark:text-white">{u.username}</p><p className="text-[10px] text-gray-500">{u.followers?.length} Pengikut</p></div> </div> <button onClick={()=>isGuest ? onRequestLogin() : handleFollow(u.uid, (profile?.following||[]).includes(u.uid))} className="bg-sky-50 text-sky-600 px-3 py-1 rounded-full text-xs font-bold">{(profile?.following||[]).includes(u.uid) ? 'Mengikuti' : 'Ikuti'}</button> </div> ))}</div></div> )}
+                    {results.posts.length > 0 && ( <div><h3 className="font-bold text-gray-500 mb-3 text-xs uppercase tracking-wider">Postingan Hasil Pencarian</h3><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">{results.posts.map(p => ( <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm flex flex-col gap-3 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition border border-gray-50 dark:border-gray-700 h-full" onClick={()=>{ setTargetPostId(p.id); setPage('view_post'); }}> <div className="flex-1"> <p className="font-bold text-sm mb-1 line-clamp-1 dark:text-white">{p.title || 'Tanpa Judul'}</p> <p className="text-xs text-gray-500 line-clamp-2 mb-2">{p.content}</p> {p.mediaUrl && <div className="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded inline-block text-gray-500"><ImageIcon size={10} className="inline mr-1"/>Ada Media</div>}</div> </div> ))}</div></div> )}
                     {results.users.length === 0 && results.posts.length === 0 && ( <div className="text-center text-gray-400 py-10">Tidak ditemukan hasil untuk "{queryTerm}"</div> )}
                 </div>
             )}
@@ -1172,16 +1180,26 @@ const App = () => {
             <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
                 <NetworkStatus />
                 {page!=='legal' && ( 
-                    <header className="fixed top-0 w-full bg-white/80 dark:bg-gray-900/80 backdrop-blur-md h-14 md:h-16 flex items-center justify-between px-4 z-40 border-b border-white/50 dark:border-gray-800 shadow-sm transition-colors duration-300">
-                        <div className="flex items-center gap-2" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-7 h-7 md:w-8 md:h-8 object-contain"/><span className="font-black text-lg md:text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
-                        <div className="flex gap-2 md:gap-3 items-center">
-                            <button onClick={()=>setPage('legal')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition" title="Kebijakan & Privasi"><Scale size={18} className="md:w-5 md:h-5"/></button>
-                            <button onClick={toggleDarkMode} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 dark:text-yellow-400 hover:bg-gray-100 transition">{darkMode ? <Sun size={18} className="md:w-5 md:h-5"/> : <Moon size={18} className="md:w-5 md:h-5"/>}</button>
-                            {isGuest ? ( <button onClick={()=>setShowAuthModal(true)} className="px-3 py-1.5 md:px-4 md:py-2 bg-sky-500 text-white rounded-full font-bold text-xs shadow-lg hover:bg-sky-600 transition flex items-center gap-2"><LogIn size={16}/> <span className="hidden md:inline">Masuk</span></button> ) : ( <><button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-gray-500 hover:text-sky-600 transition relative"><Bell size={18} className="md:w-5 md:h-5"/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-sm text-rose-400 hover:text-rose-600 transition"><LogOut size={18} className="md:w-5 md:h-5"/></button></> )}
+                    <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 md:px-8 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
+                        <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
+                        
+                        {/* DESKTOP NAV */}
+                        <div className="hidden md:flex items-center gap-6 mr-4">
+                            <button onClick={()=>setPage('home')} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
+                            <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
+                            <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 50</button>
+                            {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
+                            <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2"><PlusCircle size={16}/> Buat Post</button>
+                        </div>
+
+                        <div className="flex gap-2 items-center">
+                            <button onClick={()=>setPage('legal')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition"><Scale size={18}/></button>
+                            <button onClick={toggleDarkMode} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 dark:text-yellow-400 hover:bg-gray-200 transition">{darkMode ? <Sun size={18}/> : <Moon size={18}/>}</button>
+                            {isGuest ? ( <button onClick={()=>setShowAuthModal(true)} className="px-4 py-2 bg-sky-500 text-white rounded-full font-bold text-xs shadow-lg hover:bg-sky-600 transition flex items-center gap-2 ml-2"><LogIn size={16}/> Masuk</button> ) : ( <><button onClick={()=>setPage('notifications')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition relative"><Bell size={18}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-rose-50 dark:bg-gray-800 rounded-full text-rose-500 hover:bg-rose-100 transition ml-1"><LogOut size={18}/></button></> )}
                         </div>
                     </header> 
                 )}
-                <main className={page!=='legal' ? 'pt-14 md:pt-16' : ''}>
+                <main className={page!=='legal' ? 'pt-16 md:pt-20' : ''}>
                     {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
                     {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                     {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
@@ -1192,7 +1210,10 @@ const App = () => {
                     {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
                     {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                 </main>
-                {page!=='legal' && ( <nav className="fixed bottom-4 md:bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 md:px-6 md:py-3 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-4 md:gap-6 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 md:p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22} className="md:w-6 md:h-6"/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                
+                {/* BOTTOM NAV (MOBILE ONLY) */}
+                {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                
                 {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                 {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
                 {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}
@@ -1202,6 +1223,6 @@ const App = () => {
     );
 };
 
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} className="md:w-6 md:h-6" strokeWidth={active?2.5:2} /></button>);
+const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
