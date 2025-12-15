@@ -12,9 +12,26 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
-
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
+
+/* ================== CACHE ================== */
+// userId -> { data, expire }
+const userCache = new Map();
+const USER_TTL = 1000 * 60 * 10; // 10 menit
+
+async function getUserCached(uid) {
+  const now = Date.now();
+  const cached = userCache.get(uid);
+  if (cached && cached.expire > now) return cached.data;
+
+  const snap = await db.doc(`${USERS_PATH}/${uid}`).get();
+  if (!snap.exists) return null;
+
+  const data = snap.data();
+  userCache.set(uid, { data, expire: now + USER_TTL });
+  return data;
+}
 
 /* ================== UTIL ================== */
 function safeMillis(ts) {
@@ -23,7 +40,7 @@ function safeMillis(ts) {
 
 function shuffleSmall(arr) {
   const a = [...arr];
-  for (let i = a.length - 1; i > 0 && i > a.length - 4; i--) {
+  for (let i = a.length - 1; i > 0 && i > a.length - 3; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
@@ -31,43 +48,36 @@ function shuffleSmall(arr) {
 }
 
 /* ================== SCORE ================== */
-
-// Discovery score (home)
 function discoveryScore(p) {
-  const now = Date.now();
-  const ageHours = (now - p.timestamp) / 3600000;
-
+  const ageH = (Date.now() - p.timestamp) / 3600000;
   const likes = Array.isArray(p.likes) ? p.likes.length : 0;
   const comments = p.commentsCount || 0;
 
-  const freshness = Math.max(0, 48 - ageHours); // boost 2 hari
-  const decay = ageHours > 72 ? -5 : 0;         // penalti pelan
+  const fresh = Math.max(0, 36 - ageH);   // boost 36 jam
+  const decay = ageH > 72 ? -3 : 0;        // turun pelan
 
-  return likes * 2 + comments * 3 + freshness + decay;
+  return likes * 2 + comments * 3 + fresh + decay;
 }
 
-// Popular score
 function popularScore(p) {
-  const ageHours = (Date.now() - p.timestamp) / 3600000;
+  const ageH = (Date.now() - p.timestamp) / 3600000;
   const likes = Array.isArray(p.likes) ? p.likes.length : 0;
   const comments = p.commentsCount || 0;
 
-  return likes * 3 + comments * 4 - ageHours * 0.2;
+  return likes * 3 + comments * 4 - ageH * 0.15;
 }
 
-// Batasi spam creator
 function limitPerUser(posts, max = 2) {
-  const count = {};
+  const map = {};
   return posts.filter(p => {
-    count[p.userId] = (count[p.userId] || 0) + 1;
-    return count[p.userId] <= max;
+    map[p.userId] = (map[p.userId] || 0) + 1;
+    return map[p.userId] <= max;
   });
 }
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-
   if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
   }
@@ -76,7 +86,6 @@ export default async function handler(req, res) {
     const mode = req.query.mode || "home";
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const cursor = Number(req.query.cursor) || null;
-    const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
     const q = (req.query.q || "").toLowerCase();
 
@@ -84,14 +93,10 @@ export default async function handler(req, res) {
 
     if (mode === "meme") query = query.where("category", "==", "meme");
     if (mode === "user" && userId) query = query.where("userId", "==", userId);
-
     if (mode !== "search") query = query.orderBy("timestamp", "desc");
+    if (cursor) query = query.startAfter(admin.firestore.Timestamp.fromMillis(cursor));
 
-    if (cursor) {
-      query = query.startAfter(admin.firestore.Timestamp.fromMillis(cursor));
-    }
-
-    const pool = mode === "home" || mode === "popular" ? limit * 5 : limit * 3;
+    const pool = mode === "home" ? limit * 3 : limit * 2; // HEMAT
     const snap = await query.limit(pool).get();
 
     if (snap.empty) {
@@ -104,7 +109,7 @@ export default async function handler(req, res) {
       timestamp: safeMillis(d.data().timestamp),
     }));
 
-    /* ===== SEARCH ===== */
+    /* SEARCH */
     if (mode === "search" && q) {
       posts = posts.filter(p =>
         p.title?.toLowerCase().includes(q) ||
@@ -112,53 +117,41 @@ export default async function handler(req, res) {
       );
     }
 
-    /* ===== JOIN USER ===== */
-    const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
-
-    if (userIds.length) {
-      const snaps = await Promise.all(
-        userIds.map(uid => db.doc(`${USERS_PATH}/${uid}`).get())
-      );
-
-      const map = {};
-      snaps.forEach(d => d.exists && (map[d.id] = d.data()));
-
-      posts = posts.map(p => ({
-        ...p,
-        user: {
-          username: map[p.userId]?.username || "Unknown",
-          photoURL: map[p.userId]?.photoURL || null,
-        },
-      }));
+    /* USER JOIN (CACHED) */
+    for (const p of posts) {
+      if (!p.userId) continue;
+      const u = await getUserCached(p.userId);
+      p.user = {
+        username: u?.username || "Unknown",
+        photoURL: u?.photoURL || null,
+      };
     }
 
-    /* ===== ALGORITMA ===== */
-
+    /* ALGORITMA */
     if (mode === "home") {
-      posts = posts.map(p => ({
-        ...p,
-        _score: discoveryScore(p),
-      }));
+      posts = posts
+        .map(p => ({ ...p, _s: discoveryScore(p) }))
+        .sort((a, b) => b._s - a._s);
 
-      posts.sort((a, b) => b._score - a._score);
-
-      const top = shuffleSmall(posts.slice(0, 5));
-      const rest = posts.slice(5);
-
-      posts = limitPerUser([...top, ...rest]);
+      posts = limitPerUser([
+        ...shuffleSmall(posts.slice(0, 4)),
+        ...posts.slice(4),
+      ]);
     }
 
     if (mode === "popular") {
       posts = posts
-        .map(p => ({ ...p, _score: popularScore(p) }))
-        .sort((a, b) => b._score - a._score);
+        .map(p => ({ ...p, _s: popularScore(p) }))
+        .sort((a, b) => b._s - a._s);
     }
 
     const result = posts.slice(0, limit);
 
     res.json({
       posts: result,
-      nextCursor: result.length ? result[result.length - 1].timestamp : null,
+      nextCursor: result.length
+        ? result[result.length - 1].timestamp
+        : null,
     });
 
   } catch (e) {
