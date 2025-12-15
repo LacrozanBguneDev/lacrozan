@@ -1,150 +1,178 @@
 import admin from "firebase-admin";
 
-/* ================== KONFIGURASI ================== */
+/* ================== CONFIG ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
-
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(
-      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-    ),
+    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
   });
 }
-
 const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== CACHE USER PROFILE ================== */
+/* ================== UTIL & CACHE ================== */
+const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
+
+// Cache user profile biar irit reads (Memory Cache)
 const userCache = new Map();
 const getUserProfile = async (userId) => {
-  if (!userId) return { username: "Unknown", photoURL: null };
+  if (!userId) return { username: "Anon", photoURL: null };
   if (userCache.has(userId)) return userCache.get(userId);
+  
   const doc = await db.doc(`${USERS_PATH}/${userId}`).get();
-  const data = doc.exists
+  const data = doc.exists 
     ? { username: doc.data().username || "Unknown", photoURL: doc.data().photoURL || null }
     : { username: "Unknown", photoURL: null };
+    
   userCache.set(userId, data);
   return data;
 };
 
-/* ================== UTIL ================== */
-const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
-const shuffleArray = arr => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
+/* ================== DYNAMIC SCORE ================== */
+const calculateChaosScore = (p) => {
+  const now = Date.now();
+  const hoursAgo = (now - p.timestamp) / 3600000;
+  
+  // 1. Freshness Factor (Makin baru makin tinggi)
+  // Max score 50 untuk post < 1 jam, turun seiring waktu
+  const freshness = Math.max(0, 50 - (hoursAgo * 2)); 
 
-/* ================== SCORE ================== */
-const discoveryScore = p => {
-  const ageHours = (Date.now() - p.timestamp) / 3600000;
+  // 2. Engagement Factor (Likes/Comments)
+  // Tidak terlalu dominan biar post baru tetap muncul
   const likes = Array.isArray(p.likes) ? p.likes.length : 0;
-  const comments = p.commentsCount || 0;
-  const freshness = Math.max(0, 48 - ageHours);
-  const decay = ageHours > 72 ? -5 : 0;
-  return likes * 2 + comments * 3 + freshness + decay;
+  const engagement = (likes * 1) + ((p.commentsCount || 0) * 2);
+
+  // 3. Chaos Factor (Random)
+  // Angka acak 0-40. Ini yang bikin "Dynamic" dan beda tiap refresh
+  const chaos = Math.floor(Math.random() * 40);
+
+  return freshness + engagement + chaos;
 };
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
+  // 1. Auth Guard
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "API key invalid" });
+  if (REQUIRED_API_KEY && apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({ error: true });
   }
 
   try {
-    const mode = req.query.mode || "home";
+    // 2. Parse Params
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const viewerId = req.query.viewerId || null;
-    const userId = req.query.userId || null;
-    const q = (req.query.q || "").toLowerCase();
-    const nextCursor = Number(req.query.nextCursor) || null;
+    const nextCursor = Number(req.query.nextCursor) || null; // Timestamp
+    
+    // OPSI BARU: Frontend bisa kirim ID yang sedang tampil biar gak dobel
+    // Format: ?excludeIds=id1,id2,id3
+    const clientExcluded = (req.query.excludeIds || "").split(",").filter(Boolean);
 
-    /* ================== QUERY POSTS ================== */
-    let query = db.collection(POSTS_PATH);
-    if (mode === "meme") query = query.where("category", "==", "meme");
-    if (mode === "user" && userId) query = query.where("userId", "==", userId);
-    query = query.orderBy("timestamp", "desc");
-    if (nextCursor) query = query.startAfter(nextCursor);
+    // 3. Query Database (STRICT TIME BASED)
+    // Kita ambil pool 5x limit (misal 50) untuk disaring
+    let query = db.collection(POSTS_PATH)
+      .orderBy("timestamp", "desc"); // Selalu urut waktu biar pagination stabil
 
-    const poolMultiplier = mode === "home" || mode === "popular" ? 10 : 8;
-    const snap = await query.limit(limit * poolMultiplier).get();
+    if (nextCursor) {
+      query = query.startAfter(admin.firestore.Timestamp.fromMillis(nextCursor));
+    }
+
+    // Fetch agak banyak (Pool) untuk diacak
+    const poolSize = limit * 5; 
+    const snap = await query.limit(poolSize).get();
+
     if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
-    let posts = snap.docs.map(d => ({
+    // 4. Tentukan Next Cursor SEKARANG (PENTING!)
+    // Cursor harus berdasarkan item TERAKHIR di database yang kita pegang,
+    // BUKAN item terakhir yang kita kirim ke user. 
+    // Ini mencegah pagination mundur/ulang.
+    const lastDocInDb = snap.docs[snap.docs.length - 1];
+    const realNextCursor = safeMillis(lastDocInDb.data().timestamp);
+
+    // 5. Mapping Data Awal
+    let pool = snap.docs.map(d => ({
       id: d.id,
       ...d.data(),
       timestamp: safeMillis(d.data().timestamp),
+      userId: d.data().userId || "anon"
     }));
 
-    /* ================== SEARCH ================== */
-    if (mode === "search" && q) {
-      posts = posts.filter(p =>
-        p.title?.toLowerCase().includes(q) ||
-        p.content?.toLowerCase().includes(q)
-      );
-    }
-
-    /* ================== JOIN USER PROFILES ================== */
-    const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
-    const userProfiles = await Promise.all(userIds.map(getUserProfile));
-    const userMap = {};
-    userIds.forEach((uid, i) => userMap[uid] = userProfiles[i]);
-    posts = posts.map(p => ({ ...p, user: userMap[p.userId] || { username: "Unknown", photoURL: null } }));
-
-    /* ================== HISTORY USER ================== */
-    let seenIds = new Set();
+    // 6. Filter: History User & Client Excludes
+    let seenIds = new Set(clientExcluded);
     if (viewerId) {
+      // Ambil history dari DB (optimasi: bisa di-skip kalau heavy load)
       const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
       if (viewerDoc.exists) {
-        seenIds = new Set(viewerDoc.data().seenPosts || []);
+        (viewerDoc.data().seenPosts || []).forEach(id => seenIds.add(id));
       }
     }
-    posts = posts.filter(p => !seenIds.has(p.id));
+    
+    // Buang post yang sudah dilihat/exclude
+    pool = pool.filter(p => !seenIds.has(p.id));
 
-    /* ================== SCORE & ALGORITMA ================== */
-    if (mode === "home") {
-      posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));
-      posts.sort((a, b) => b._score - a._score);
+    // 7. SCORING & DIVERSITY (Inti Algoritma)
+    
+    // Beri nilai "Chaos Score" ke sisa post
+    pool.forEach(p => { p._score = calculateChaosScore(p); });
+    
+    // Sort berdasarkan score (Campuran fresh + viral + random)
+    pool.sort((a, b) => b._score - a._score);
 
-      // Pisahkan post terbaru (<12 jam) dan sisanya
-      const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12);
-      let rest = posts.filter(p => !newPosts.includes(p));
+    // SELEKSI FINAL: Strict One User Per Batch
+    const finalPosts = [];
+    const selectedUsers = new Set(); // Melacak user di batch ini
 
-      // Shuffle rest untuk variasi
-      rest = shuffleArray(rest);
+    // Putaran 1: Cari post dengan user yang BELUM ada di batch ini
+    for (const p of pool) {
+      if (finalPosts.length >= limit) break;
+      if (!selectedUsers.has(p.userId)) {
+        finalPosts.push(p);
+        selectedUsers.add(p.userId);
+      }
+    }
 
-      // Gabungkan tapi batasi max 2 post per user
-      const finalPosts = [];
-      const count = {};
-      const allPosts = [...newPosts, ...rest];
-      for (const p of allPosts) {
-        count[p.userId] = (count[p.userId] || 0) + 1;
-        if (count[p.userId] <= 2) finalPosts.push(p);
+    // Putaran 2 (Fallback): Kalau slot masih sisa (jarang terjadi kalau pool 50),
+    // baru boleh ambil user yang sama
+    if (finalPosts.length < limit) {
+      for (const p of pool) {
         if (finalPosts.length >= limit) break;
+        // Cek ID post biar gak masukin post yang sudah masuk di putaran 1
+        if (!finalPosts.find(x => x.id === p.id)) {
+          finalPosts.push(p);
+        }
       }
-
-      posts = finalPosts;
     }
 
-    const result = posts;
+    // 8. Join Profile (Hemat Read, cuma buat finalPosts)
+    const uniqueUserIds = [...new Set(finalPosts.map(p => p.userId))];
+    const profiles = await Promise.all(uniqueUserIds.map(getUserProfile));
+    const profileMap = Object.fromEntries(uniqueUserIds.map((id, i) => [id, profiles[i]]));
 
-    /* ================== UPDATE HISTORY USER ================== */
+    const result = finalPosts.map(p => {
+      const { _score, ...rest } = p; // Hapus score internal
+      return {
+        ...rest,
+        user: profileMap[p.userId] || { username: "Unknown", photoURL: null }
+      };
+    });
+
+    // 9. Update History (Fire & Forget)
     if (viewerId && result.length) {
-      const viewerRef = db.doc(`${USERS_PATH}/${viewerId}`);
-      await viewerRef.set({
-        seenPosts: admin.firestore.FieldValue.arrayUnion(...result.map(p => p.id))
-      }, { merge: true });
+      db.doc(`${USERS_PATH}/${viewerId}`).set({
+        seenPosts: admin.firestore.FieldValue.arrayUnion(...result.map(p => p.id)),
+        lastActive: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }).catch(e => console.log("History err", e));
     }
 
-    /* ================== NEXT CURSOR ================== */
-    const newCursor = result.length ? result[result.length - 1].timestamp : null;
+    // 10. Return Response
+    // Jika snap.size < poolSize, berarti DB sudah habis, cursor null
+    const nextCursorResponse = snap.size < poolSize ? null : realNextCursor;
 
-    res.json({ posts: result, nextCursor: newCursor });
+    res.json({
+      posts: result,
+      nextCursor: nextCursorResponse
+    });
 
   } catch (e) {
     console.error("FEED ERROR:", e);
