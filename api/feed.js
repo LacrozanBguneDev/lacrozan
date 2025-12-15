@@ -1,6 +1,6 @@
 import admin from "firebase-admin";
 
-/* ================== CONFIG ================== */
+/* ================== KONFIGURASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
 if (!admin.apps.length) {
@@ -15,164 +15,144 @@ const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== UTIL ================== */
-// Helper aman buat convert timestamp
-const safeMillis = (ts) => {
-  if (!ts) return Date.now(); // Fallback kalau null
-  if (typeof ts === 'number') return ts;
-  if (ts.toMillis) return ts.toMillis();
-  return Date.now();
-};
-
-// Cache User Profile (Hemat Read)
+/* ================== CACHE USER PROFILE ================== */
 const userCache = new Map();
 const getUserProfile = async (userId) => {
-  if (!userId) return { username: "Anonim", photoURL: null };
+  if (!userId) return { username: "Unknown", photoURL: null };
   if (userCache.has(userId)) return userCache.get(userId);
-  try {
-    const doc = await db.doc(`${USERS_PATH}/${userId}`).get();
-    const data = doc.exists
-      ? { username: doc.data().username || "User", photoURL: doc.data().photoURL || null }
-      : { username: "Unknown", photoURL: null };
-    userCache.set(userId, data);
-    return data;
-  } catch (e) {
-    return { username: "Error", photoURL: null };
-  }
+  const doc = await db.doc(`${USERS_PATH}/${userId}`).get();
+  const data = doc.exists
+    ? { username: doc.data().username || "Unknown", photoURL: doc.data().photoURL || null }
+    : { username: "Unknown", photoURL: null };
+  userCache.set(userId, data);
+  return data;
 };
 
-/* ================== SCORING ================== */
-const calculateChaosScore = (p) => {
-  const ageHours = Math.max(0.1, (Date.now() - p.timestamp) / 3600000);
+/* ================== UTIL ================== */
+const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
+const shuffleArray = arr => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+/* ================== SCORE ================== */
+const discoveryScore = p => {
+  const ageHours = (Date.now() - p.timestamp) / 3600000;
   const likes = Array.isArray(p.likes) ? p.likes.length : 0;
   const comments = p.commentsCount || 0;
-  
-  // Rumus: (Interaksi) / (Umur^1.5) + Faktor Random
-  const rawScore = (likes + comments * 2) / Math.pow(ageHours, 1.5);
-  const chaos = Math.random() * 5; // Tambah sedikit bumbu random
-  return rawScore + chaos;
+  const freshness = Math.max(0, 48 - ageHours);
+  const decay = ageHours > 72 ? -5 : 0;
+  return likes * 2 + comments * 3 + freshness + decay;
 };
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
-  // Set JSON header biar frontend gak bingung
-  res.setHeader('Content-Type', 'application/json');
-
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-  if (REQUIRED_API_KEY && apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "Unauthorized" });
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({ error: true, message: "API key invalid" });
   }
 
   try {
-    // 1. INPUT VALIDATION (Biar gak crash kena NaN)
+    const mode = req.query.mode || "home";
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const viewerId = req.query.viewerId || null;
-    
-    // Validasi Cursor: Pastikan Number valid, bukan NaN
-    let nextCursor = req.query.nextCursor;
-    if (nextCursor === "null" || nextCursor === "undefined") nextCursor = null;
-    nextCursor = Number(nextCursor);
-    if (isNaN(nextCursor) || nextCursor === 0) nextCursor = null;
+    const userId = req.query.userId || null;
+    const q = (req.query.q || "").toLowerCase();
+    const nextCursor = Number(req.query.nextCursor) || null;
 
-    const excludeIdsRaw = req.query.excludeIds || "";
-    const excludeIds = excludeIdsRaw.split(",").filter(id => id && id.length > 0);
+    /* ================== QUERY POSTS ================== */
+    let query = db.collection(POSTS_PATH);
+    if (mode === "meme") query = query.where("category", "==", "meme");
+    if (mode === "user" && userId) query = query.where("userId", "==", userId);
+    query = query.orderBy("timestamp", "desc");
+    if (nextCursor) query = query.startAfter(nextCursor);
 
-    // 2. QUERY DB (TIME BASED)
-    let query = db.collection(POSTS_PATH).orderBy("timestamp", "desc");
-    
-    // Hanya pasang cursor kalau valid
-    if (nextCursor) {
-      query = query.startAfter(admin.firestore.Timestamp.fromMillis(nextCursor));
+    const poolMultiplier = mode === "home" || mode === "popular" ? 10 : 8;
+    const snap = await query.limit(limit * poolMultiplier).get();
+    if (snap.empty) return res.json({ posts: [], nextCursor: null });
+
+    let posts = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: safeMillis(d.data().timestamp),
+    }));
+
+    /* ================== SEARCH ================== */
+    if (mode === "search" && q) {
+      posts = posts.filter(p =>
+        p.title?.toLowerCase().includes(q) ||
+        p.content?.toLowerCase().includes(q)
+      );
     }
 
-    // Ambil Pool (3x limit cukup, 5x kebanyakan bikin lemot)
-    const poolSize = limit * 3;
-    const snap = await query.limit(poolSize).get();
+    /* ================== JOIN USER PROFILES ================== */
+    const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
+    const userProfiles = await Promise.all(userIds.map(getUserProfile));
+    const userMap = {};
+    userIds.forEach((uid, i) => userMap[uid] = userProfiles[i]);
+    posts = posts.map(p => ({ ...p, user: userMap[p.userId] || { username: "Unknown", photoURL: null } }));
 
-    // Kalau kosong, return struktur standar
-    if (snap.empty) {
-      return res.json({ posts: [], nextCursor: null });
-    }
-
-    // 3. SIMPAN POSISI DATABASE TERAKHIR (Untuk Cursor Berikutnya)
-    const lastDoc = snap.docs[snap.docs.length - 1];
-    const realNextCursor = safeMillis(lastDoc.data().timestamp); // Ini kunci anti-duplikat
-
-    // 4. MAPPING DATA
-    let pool = snap.docs.map(d => {
-      const data = d.data();
-      return {
-        id: d.id,
-        ...data,
-        timestamp: safeMillis(data.timestamp),
-        userId: data.userId || "anon",
-        _score: 0 // Placeholder
-      };
-    });
-
-    // 5. FILTER: History & Exclude
-    let blockList = new Set(excludeIds);
+    /* ================== HISTORY USER ================== */
+    let seenIds = new Set();
     if (viewerId) {
-      // Logic history opsional (bisa di-skip kalau bikin berat)
       const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
       if (viewerDoc.exists) {
-        (viewerDoc.data().seenPosts || []).forEach(id => blockList.add(id));
+        seenIds = new Set(viewerDoc.data().seenPosts || []);
       }
     }
-    pool = pool.filter(p => !blockList.has(p.id));
+    posts = posts.filter(p => !seenIds.has(p.id));
 
-    // 6. SORTING (Chaos Algorithm)
-    pool.forEach(p => p._score = calculateChaosScore(p));
-    pool.sort((a, b) => b._score - a._score);
+    /* ================== SCORE & WEIGHTED RANDOM ================== */
+    posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));
+    
+    // Pisahkan post terbaru (<12 jam)
+    const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12);
+    let rest = posts.filter(p => !newPosts.includes(p));
+    rest = shuffleArray(rest);
 
-    // 7. DIVERSITY (1 Post per User)
+    // Weighted random selection
     const finalPosts = [];
-    const usedUsers = new Set();
-    
-    // Putaran 1: User Unik
-    for (const p of pool) {
-      if (finalPosts.length >= limit) break;
-      if (!usedUsers.has(p.userId)) {
-        finalPosts.push(p);
-        usedUsers.add(p.userId);
-      }
-    }
-    
-    // Putaran 2: Isi sisa slot (jika perlu)
-    if (finalPosts.length < limit) {
-      for (const p of pool) {
-        if (finalPosts.length >= limit) break;
-        // Cek ID post, bukan user lagi (biar gak duplikat item)
-        if (!finalPosts.find(existing => existing.id === p.id)) {
-          finalPosts.push(p);
+    const count = {};
+    const allPosts = [...newPosts, ...rest];
+    while (finalPosts.length < limit && allPosts.length) {
+      const totalScore = allPosts.reduce((sum, p) => sum + p._score + 1, 0);
+      let r = Math.random() * totalScore;
+      let chosenIndex = 0;
+      let sum = 0;
+      for (let i = 0; i < allPosts.length; i++) {
+        sum += allPosts[i]._score + 1;
+        if (sum >= r) {
+          chosenIndex = i;
+          break;
         }
       }
+      const p = allPosts[chosenIndex];
+      if ((count[p.userId] || 0) < 2) {
+        finalPosts.push(p);
+        count[p.userId] = (count[p.userId] || 0) + 1;
+      }
+      allPosts.splice(chosenIndex, 1); // remove selected
     }
 
-    // 8. JOIN PROFILES
-    const userIds = [...new Set(finalPosts.map(p => p.userId))];
-    const profiles = await Promise.all(userIds.map(getUserProfile));
-    const userMap = {};
-    userIds.forEach((id, i) => userMap[id] = profiles[i]);
+    /* ================== UPDATE HISTORY USER ================== */
+    if (viewerId && finalPosts.length) {
+      const viewerRef = db.doc(`${USERS_PATH}/${viewerId}`);
+      await viewerRef.set({
+        seenPosts: admin.firestore.FieldValue.arrayUnion(...finalPosts.map(p => p.id))
+      }, { merge: true });
+    }
 
-    const result = finalPosts.map(p => {
-      const { _score, ...rest } = p;
-      return { ...rest, user: userMap[p.userId] };
-    });
+    /* ================== NEXT CURSOR ================== */
+    const newCursor = finalPosts.length ? finalPosts[finalPosts.length - 1].timestamp : null;
 
-    // 9. RESPONSE AMAN
-    // Cek apakah DB masih ada sisa? Kalau snap kurang dari limit, berarti habis.
-    const hasMore = snap.size >= poolSize; 
-    
-    res.json({
-      posts: result,
-      // Pastikan return null jika DB habis, biar frontend stop request
-      nextCursor: hasMore ? realNextCursor : null 
-    });
+    res.json({ posts: finalPosts, nextCursor: newCursor });
 
   } catch (e) {
     console.error("FEED ERROR:", e);
-    // Return empty array biar frontend gak nge-freeze/crash
-    res.status(200).json({ posts: [], nextCursor: null, error: e.message });
+    res.status(500).json({ error: true, message: e.message });
   }
 }
