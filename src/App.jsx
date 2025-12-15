@@ -287,6 +287,7 @@ const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
     useEffect(() => {
         const handleWinMove = (e) => {
             if(isDragging) {
+                e.preventDefault(); // Mencegah seleksi teks
                 const newX = Math.min(Math.max(0, e.clientX - dragStartRef.current.x), window.innerWidth - 60);
                 const newY = Math.min(Math.max(0, e.clientY - dragStartRef.current.y), window.innerHeight - 60);
                 setPosition({ x: newX, y: newY });
@@ -317,7 +318,11 @@ const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
             onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)} 
             onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)} 
             onTouchEnd={handleEnd} 
-            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+            onMouseDown={(e) => {
+                e.preventDefault();
+                handleStart(e.clientX, e.clientY);
+                setIsDragging(true); // Langsung set dragging true untuk desktop
+            }}
         >
             <button onClick={() => !isDragging && onClick()} className="bg-gradient-to-br from-yellow-400 to-orange-500 p-2.5 rounded-full shadow-2xl shadow-orange-500/50 relative group active:scale-95 transition-transform">
                 <GiftIcon size={24} className={`text-white ${canClaim ? 'animate-bounce' : ''}`}/>
@@ -755,7 +760,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             ) : (
                 <div className="flex-1 flex flex-col">
                     {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-1 text-[15px] line-clamp-1">{post.title}</h3>}
-                    <div className="text-sm text-gray-600 dark:text-gray-300 mb-2 leading-relaxed flex-1">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca'}</button>}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-300 mb-2 leading-relaxed flex-1">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     <div onDoubleClick={handleDoubleTap} className="relative mt-auto">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                          {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
@@ -842,6 +847,8 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     useEffect(() => {
         setLoadingLocal(true);
+        setLocalPosts([]); // Reset posts dulu biar gak blank putih lama (biar muncul skeleton)
+        
         const fetchUserPosts = async () => {
             try {
                 const data = await fetchFeedData({
@@ -924,16 +931,9 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 };
 
 const TrendingTags = ({ posts, onTagClick }) => {
-    const tags = useMemo(() => { 
-        const tagCounts = {}; 
-        posts.forEach(p => { 
-            const uniqueTags = new Set(extractHashtags(p.content));
-            uniqueTags.forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; }); 
-        }); 
-        return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10); 
-    }, [posts]);
-    if (tags.length === 0) return null;
-    return ( <div className="mb-4 overflow-x-auto no-scrollbar py-2"><div className="flex gap-3"><div className="flex items-center gap-1 text-xs font-bold text-sky-600 dark:text-sky-400 whitespace-nowrap mr-2"><TrendingUp size={16}/> Trending:</div>{tags.map(([tag, count]) => ( <div key={tag} onClick={()=>onTagClick(tag)} className="px-3 py-1 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-600 dark:text-gray-300 shadow-sm whitespace-nowrap flex items-center gap-1 cursor-pointer hover:bg-sky-50">#{tag.replace('#','')} <span className="text-sky-400 ml-1">({count})</span></div> ))}</div></div> );
+    // Component ini masih ada tapi tidak dirender langsung di bawah header utama lagi di mode desktop
+    // Kita gunakan logicnya untuk mengambil top 1 trending
+    return null;
 };
 
 const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, isLoadingFeed, feedError, retryFeed }) => {
@@ -943,9 +943,23 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     const [sortType, setSortType] = useState('home'); 
     const bottomRef = useRef(null);
 
+    // Ambil top 1 trending tag untuk ditampilkan di header compact
+    const topTrend = useMemo(() => {
+        const tagCounts = {};
+        allPosts.forEach(p => { const tags = extractHashtags(p.content); tags.forEach(t => tagCounts[t] = (tagCounts[t]||0)+1); });
+        const sorted = Object.entries(tagCounts).sort((a,b) => b[1]-a[1]);
+        return sorted.length > 0 ? {tag: sorted[0][0], count: sorted[0][1]} : null;
+    }, [allPosts]);
+
     const loadFeed = async (reset = false) => {
         if (loading) return;
         setLoading(true);
+
+        // Jika reset (ganti tab/refresh manual), kosongkan list dulu agar SkeletonPost muncul
+        if (reset) {
+            setFeedPosts([]);
+            window.scrollTo({ top: 0, behavior: 'smooth' }); 
+        }
 
         const currentCursor = reset ? null : nextCursor;
         
@@ -964,7 +978,6 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
 
             if (reset) {
                 setFeedPosts(enrichedPosts);
-                window.scrollTo({ top: 0, behavior: 'smooth' }); 
             } else {
                 setFeedPosts(prev => [...prev, ...enrichedPosts]);
             }
@@ -1005,16 +1018,23 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
     // Grid dihapus, diganti Stack vertical
     return (
         <div className="w-full max-w-3xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
-            <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all">
-                <div className="flex gap-2 overflow-x-auto no-scrollbar">
+            <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
+                <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
                      <button onClick={() => setSortType('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
                      <button onClick={() => setSortType('meme')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
                      <button onClick={() => setSortType('popular')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
+                     
+                     {/* FIX: Trending Tag Masuk Sini agar dempet */}
+                     {topTrend && (
+                        <div onClick={() => onHashtagClick(topTrend.tag.replace('#',''))} className="hidden md:flex items-center px-3 py-1.5 bg-white dark:bg-gray-800 border border-sky-100 dark:border-gray-700 rounded-full text-[10px] font-bold text-gray-500 cursor-pointer hover:bg-sky-50 whitespace-nowrap">
+                            <TrendingUp size={12} className="mr-1 text-sky-500"/> {topTrend.tag}
+                        </div>
+                     )}
                 </div>
                 <button onClick={manualRefresh} className="ml-auto p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={18}/></button>
             </div>
 
-            <TrendingTags posts={allPosts} onTagClick={onHashtagClick} />
+            {/* TrendingTags Baris Lama Dihapus sesuai request */}
 
             {feedError && (
                 <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 rounded-3xl mb-4 text-center">
@@ -1204,18 +1224,24 @@ const App = () => {
                     <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 md:px-8 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
                         <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                         
-                        {/* DESKTOP NAV */}
+                        {/* DESKTOP NAV - FIX: Reordered as requested */}
                         <div className="hidden md:flex items-center gap-6 mr-4">
                             <button onClick={()=>setPage('home')} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
-                            <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
-                            <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 50</button>
+                            
                             {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
-                            <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2"><PlusCircle size={16}/> Buat Post</button>
+                            
+                            {/* Tombol Buat Post Ditengahkan */}
+                            <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2 mx-2"><PlusCircle size={16}/> Buat Post</button>
+                            
+                            <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 50</button>
+                            
+                            <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
                         </div>
 
                         <div className="flex gap-2 items-center">
                             <button onClick={()=>setPage('legal')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition"><Scale size={18}/></button>
-                            <button onClick={toggleDarkMode} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 dark:text-yellow-400 hover:bg-gray-200 transition">{darkMode ? <Sun size={18}/> : <Moon size={18}/>}</button>
+                            {/* Tombol Dark Mode Dihapus sesuai request, tapi sistem tetap jalan otomatis dari localStorage/OS */}
+                            
                             {isGuest ? ( <button onClick={()=>setShowAuthModal(true)} className="px-4 py-2 bg-sky-500 text-white rounded-full font-bold text-xs shadow-lg hover:bg-sky-600 transition flex items-center gap-2 ml-2"><LogIn size={16}/> Masuk</button> ) : ( <><button onClick={()=>setPage('notifications')} className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition relative"><Bell size={18}/>{notifCount>0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}</button><button onClick={async()=>{await signOut(auth); setPage('home');}} className="p-2 bg-rose-50 dark:bg-gray-800 rounded-full text-rose-500 hover:bg-rose-100 transition ml-1"><LogOut size={18}/></button></> )}
                         </div>
                     </header> 
