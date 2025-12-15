@@ -442,6 +442,7 @@ const SkeletonPost = () => (
     </div>
 );
 
+// PERBAIKAN 1: Menghapus line-clamp agar tombol "Baca Selengkapnya" bekerja, dan mengecilkan font (text-sm)
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;"); 
@@ -450,7 +451,8 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[0.93rem] md:text-sm line-clamp-5 md:line-clamp-none" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
+    // FIX: Menggunakan text-sm dan menghapus line-clamp agar handled by JS
+    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
 };
 
 // ==========================================
@@ -720,11 +722,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
+    // PERBAIKAN 3 & 4: Menghapus h-full agar kartu tidak dipaksa tinggi (grid independent), dan menggeser label MEME (top-14)
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl md:rounded-2xl p-4 mb-2 md:mb-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg h-full flex flex-col">
+        <div className="bg-white dark:bg-gray-800 rounded-xl md:rounded-2xl p-4 mb-2 md:mb-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg flex flex-col">
             {post.isShort && <div className="absolute top-4 right-4 bg-black/80 text-white text-[10px] font-bold px-3 py-1 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={10} className="mr-1 text-yellow-400"/> SHORT</div>}
             {!post.isShort && likeCount > 10 && <div className="absolute top-4 right-4 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] font-bold px-3 py-1 rounded-full border border-orange-200 dark:border-orange-800 flex items-center z-10"><Flame size={10} className="mr-1"/> TRENDING</div>}
-            {isMeme && !post.isShort && <div className="absolute top-4 right-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 dark:border-yellow-800 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
+            {isMeme && !post.isShort && <div className="absolute top-14 right-4 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-bold px-3 py-1 rounded-full border border-yellow-200 dark:border-yellow-800 flex items-center z-10"><Laugh size={10} className="mr-1"/> MEME</div>}
             <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => goToProfile(post.userId)}>
                     <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-gradient-to-tr from-sky-200 to-purple-200 p-[2px] flex-shrink-0"><div className="w-full h-full rounded-full bg-white overflow-hidden"><Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full"/></div></div>
@@ -982,8 +985,9 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
         }
     }
 
+    // PERBAIKAN 2: Menambahkan items-start dan menghapus auto-rows-fr agar grid desktop rapi dan tinggi independen
     return (
-        <div className="w-full max-w-[1400px] mx-auto pb-24 px-4 md:px-8 pt-4"> {/* FIX: Ultra Wide Width */}
+        <div className="w-full max-w-[1400px] mx-auto pb-24 px-4 md:px-8 pt-4"> 
             <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar">
                      <button onClick={() => setSortType('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
@@ -1008,7 +1012,7 @@ const HomeScreen = ({ currentUserId, profile, allPosts, handleFollow, goToProfil
                     <p className="text-gray-400 font-bold">Belum ada postingan.</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 auto-rows-fr"> {/* FIX: Grid Layout 2-4 cols */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 items-start"> 
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700 col-span-full md:col-span-1" : ""} h-full`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-1"><CheckCircle size={14}/> Postingan Berhasil Terkirim</div>}
