@@ -12,11 +12,17 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+// Path disesuaikan dengan getPublicCollection di frontend
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
 /* ================== UTIL ================== */
-const safeMillis = ts => ts?.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : (typeof ts === 'number' ? ts : 0));
+const safeMillis = ts => {
+  if (ts?.toMillis) return ts.toMillis();
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts === 'number') return ts;
+  return 0;
+};
 
 const shuffle = arr => {
   const a = [...arr];
@@ -53,6 +59,7 @@ const popularScore = p => {
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
+  // Samakan pengambilan API Key dengan header x-api-key dari frontend
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
@@ -63,47 +70,44 @@ export default async function handler(req, res) {
     const limitNum = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
-    const cursor = req.query.cursor || null;
+    const cursorId = req.query.cursor || null; // Frontend mengirimkan ID post sebagai cursor
     const q = (req.query.q || "").toLowerCase();
 
-    /* ===== LOAD SEEN POSTS ===== */
+    /* ===== LOAD SEEN POSTS (Hanya untuk Home) ===== */
     let seenIds = new Set();
-    if (viewerId) {
+    if (viewerId && mode === "home") {
       const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
       if (viewerSnap.exists) {
         seenIds = new Set(viewerSnap.data().seenPosts || []);
       }
     }
 
-    /* ===== QUERY ===== */
+    /* ===== QUERY BUILDING ===== */
     let queryRef = db.collection(POSTS_PATH);
 
-    // FIX: Penanganan Filter & OrderBy agar tidak error Index
-    if (mode === "meme") {
-      queryRef = queryRef.where("category", "==", "meme");
-    }
-    
-    if (mode === "user" && userId) {
-      queryRef = queryRef.where("userId", "==", userId);
-    }
+    // Filter berdasarkan Mode
+    if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
+    if (mode === "user" && userId) queryRef = queryRef.where("userId", "==", userId);
 
-    // Selalu urutkan berdasarkan waktu terbaru kecuali saat search
+    // Sorting (Search tidak pakai orderBy Firestore karena kita filter manual di bawah)
     if (mode !== "search") {
       queryRef = queryRef.orderBy("timestamp", "desc");
     }
 
-    // FIX: Cursor Logic untuk Infinite Scroll
-    if (cursor && mode !== "search") {
-      const cursorDoc = await db.collection(POSTS_PATH).doc(cursor).get();
+    // PAGINATION: Jika ada cursorId, cari dulu dokumennya untuk startAfter
+    if (cursorId && mode !== "search") {
+      const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
       if (cursorDoc.exists) {
         queryRef = queryRef.startAfter(cursorDoc);
       }
     }
 
-    // Ambil data lebih banyak untuk diproses algoritma scoring/filtering
+    // Ambil data (lebihkan limit untuk filtering internal)
     const snap = await queryRef.limit(limitNum * 5).get();
     
-    if (snap.empty) return res.json({ posts: [], nextCursor: null });
+    if (snap.empty) {
+      return res.json({ posts: [], nextCursor: null });
+    }
 
     let posts = snap.docs.map(d => {
       const data = d.data();
@@ -114,7 +118,7 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ===== SEARCH (In-Memory Filter) ===== */
+    /* ===== SEARCH FILTERING ===== */
     if (mode === "search" && q) {
       posts = posts.filter(p =>
         p.title?.toLowerCase().includes(q) ||
@@ -122,58 +126,48 @@ export default async function handler(req, res) {
       );
     }
 
-    /* ===== ANTI DUPLIKAT GLOBAL ===== */
-    // Hanya filter 'seen' jika bukan mode 'user' agar profile tetap lengkap
-    if (mode !== "user") {
-        posts = posts.filter(p => !seenIds.has(p.id));
+    /* ===== ANTI DUPLIKAT (Hanya Mode Home) ===== */
+    if (mode === "home") {
+      posts = posts.filter(p => !seenIds.has(p.id));
     }
 
     /* ===== ALGORITMA SCORING ===== */
     if (mode === "home") {
-      // Home menggunakan campuran Discovery Score dan Shuffle
       posts = posts.map(p => ({ ...p, _s: discoveryScore(p) }))
                    .sort((a,b)=>b._s-a._s);
-
-      const fresh = posts.filter(p => Date.now() - p.timestamp < 86400000); // 24 jam terakhir
-      const old = posts.filter(p => Date.now() - p.timestamp >= 86400000);
-
-      posts = [
-        ...shuffle(fresh).slice(0, Math.ceil(limitNum * 0.7)),
-        ...old
-      ];
+      
+      const fresh = posts.filter(p => (Date.now() - p.timestamp) < 86400000);
+      const old = posts.filter(p => (Date.now() - p.timestamp) >= 86400000);
+      
+      posts = [...shuffle(fresh).slice(0, Math.ceil(limitNum * 0.7)), ...old];
     } else if (mode === "popular") {
-      // Popular fokus pada interaksi tertinggi
       posts = posts.map(p => ({ ...p, _s: popularScore(p) }))
                    .sort((a,b)=>b._s-a._s);
     }
 
-    // Batasi post per user agar feed bervariasi (kecuali di halaman profile user itu sendiri)
+    // Batasi 2 post per user agar feed bervariasi (kecuali mode user)
     if (mode !== "user") {
-        posts = limitPerUser(posts, 2);
+      posts = limitPerUser(posts, 2);
     }
-    
+
     posts = posts.slice(0, limitNum);
 
-    /* ===== JOIN USER DATA ===== */
+    /* ===== JOIN USER DATA (Dibutuhkan untuk Badge di Frontend) ===== */
     const uids = [...new Set(posts.map(p => p.userId))];
     if (uids.length) {
       const snaps = await Promise.all(
         uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
       );
-      const map = {};
-      snaps.forEach(s => {
-        if (s.exists) {
-          map[s.id] = s.data();
-        }
-      });
+      const userMap = {};
+      snaps.forEach(s => s.exists && (userMap[s.id] = s.data()));
       
       posts = posts.map(p => ({
         ...p,
         user: {
-          username: map[p.userId]?.username || "User",
-          photoURL: map[p.userId]?.photoURL || null,
-          reputation: map[p.userId]?.reputation || 0,
-          isDev: map[p.userId]?.email === "irhamdika00@gmail.com"
+          username: userMap[p.userId]?.username || "Unknown",
+          photoURL: userMap[p.userId]?.photoURL || null,
+          reputation: userMap[p.userId]?.reputation || 0, // Untuk getReputationBadge
+          email: userMap[p.userId]?.email || null // Untuk deteksi isDev
         },
       }));
     }
@@ -185,11 +179,12 @@ export default async function handler(req, res) {
       }, { merge: true });
     }
 
-    // Tentukan Cursor Berikutnya
-    const nextCursor = posts.length > 0 ? posts[posts.length - 1].id : null;
+    /* ===== FINAL RESPONSE ===== */
+    // nextCursor adalah ID post terakhir, ini yang dibaca oleh fetchFeedData
+    const nextCursor = posts.length >= limitNum ? posts[posts.length - 1].id : null;
 
     res.json({ 
-      posts,
+      posts, 
       nextCursor 
     });
 
