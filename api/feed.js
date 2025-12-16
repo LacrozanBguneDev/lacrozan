@@ -1,14 +1,15 @@
+
 import admin from "firebase-admin";
 
 /* ================== KONFIGURASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(
-      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-    ),
-  });
+admin.initializeApp({
+credential: admin.credential.cert(
+JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+),
+});
 }
 
 const db = admin.firestore();
@@ -16,86 +17,139 @@ const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
 /* ================== UTIL ================== */
-const safeMillis = ts => (ts?.toMillis ? ts.toMillis() : 0);
+const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
 
-const shuffle = arr => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+const shuffleArray = arr => {
+const a = [...arr];
+for (let i = a.length - 1; i > 0; i--) {
+const j = Math.floor(Math.random() * (i + 1));
+[a[i], a[j]] = [a[j], a[i]];
+}
+return a;
+};
+
+/* ================== SCORE ================== */
+const discoveryScore = p => {
+const ageHours = (Date.now() - p.timestamp) / 3600000;
+const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+const comments = p.commentsCount || 0;
+const freshness = Math.max(0, 48 - ageHours);
+const decay = ageHours > 72 ? -5 : 0;
+return likes * 2 + comments * 3 + freshness + decay;
+};
+
+const popularScore = p => {
+const ageHours = (Date.now() - p.timestamp) / 3600000;
+const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+const comments = p.commentsCount || 0;
+return likes * 3 + comments * 4 - ageHours * 0.2;
+};
+
+const limitPerUser = (posts, max = 2) => {
+const count = {};
+return posts.filter(p => {
+count[p.userId] = (count[p.userId] || 0) + 1;
+return count[p.userId] <= max;
+});
 };
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
-  const apiKey = String(
-    req.headers["x-api-key"] || req.query.apiKey || ""
-  ).trim();
+const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
+if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+return res.status(401).json({ error: true, message: "API key invalid" });
+}
 
-  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "API key invalid" });
-  }
+try {
+const mode = req.query.mode || "home";
+const limit = Math.min(Number(req.query.limit) || 10, 20);
+const viewerId = req.query.viewerId || null;
+const userId = req.query.userId || null;
+const q = (req.query.q || "").toLowerCase();
 
-  try {
-    const mode = req.query.mode || "home";
-    const limit = Math.min(Number(req.query.limit) || 10, 20);
-    const viewerId = req.query.viewerId || null;
-    const nextCursor = Number(req.query.nextCursor) || null;
+// --- QUERY POST ---  
+let query = db.collection(POSTS_PATH);  
+if (mode === "meme") query = query.where("category", "==", "meme");  
+if (mode === "user" && userId) query = query.where("userId", "==", userId);  
+if (mode !== "search") query = query.orderBy("timestamp", "desc");  
 
-    /* ================== QUERY ================== */
-    let query = db.collection(POSTS_PATH);
+const poolMultiplier = mode === "home" || mode === "popular" ? 15 : 8;  
+const snap = await query.limit(limit * poolMultiplier).get();  
+if (snap.empty) return res.json({ posts: [], nextCursor: null });  
 
-    if (mode === "meme") query = query.where("category", "==", "meme");
+let posts = snap.docs.map(d => ({  
+  id: d.id,  
+  ...d.data(),  
+  timestamp: safeMillis(d.data().timestamp),  
+}));  
 
-    query = query.orderBy("timestamp", "desc");
-    if (nextCursor) query = query.startAfter(nextCursor);
+// --- SEARCH ---  
+if (mode === "search" && q) {  
+  posts = posts.filter(p =>  
+    p.title?.toLowerCase().includes(q) ||  
+    p.content?.toLowerCase().includes(q)  
+  );  
+}  
 
-    const poolSize = mode === "home" ? limit * 8 : limit;
-    const snap = await query.limit(poolSize).get();
+// --- JOIN USER PROFILES ---  
+const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];  
+if (userIds.length) {  
+  const snaps = await Promise.all(  
+    userIds.map(uid => db.doc(`${USERS_PATH}/${uid}`).get())  
+  );  
+  const map = {};  
+  snaps.forEach(d => d.exists && (map[d.id] = d.data()));  
+  posts = posts.map(p => ({  
+    ...p,  
+    user: {  
+      username: map[p.userId]?.username || "Unknown",  
+      photoURL: map[p.userId]?.photoURL || null,  
+    },  
+  }));  
+}  
 
-    if (snap.empty) {
-      return res.json({ posts: [], nextCursor: null });
-    }
+// --- HISTORY USER ---  
+let seenIds = new Set();  
+if (viewerId) {  
+  const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();  
+  if (viewerDoc.exists) {  
+    const data = viewerDoc.data();  
+    seenIds = new Set(data.seenPosts || []);  
+  }  
+}  
 
-    let posts = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      timestamp: safeMillis(d.data().timestamp),
-    }));
+posts = posts.filter(p => !seenIds.has(p.id)); // Filter post yang sudah dilihat  
 
-    /* ================== HOME ALGORITHM ================== */
-    if (mode === "home") {
-      const now = Date.now();
+// --- SCORE & ALGORITMA ---  
+if (mode === "home") {  
+  posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));  
+  posts.sort((a, b) => b._score - a._score);  
+  // Boost 3 post terbaru agar selalu muncul di atas  
+  const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12).slice(0, 3);  
+  const rest = posts.filter(p => !newPosts.includes(p));  
+  posts = shuffleArray(newPosts).concat(limitPerUser(rest));  
+} else if (mode === "popular") {  
+  posts = posts.map(p => ({ ...p, _score: popularScore(p) }))  
+               .sort((a, b) => b._score - a._score);  
+}  
 
-      const fresh = posts.filter(
-        p => (now - p.timestamp) / 3600000 < 24
-      );
-      const rest = posts.filter(p => !fresh.includes(p));
+const result = posts.slice(0, limit);  
 
-      posts = [
-        ...shuffle(fresh),
-        ...shuffle(rest),
-      ].slice(0, limit);
-    }
+// --- UPDATE HISTORY USER ---  
+if (viewerId && result.length) {  
+  const viewerRef = db.doc(`${USERS_PATH}/${viewerId}`);  
+  await viewerRef.set({  
+    seenPosts: Array.from(new Set([...seenIds, ...result.map(p => p.id)]))  
+  }, { merge: true });  
+}  
 
-    /* ================== MEME & POPULER ================== */
-    else {
-      posts = posts.slice(0, limit);
-    }
+res.json({  
+  posts: result,  
+  nextCursor: result.length ? result[result.length - 1].timestamp : null,  
+});
 
-    /* ================== CURSOR ================== */
-    const newCursor = posts.length
-      ? posts[posts.length - 1].timestamp
-      : null;
-
-    res.json({
-      posts,
-      nextCursor: newCursor,
-    });
-
-  } catch (e) {
-    console.error("FEED ERROR:", e);
-    res.status(500).json({ error: true, message: e.message });
-  }
+} catch (e) {
+console.error("FEED ERROR:", e);
+res.status(500).json({ error: true, message: e.message });
+}
 }
