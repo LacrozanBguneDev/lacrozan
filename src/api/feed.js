@@ -1,55 +1,119 @@
-import admin from 'firebase-admin';
+import admin from "firebase-admin";
+
+const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    databaseURL: "https://eduku-web.firebaseio.com"
+    credential: admin.credential.cert(
+      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+    ),
   });
 }
 
 const db = admin.firestore();
+const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
+const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
+/* ================== UTIL ================== */
+const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
+
+const shuffle = arr => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+/* ================== HANDLER ================== */
 export default async function handler(req, res) {
+  const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({ error: true });
+  }
+
   try {
-    const userId = req.query.userId || "guest"; // ganti sesuai user login
+    const limit = Math.min(Number(req.query.limit) || 10, 20);
+    const viewerId = req.query.viewerId || null;
 
-    // Ambil 100 post terbaru
-    const snapshot = await db.collection("posts")
-                             .orderBy("timestamp", "desc")
-                             .limit(100)
-                             .get();
+    /* === Ambil pool post besar === */
+    const poolSize = limit * 15;
+    const snap = await db.collection(POSTS_PATH)
+      .orderBy("timestamp", "desc")
+      .limit(poolSize)
+      .get();
 
-    let posts = [];
-    snapshot.forEach(doc => posts.push({ id: doc.id, ...doc.data() }));
+    if (snap.empty) return res.json({ posts: [] });
 
-    // Hitung score feed
-    posts = posts.map(post => {
-      let score = 1; // base chance
+    let posts = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: safeMillis(d.data().timestamp),
+    }));
 
-      // post dari akun yang di-follow
-      if (post.followers?.includes(userId)) score += 3;
+    /* === Filter seen posts === */
+    let seen = new Set();
+    if (viewerId) {
+      const v = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+      if (v.exists) seen = new Set(v.data().seenPosts || []);
+    }
+    posts = posts.filter(p => !seen.has(p.id));
 
-      // post sejenis yang user suka
-      if (post.tags && post.tags.some(tag => post.userLikes?.includes(tag))) score += 2;
+    /* === Kelompokkan per user === */
+    const byUser = {};
+    for (const p of posts) {
+      if (!byUser[p.userId]) byUser[p.userId] = [];
+      byUser[p.userId].push(p);
+    }
 
-      // post baru sedikit di-boost
-      const ageInHours = (Date.now() - post.timestamp.toMillis()) / (1000*60*60);
-      if (ageInHours < 24) score += 1.5;
+    /* === Urutkan tiap user by terbaru === */
+    Object.values(byUser).forEach(arr =>
+      arr.sort((a, b) => b.timestamp - a.timestamp)
+    );
 
-      return { ...post, score };
+    /* === Round-robin anti spam === */
+    let users = shuffle(Object.keys(byUser));
+    let result = [];
+    let round = 0;
+
+    while (result.length < limit && users.length) {
+      for (const uid of users) {
+        const arr = byUser[uid];
+        if (arr[round]) {
+          result.push(arr[round]);
+          if (result.length >= limit) break;
+        }
+      }
+      round++;
+      if (round > 2) break; // keras: max 3 post / user
+    }
+
+    /* === Join user profile (minimal) === */
+    const uids = [...new Set(result.map(p => p.userId))];
+    const profiles = await Promise.all(
+      uids.map(uid => db.doc(`${USERS_PATH}/${uid}`).get())
+    );
+    const map = {};
+    profiles.forEach(d => {
+      map[d.id] = d.exists
+        ? { username: d.data().username || "Unknown", photoURL: d.data().photoURL || null }
+        : { username: "Unknown", photoURL: null };
     });
 
-    // Sortir berdasarkan score
-    posts.sort((a,b) => b.score - a.score);
+    result = result.map(p => ({ ...p, user: map[p.userId] }));
 
-    // Ambil batch kecil untuk frontend (misal 10 post)
-    const batch = posts.slice(0, 10);
+    /* === Update seen === */
+    if (viewerId && result.length) {
+      await db.doc(`${USERS_PATH}/${viewerId}`).set({
+        seenPosts: admin.firestore.FieldValue.arrayUnion(...result.map(p => p.id))
+      }, { merge: true });
+    }
 
-    // Return JSON siap render
-    res.status(200).json({ posts: batch });
+    res.json({ posts: result });
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Server error" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: true });
   }
 }
