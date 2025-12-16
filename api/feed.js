@@ -1,6 +1,8 @@
 import admin from "firebase-admin";
 
-/* ================== INIT ================== */
+/* ================== KONFIGURASI ================== */
+const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(
@@ -11,6 +13,7 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
+const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
 /* ================== UTIL ================== */
 const safeMillis = ts => (ts?.toMillis ? ts.toMillis() : 0);
@@ -26,32 +29,40 @@ const shuffle = arr => {
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
+  const apiKey = String(
+    req.headers["x-api-key"] || req.query.apiKey || ""
+  ).trim();
+
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({ error: true, message: "API key invalid" });
+  }
+
   try {
     const mode = req.query.mode || "home";
     const limit = Math.min(Number(req.query.limit) || 10, 20);
-
-    // 🔑 ID POST YANG SUDAH DIKIRIM KE FRONTEND
-    const sentIds = new Set(
-      (req.query.sentIds || "")
-        .split(",")
-        .filter(Boolean)
-    );
+    const viewerId = req.query.viewerId || null;
+    const nextCursor = Number(req.query.nextCursor) || null;
 
     /* ================== QUERY ================== */
-    let query = db.collection(POSTS_PATH).orderBy("timestamp", "desc");
+    let query = db.collection(POSTS_PATH);
+
     if (mode === "meme") query = query.where("category", "==", "meme");
 
-    const snap = await query.limit(limit * 10).get();
-    if (snap.empty) return res.json({ posts: [], sentIds: [...sentIds] });
+    query = query.orderBy("timestamp", "desc");
+    if (nextCursor) query = query.startAfter(nextCursor);
+
+    const poolSize = mode === "home" ? limit * 8 : limit;
+    const snap = await query.limit(poolSize).get();
+
+    if (snap.empty) {
+      return res.json({ posts: [], nextCursor: null });
+    }
 
     let posts = snap.docs.map(d => ({
       id: d.id,
       ...d.data(),
       timestamp: safeMillis(d.data().timestamp),
     }));
-
-    /* ================== FILTER DUPLIKAT ================== */
-    posts = posts.filter(p => !sentIds.has(p.id));
 
     /* ================== HOME ALGORITHM ================== */
     if (mode === "home") {
@@ -65,19 +76,22 @@ export default async function handler(req, res) {
       posts = [
         ...shuffle(fresh),
         ...shuffle(rest),
-      ];
-    } else {
-      posts = shuffle(posts);
+      ].slice(0, limit);
     }
 
-    posts = posts.slice(0, limit);
+    /* ================== MEME & POPULER ================== */
+    else {
+      posts = posts.slice(0, limit);
+    }
 
-    /* ================== UPDATE sentIds ================== */
-    posts.forEach(p => sentIds.add(p.id));
+    /* ================== CURSOR ================== */
+    const newCursor = posts.length
+      ? posts[posts.length - 1].timestamp
+      : null;
 
     res.json({
       posts,
-      sentIds: [...sentIds], // kirim balik ke frontend
+      nextCursor: newCursor,
     });
 
   } catch (e) {
