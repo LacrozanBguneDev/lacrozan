@@ -15,13 +15,15 @@ const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== UTIL ================== */
+/* ================== UTIL (PERBAIKAN TIMESTAMP & ACAK) ================== */
+// Memastikan timestamp balik ke angka murni (ms) agar tidak NaN di frontend
 const safeMillis = ts => {
-  if (!ts) return 0;
-  if (ts.toMillis) return ts.toMillis();
+  if (!ts) return Date.now();
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (ts._seconds) return ts._seconds * 1000;
-  if (ts instanceof Date) return ts.getTime();
-  return Number(ts) || 0;
+  if (typeof ts === 'number') return ts;
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? Date.now() : d.getTime();
 };
 
 const shuffle = arr => {
@@ -33,9 +35,30 @@ const shuffle = arr => {
   return a;
 };
 
+// Mencegah spam user yang sama muncul berlebihan
+const limitPerUser = (posts, max = 2) => {
+  const map = {};
+  return posts.filter(p => {
+    map[p.userId] = (map[p.userId] || 0) + 1;
+    return map[p.userId] <= max;
+  });
+};
+
+/* ================== SCORE (PRIORITAS BARU & TRENDING) ================== */
+const calculateScore = p => {
+  const ageH = (Date.now() - p.timestamp) / 3600000;
+  const likes = p.likes?.length || 0;
+  const comments = p.commentsCount || 0;
+  
+  // Bonus untuk postingan di bawah 24 jam (Postingan baru sangat diprioritaskan)
+  const freshness = Math.max(0, 24 - ageH) * 2; 
+  
+  // Rumus: Likes + Komentar + Bonus Baru - Penalti Waktu
+  return (likes * 3) + (comments * 5) + freshness - (ageH * 0.5);
+};
+
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
-  // 1. Pastikan Header & API Key sesuai request frontend
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
@@ -47,73 +70,94 @@ export default async function handler(req, res) {
     const viewerId = req.query.viewerId || null;
     const cursor = req.query.cursor || null;
 
-    /* ===== 2. QUERY BASE ===== */
     let queryRef = db.collection(POSTS_PATH);
 
+    /* ===== FILTER MODE ===== */
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
 
-    // Frontend butuh urutan terbaru agar scroll terasa natural
+    // Untuk dapet data yang fresh, kita ambil lebih banyak dulu lalu diacak di server
     queryRef = queryRef.orderBy("timestamp", "desc");
 
-    /* ===== 3. PAGINATION (PENTING) ===== */
     if (cursor) {
       const cursorDoc = await db.collection(POSTS_PATH).doc(cursor).get();
-      if (cursorDoc.exists) {
-        queryRef = queryRef.startAfter(cursorDoc);
-      }
+      if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
     }
 
-    // Kita ambil data sesuai limit yang diminta frontend
-    const snap = await queryRef.limit(limitReq).get();
+    // Ambil data 3x lipat lebih banyak agar kita bisa acak/filter spam user
+    const fetchLimit = cursor ? limitReq * 2 : limitReq * 4;
+    const snap = await queryRef.limit(fetchLimit).get();
     
-    if (snap.empty) {
-      return res.json({ posts: [], nextCursor: null });
-    }
+    if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
-    /* ===== 4. MAPPING DATA (SESUAI POSTCARD.JSX) ===== */
     let posts = snap.docs.map(d => {
       const data = d.data();
+      const ts = safeMillis(data.timestamp);
       return {
         ...data,
-        id: d.id, // ID harus ada di level atas
-        timestamp: data.timestamp, // Biarkan dalam format asli atau millis, PostCard biasanya handle keduanya
+        id: d.id,
+        timestamp: ts, // SEKARANG PASTI ANGKA (MENCEGAH NaN)
       };
     });
 
-    /* ===== 5. JOIN USER DATA ===== */
-    const uids = [...new Set(posts.map(p => p.userId))];
-    const userMap = {};
-    
-    if (uids.length) {
-      const userSnaps = await Promise.all(uids.map(id => db.doc(`${USERS_PATH}/${id}`).get()));
-      userSnaps.forEach(s => {
-        if (s.exists) userMap[s.id] = s.data();
-      });
+    /* ===== ALGORITMA ANTI MONOTON ===== */
+    if (mode === "home" || mode === "popular") {
+      // 1. Hitung skor untuk tiap post
+      posts = posts.map(p => ({ ...p, _score: calculateScore(p) }));
+      
+      // 2. Pisahkan sangat baru vs lama
+      const superFresh = posts.filter(p => (Date.now() - p.timestamp) < 3600000 * 6); // 6 jam terakhir
+      const others = posts.filter(p => (Date.now() - p.timestamp) >= 3600000 * 6);
+
+      // 3. Acak masing-masing grup agar tiap refresh terasa beda
+      posts = [...shuffle(superFresh), ...shuffle(others)];
+      
+      // 4. Sortir berdasarkan skor tapi beri toleransi acak (biar gak itu-itu aja)
+      posts.sort((a, b) => (b._score + Math.random() * 5) - (a._score + Math.random() * 5));
     }
 
-    // Gabungkan data user ke post
+    /* ===== ANTI SPAM USER ===== */
+    // Maksimal 2 postingan dari user yang sama dalam satu tampilan feed
+    if (mode !== "user") {
+      posts = limitPerUser(posts, 2);
+    }
+
+    // Ambil sesuai limit asli
+    posts = posts.slice(0, limitReq);
+
+    /* ===== JOIN DATA USER (BADGE & FOTO) ===== */
+    const uids = [...new Set(posts.map(p => p.userId))];
+    const userMap = {};
+    if (uids.length) {
+      const userSnaps = await Promise.all(uids.map(id => db.doc(`${USERS_PATH}/${id}`).get()));
+      userSnaps.forEach(s => { if (s.exists) userMap[s.id] = s.data(); });
+    }
+
     posts = posts.map(p => {
-      const userData = userMap[p.userId] || {};
+      const u = userMap[p.userId] || {};
       return {
         ...p,
         user: {
-          username: userData.username || "Anonim",
-          photoURL: userData.photoURL || null,
-          reputation: userData.reputation || 0,
-          email: userData.email || ""
+          username: u.username || "User",
+          photoURL: u.photoURL || null,
+          reputation: u.reputation || 0,
+          email: u.email || ""
         }
       };
     });
 
-    /* ===== 6. RESPONSE SESUAI FRONTEND ===== */
-    // Frontend Anda mengecek: data.posts.length === limit
-    // Jadi kita kirim balik ID terakhir sebagai cursor
-    const lastDocId = posts.length > 0 ? posts[posts.length - 1].id : null;
+    /* ===== UPDATE SEEN (BIAR GAK MUNCUL LAGI) ===== */
+    if (viewerId && posts.length && mode === "home") {
+      await db.doc(`${USERS_PATH}/${viewerId}`).set({
+        seenPosts: admin.firestore.FieldValue.arrayUnion(...posts.map(p => p.id))
+      }, { merge: true });
+    }
+
+    const lastId = posts.length > 0 ? posts[posts.length - 1].id : null;
 
     res.status(200).json({
       posts: posts,
-      nextCursor: lastDocId
+      nextCursor: lastId
     });
 
   } catch (e) {
