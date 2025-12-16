@@ -27,33 +27,29 @@ const shuffleArray = arr => {
   return a;
 };
 
-const limitPerUser = (posts, max = 2) => {
-  const count = {};
-  return posts.filter(p => {
-    count[p.userId] = (count[p.userId] || 0) + 1;
-    return count[p.userId] <= max;
-  });
+/* ================== SCORE ================== */
+const discoveryScore = p => {
+  const ageHours = (Date.now() - p.timestamp) / 3600000;
+  const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+  const comments = p.commentsCount || 0;
+  const freshness = Math.max(0, 48 - ageHours);
+  const decay = ageHours > 72 ? -10 : 0;
+  return likes * 2 + comments * 3 + freshness + decay;
 };
 
-/* ================== PROFILE CACHE ================== */
-const profileCache = new Map();
-const PROFILE_TTL = 5 * 60 * 1000;
+const popularScore = p => {
+  const ageHours = (Date.now() - p.timestamp) / 3600000;
+  const likes = Array.isArray(p.likes) ? p.likes.length : 0;
+  const comments = p.commentsCount || 0;
+  return likes * 3 + comments * 4 - ageHours * 0.3;
+};
 
-const getUserProfile = async userId => {
-  const cached = profileCache.get(userId);
-  const now = Date.now();
-
-  if (cached && cached.expires > now) return cached.data;
-
-  const snap = await db.doc(`${USERS_PATH}/${userId}`).get();
-  const data = snap.exists ? snap.data() : null;
-
-  profileCache.set(userId, {
-    data,
-    expires: now + PROFILE_TTL,
+const limitPerUser = (posts, max = 2) => {
+  const map = {};
+  return posts.filter(p => {
+    map[p.userId] = (map[p.userId] || 0) + 1;
+    return map[p.userId] <= max;
   });
-
-  return data;
 };
 
 /* ================== HANDLER ================== */
@@ -65,38 +61,13 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
-    const limit = Math.min(Number(req.query.limit) || 10, 20);
+    const limit = Math.min(Number(req.query.limit) || 5, 20);
     const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
     const q = (req.query.q || "").toLowerCase();
-    const cursor = Number(req.query.cursor || Date.now());
+    const cursor = Number(req.query.cursor || 0);
 
-    /* ================== QUERY DASAR ================== */
-    let query = db.collection(POSTS_PATH);
-
-    if (mode === "meme") query = query.where("category", "==", "meme");
-    if (mode === "user" && userId) query = query.where("userId", "==", userId);
-    if (mode !== "search") query = query.orderBy("timestamp", "desc");
-
-    const poolSize = limit * 12;
-    const snap = await query.limit(poolSize).get();
-    if (snap.empty) return res.json({ posts: [], nextCursor: null });
-
-    let posts = snap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      timestamp: safeMillis(d.data().timestamp),
-    }));
-
-    /* ================== SEARCH ================== */
-    if (mode === "search" && q) {
-      posts = posts.filter(p =>
-        p.title?.toLowerCase().includes(q) ||
-        p.content?.toLowerCase().includes(q)
-      );
-    }
-
-    /* ================== SEEN POSTS ================== */
+    /* ====== LOAD HISTORY (ANTI DUPLIKAT GLOBAL) ====== */
     let seenIds = new Set();
     if (viewerId) {
       const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
@@ -105,58 +76,96 @@ export default async function handler(req, res) {
       }
     }
 
-    posts = posts.filter(
-      p => p.timestamp < cursor && !seenIds.has(p.id)
-    );
+    /* ====== QUERY ====== */
+    let query = db.collection(POSTS_PATH);
 
-    /* ================== PRIORITAS BARU + RANDOM ================== */
-    const now = Date.now();
-    const FRESH_LIMIT = now - 48 * 3600000;
+    if (mode === "meme") query = query.where("category", "==", "meme");
+    if (mode === "user" && userId) query = query.where("userId", "==", userId);
+    if (mode !== "search") query = query.orderBy("timestamp", "desc");
 
-    let freshPosts = posts.filter(p => p.timestamp >= FRESH_LIMIT);
-    let oldPosts   = posts.filter(p => p.timestamp < FRESH_LIMIT);
-
-    freshPosts = shuffleArray(freshPosts);
-    oldPosts   = shuffleArray(oldPosts);
-
-    const freshTake = Math.ceil(limit * 0.7);
-    const oldTake   = limit - freshTake;
-
-    posts = [
-      ...freshPosts.slice(0, freshTake),
-      ...oldPosts.slice(0, oldTake),
-    ];
-
-    posts = shuffleArray(limitPerUser(posts));
-
-    /* ================== JOIN USER (CACHE) ================== */
-    for (let p of posts) {
-      if (!p.userId) {
-        p.user = { username: "Unknown", photoURL: null };
-        continue;
-      }
-
-      const profile = await getUserProfile(p.userId);
-      p.user = {
-        username: profile?.username || "Unknown",
-        photoURL: profile?.photoURL || null,
-      };
+    if (cursor) {
+      query = query.startAfter(cursor);
     }
 
-    /* ================== UPDATE SEEN ================== */
-    if (viewerId && posts.length) {
+    const poolSize = limit * 20;
+    const snap = await query.limit(poolSize).get();
+    if (snap.empty) {
+      return res.json({ posts: [], nextCursor: null });
+    }
+
+    let posts = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        timestamp: safeMillis(data.timestamp),
+      };
+    });
+
+    /* ====== SEARCH ====== */
+    if (mode === "search" && q) {
+      posts = posts.filter(p =>
+        p.title?.toLowerCase().includes(q) ||
+        p.content?.toLowerCase().includes(q)
+      );
+    }
+
+    /* ====== FILTER DUPLIKAT USER ====== */
+    posts = posts.filter(p => !seenIds.has(p.id));
+
+    /* ====== ALGORITMA ====== */
+    if (mode === "home") {
+      posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));
+      posts.sort((a, b) => b._score - a._score);
+
+      const fresh = posts.filter(p => (Date.now() - p.timestamp) < 24 * 3600000);
+      const old = posts.filter(p => !fresh.includes(p));
+
+      const mixed = [
+        ...shuffleArray(fresh).slice(0, Math.ceil(limit * 0.7)),
+        ...shuffleArray(old).slice(0, limit),
+      ];
+
+      posts = limitPerUser(mixed, 2);
+    }
+
+    if (mode === "popular") {
+      posts = posts
+        .map(p => ({ ...p, _score: popularScore(p) }))
+        .sort((a, b) => b._score - a._score);
+    }
+
+    /* ====== JOIN USER ====== */
+    const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
+    if (userIds.length) {
+      const snaps = await Promise.all(
+        userIds.map(uid => db.doc(`${USERS_PATH}/${uid}`).get())
+      );
+      const map = {};
+      snaps.forEach(d => d.exists && (map[d.id] = d.data()));
+      posts = posts.map(p => ({
+        ...p,
+        user: {
+          username: map[p.userId]?.username || "Unknown",
+          photoURL: map[p.userId]?.photoURL || null,
+        },
+      }));
+    }
+
+    const result = posts.slice(0, limit);
+
+    /* ====== UPDATE HISTORY ====== */
+    if (viewerId && result.length) {
       await db.doc(`${USERS_PATH}/${viewerId}`).set({
-        seenPosts: admin.firestore.FieldValue.arrayUnion(
-          ...posts.map(p => p.id)
+        seenPosts: Array.from(
+          new Set([...seenIds, ...result.map(p => p.id)])
         )
       }, { merge: true });
     }
 
     res.json({
-      posts,
-      nextCursor: posts.length
-        ? posts[posts.length - 1].timestamp
-        : null,
+      posts: result,
+      nextCursor: result.length ? result[result.length - 1].timestamp : null,
     });
 
   } catch (e) {
