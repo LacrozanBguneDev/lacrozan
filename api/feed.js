@@ -1,15 +1,14 @@
-
 import admin from "firebase-admin";
 
 /* ================== KONFIGURASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
 if (!admin.apps.length) {
-admin.initializeApp({
-credential: admin.credential.cert(
-JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-),
-});
+  admin.initializeApp({
+    credential: admin.credential.cert(
+      JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+    ),
+  });
 }
 
 const db = admin.firestore();
@@ -20,136 +19,134 @@ const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 const safeMillis = ts => ts && ts.toMillis ? ts.toMillis() : 0;
 
 const shuffleArray = arr => {
-const a = [...arr];
-for (let i = a.length - 1; i > 0; i--) {
-const j = Math.floor(Math.random() * (i + 1));
-[a[i], a[j]] = [a[j], a[i]];
-}
-return a;
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 };
 
-/* ================== SCORE ================== */
-const discoveryScore = p => {
-const ageHours = (Date.now() - p.timestamp) / 3600000;
-const likes = Array.isArray(p.likes) ? p.likes.length : 0;
-const comments = p.commentsCount || 0;
-const freshness = Math.max(0, 48 - ageHours);
-const decay = ageHours > 72 ? -5 : 0;
-return likes * 2 + comments * 3 + freshness + decay;
-};
+/* ================== USER PROFILE CACHE ================== */
+// { userId: { data, expires } }
+const profileCache = new Map();
+const PROFILE_TTL = 5 * 60 * 1000; // 5 menit
 
-const popularScore = p => {
-const ageHours = (Date.now() - p.timestamp) / 3600000;
-const likes = Array.isArray(p.likes) ? p.likes.length : 0;
-const comments = p.commentsCount || 0;
-return likes * 3 + comments * 4 - ageHours * 0.2;
-};
+const getUserProfile = async userId => {
+  const cached = profileCache.get(userId);
+  const now = Date.now();
 
-const limitPerUser = (posts, max = 2) => {
-const count = {};
-return posts.filter(p => {
-count[p.userId] = (count[p.userId] || 0) + 1;
-return count[p.userId] <= max;
-});
+  if (cached && cached.expires > now) {
+    return cached.data;
+  }
+
+  const snap = await db.doc(`${USERS_PATH}/${userId}`).get();
+  const data = snap.exists ? snap.data() : null;
+
+  profileCache.set(userId, {
+    data,
+    expires: now + PROFILE_TTL,
+  });
+
+  return data;
 };
 
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
-const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
-return res.status(401).json({ error: true, message: "API key invalid" });
-}
+  const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({ error: true, message: "API key invalid" });
+  }
 
-try {
-const mode = req.query.mode || "home";
-const limit = Math.min(Number(req.query.limit) || 10, 20);
-const viewerId = req.query.viewerId || null;
-const userId = req.query.userId || null;
-const q = (req.query.q || "").toLowerCase();
+  try {
+    const mode = req.query.mode || "home";
+    const limit = Math.min(Number(req.query.limit) || 10, 20);
+    const viewerId = req.query.viewerId || null;
+    const cursor = Number(req.query.cursor || Date.now());
 
-// --- QUERY POST ---  
-let query = db.collection(POSTS_PATH);  
-if (mode === "meme") query = query.where("category", "==", "meme");  
-if (mode === "user" && userId) query = query.where("userId", "==", userId);  
-if (mode !== "search") query = query.orderBy("timestamp", "desc");  
+    /* ================== SEEN POSTS ================== */
+    let seenIds = new Set();
+    if (viewerId) {
+      const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+      if (viewerDoc.exists) {
+        seenIds = new Set(viewerDoc.data().seenPosts || []);
+      }
+    }
 
-const poolMultiplier = mode === "home" || mode === "popular" ? 15 : 8;  
-const snap = await query.limit(limit * poolMultiplier).get();  
-if (snap.empty) return res.json({ posts: [], nextCursor: null });  
+    /* ================== POOL BARU & LAMA ================== */
+    const now = Date.now();
+    const FRESH_LIMIT = now - 48 * 3600000;
 
-let posts = snap.docs.map(d => ({  
-  id: d.id,  
-  ...d.data(),  
-  timestamp: safeMillis(d.data().timestamp),  
-}));  
+    const freshSnap = await db.collection(POSTS_PATH)
+      .where("timestamp", ">=", admin.firestore.Timestamp.fromMillis(FRESH_LIMIT))
+      .orderBy("timestamp", "desc")
+      .limit(limit * 5)
+      .get();
 
-// --- SEARCH ---  
-if (mode === "search" && q) {  
-  posts = posts.filter(p =>  
-    p.title?.toLowerCase().includes(q) ||  
-    p.content?.toLowerCase().includes(q)  
-  );  
-}  
+    const oldSnap = await db.collection(POSTS_PATH)
+      .where("timestamp", "<", admin.firestore.Timestamp.fromMillis(FRESH_LIMIT))
+      .orderBy("timestamp", "desc")
+      .limit(limit * 3)
+      .get();
 
-// --- JOIN USER PROFILES ---  
-const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];  
-if (userIds.length) {  
-  const snaps = await Promise.all(  
-    userIds.map(uid => db.doc(`${USERS_PATH}/${uid}`).get())  
-  );  
-  const map = {};  
-  snaps.forEach(d => d.exists && (map[d.id] = d.data()));  
-  posts = posts.map(p => ({  
-    ...p,  
-    user: {  
-      username: map[p.userId]?.username || "Unknown",  
-      photoURL: map[p.userId]?.photoURL || null,  
-    },  
-  }));  
-}  
+    let freshPosts = freshSnap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: safeMillis(d.data().timestamp),
+    }));
 
-// --- HISTORY USER ---  
-let seenIds = new Set();  
-if (viewerId) {  
-  const viewerDoc = await db.doc(`${USERS_PATH}/${viewerId}`).get();  
-  if (viewerDoc.exists) {  
-    const data = viewerDoc.data();  
-    seenIds = new Set(data.seenPosts || []);  
-  }  
-}  
+    let oldPosts = oldSnap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: safeMillis(d.data().timestamp),
+    }));
 
-posts = posts.filter(p => !seenIds.has(p.id)); // Filter post yang sudah dilihat  
+    // FILTER CURSOR + SEEN
+    freshPosts = freshPosts.filter(p => p.timestamp < cursor && !seenIds.has(p.id));
+    oldPosts   = oldPosts.filter(p => p.timestamp < cursor && !seenIds.has(p.id));
 
-// --- SCORE & ALGORITMA ---  
-if (mode === "home") {  
-  posts = posts.map(p => ({ ...p, _score: discoveryScore(p) }));  
-  posts.sort((a, b) => b._score - a._score);  
-  // Boost 3 post terbaru agar selalu muncul di atas  
-  const newPosts = posts.filter(p => (Date.now() - p.timestamp) / 3600000 < 12).slice(0, 3);  
-  const rest = posts.filter(p => !newPosts.includes(p));  
-  posts = shuffleArray(newPosts).concat(limitPerUser(rest));  
-} else if (mode === "popular") {  
-  posts = posts.map(p => ({ ...p, _score: popularScore(p) }))  
-               .sort((a, b) => b._score - a._score);  
-}  
+    /* ================== RANDOM PROPORSIONAL ================== */
+    const freshTake = Math.ceil(limit * 0.7);
+    const oldTake   = limit - freshTake;
 
-const result = posts.slice(0, limit);  
+    const pickedFresh = shuffleArray(freshPosts).slice(0, freshTake);
+    const pickedOld   = shuffleArray(oldPosts).slice(0, oldTake);
 
-// --- UPDATE HISTORY USER ---  
-if (viewerId && result.length) {  
-  const viewerRef = db.doc(`${USERS_PATH}/${viewerId}`);  
-  await viewerRef.set({  
-    seenPosts: Array.from(new Set([...seenIds, ...result.map(p => p.id)]))  
-  }, { merge: true });  
-}  
+    let posts = shuffleArray([...pickedFresh, ...pickedOld]);
 
-res.json({  
-  posts: result,  
-  nextCursor: result.length ? result[result.length - 1].timestamp : null,  
-});
+    /* ================== JOIN USER (CACHE) ================== */
+    for (let p of posts) {
+      if (!p.userId) {
+        p.user = { username: "Unknown", photoURL: null };
+        continue;
+      }
 
-} catch (e) {
-console.error("FEED ERROR:", e);
-res.status(500).json({ error: true, message: e.message });
-}
+      const profile = await getUserProfile(p.userId);
+      p.user = {
+        username: profile?.username || "Unknown",
+        photoURL: profile?.photoURL || null,
+      };
+    }
+
+    /* ================== UPDATE SEEN ================== */
+    if (viewerId && posts.length) {
+      await db.doc(`${USERS_PATH}/${viewerId}`).set({
+        seenPosts: admin.firestore.FieldValue.arrayUnion(
+          ...posts.map(p => p.id)
+        )
+      }, { merge: true });
+    }
+
+    /* ================== RESPONSE ================== */
+    res.json({
+      posts,
+      nextCursor: posts.length
+        ? posts[posts.length - 1].timestamp
+        : null,
+    });
+
+  } catch (e) {
+    console.error("FEED ERROR:", e);
+    res.status(500).json({ error: true, message: e.message });
+  }
 }
