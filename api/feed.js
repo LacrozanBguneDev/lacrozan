@@ -27,18 +27,23 @@ const shuffleArray = arr => {
   return a;
 };
 
-/* ================== USER PROFILE CACHE ================== */
-// { userId: { data, expires } }
+const limitPerUser = (posts, max = 2) => {
+  const count = {};
+  return posts.filter(p => {
+    count[p.userId] = (count[p.userId] || 0) + 1;
+    return count[p.userId] <= max;
+  });
+};
+
+/* ================== PROFILE CACHE ================== */
 const profileCache = new Map();
-const PROFILE_TTL = 5 * 60 * 1000; // 5 menit
+const PROFILE_TTL = 5 * 60 * 1000;
 
 const getUserProfile = async userId => {
   const cached = profileCache.get(userId);
   const now = Date.now();
 
-  if (cached && cached.expires > now) {
-    return cached.data;
-  }
+  if (cached && cached.expires > now) return cached.data;
 
   const snap = await db.doc(`${USERS_PATH}/${userId}`).get();
   const data = snap.exists ? snap.data() : null;
@@ -62,7 +67,34 @@ export default async function handler(req, res) {
     const mode = req.query.mode || "home";
     const limit = Math.min(Number(req.query.limit) || 10, 20);
     const viewerId = req.query.viewerId || null;
+    const userId = req.query.userId || null;
+    const q = (req.query.q || "").toLowerCase();
     const cursor = Number(req.query.cursor || Date.now());
+
+    /* ================== QUERY DASAR ================== */
+    let query = db.collection(POSTS_PATH);
+
+    if (mode === "meme") query = query.where("category", "==", "meme");
+    if (mode === "user" && userId) query = query.where("userId", "==", userId);
+    if (mode !== "search") query = query.orderBy("timestamp", "desc");
+
+    const poolSize = limit * 12;
+    const snap = await query.limit(poolSize).get();
+    if (snap.empty) return res.json({ posts: [], nextCursor: null });
+
+    let posts = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: safeMillis(d.data().timestamp),
+    }));
+
+    /* ================== SEARCH ================== */
+    if (mode === "search" && q) {
+      posts = posts.filter(p =>
+        p.title?.toLowerCase().includes(q) ||
+        p.content?.toLowerCase().includes(q)
+      );
+    }
 
     /* ================== SEEN POSTS ================== */
     let seenIds = new Set();
@@ -73,46 +105,29 @@ export default async function handler(req, res) {
       }
     }
 
-    /* ================== POOL BARU & LAMA ================== */
+    posts = posts.filter(
+      p => p.timestamp < cursor && !seenIds.has(p.id)
+    );
+
+    /* ================== PRIORITAS BARU + RANDOM ================== */
     const now = Date.now();
     const FRESH_LIMIT = now - 48 * 3600000;
 
-    const freshSnap = await db.collection(POSTS_PATH)
-      .where("timestamp", ">=", admin.firestore.Timestamp.fromMillis(FRESH_LIMIT))
-      .orderBy("timestamp", "desc")
-      .limit(limit * 5)
-      .get();
+    let freshPosts = posts.filter(p => p.timestamp >= FRESH_LIMIT);
+    let oldPosts   = posts.filter(p => p.timestamp < FRESH_LIMIT);
 
-    const oldSnap = await db.collection(POSTS_PATH)
-      .where("timestamp", "<", admin.firestore.Timestamp.fromMillis(FRESH_LIMIT))
-      .orderBy("timestamp", "desc")
-      .limit(limit * 3)
-      .get();
+    freshPosts = shuffleArray(freshPosts);
+    oldPosts   = shuffleArray(oldPosts);
 
-    let freshPosts = freshSnap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      timestamp: safeMillis(d.data().timestamp),
-    }));
-
-    let oldPosts = oldSnap.docs.map(d => ({
-      id: d.id,
-      ...d.data(),
-      timestamp: safeMillis(d.data().timestamp),
-    }));
-
-    // FILTER CURSOR + SEEN
-    freshPosts = freshPosts.filter(p => p.timestamp < cursor && !seenIds.has(p.id));
-    oldPosts   = oldPosts.filter(p => p.timestamp < cursor && !seenIds.has(p.id));
-
-    /* ================== RANDOM PROPORSIONAL ================== */
     const freshTake = Math.ceil(limit * 0.7);
     const oldTake   = limit - freshTake;
 
-    const pickedFresh = shuffleArray(freshPosts).slice(0, freshTake);
-    const pickedOld   = shuffleArray(oldPosts).slice(0, oldTake);
+    posts = [
+      ...freshPosts.slice(0, freshTake),
+      ...oldPosts.slice(0, oldTake),
+    ];
 
-    let posts = shuffleArray([...pickedFresh, ...pickedOld]);
+    posts = shuffleArray(limitPerUser(posts));
 
     /* ================== JOIN USER (CACHE) ================== */
     for (let p of posts) {
@@ -137,7 +152,6 @@ export default async function handler(req, res) {
       }, { merge: true });
     }
 
-    /* ================== RESPONSE ================== */
     res.json({
       posts,
       nextCursor: posts.length
