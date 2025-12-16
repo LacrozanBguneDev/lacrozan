@@ -16,7 +16,7 @@ const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
 /* ================== UTIL ================== */
-const safeMillis = ts => ts?.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : 0);
+const safeMillis = ts => ts?.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : (typeof ts === 'number' ? ts : 0));
 
 const shuffle = arr => {
   const a = [...arr];
@@ -60,10 +60,10 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
-    const limitNum = Math.min(Number(req.query.limit) || 10, 50); // Sesuaikan default limit
+    const limitNum = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const userId = req.query.userId || null;
-    const cursor = req.query.cursor || null; // Ambil cursor dari frontend
+    const cursor = req.query.cursor || null;
     const q = (req.query.q || "").toLowerCase();
 
     /* ===== LOAD SEEN POSTS ===== */
@@ -78,23 +78,31 @@ export default async function handler(req, res) {
     /* ===== QUERY ===== */
     let queryRef = db.collection(POSTS_PATH);
 
-    if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
-    if (mode === "user" && userId) queryRef = queryRef.where("userId", "==", userId);
+    // FIX: Penanganan Filter & OrderBy agar tidak error Index
+    if (mode === "meme") {
+      queryRef = queryRef.where("category", "==", "meme");
+    }
     
-    // Penanganan Pagination (Cursor)
+    if (mode === "user" && userId) {
+      queryRef = queryRef.where("userId", "==", userId);
+    }
+
+    // Selalu urutkan berdasarkan waktu terbaru kecuali saat search
     if (mode !== "search") {
       queryRef = queryRef.orderBy("timestamp", "desc");
-      if (cursor) {
-        // Karena frontend mengirim cursor (timestamp/ID), kita gunakan startAfter
-        const cursorDoc = await db.collection(POSTS_PATH).doc(cursor).get();
-        if (cursorDoc.exists) {
-            queryRef = queryRef.startAfter(cursorDoc);
-        }
+    }
+
+    // FIX: Cursor Logic untuk Infinite Scroll
+    if (cursor && mode !== "search") {
+      const cursorDoc = await db.collection(POSTS_PATH).doc(cursor).get();
+      if (cursorDoc.exists) {
+        queryRef = queryRef.startAfter(cursorDoc);
       }
     }
 
-    // Ambil data lebih banyak sedikit untuk filtering (anti-duplikat/limit per user)
+    // Ambil data lebih banyak untuk diproses algoritma scoring/filtering
     const snap = await queryRef.limit(limitNum * 5).get();
+    
     if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
     let posts = snap.docs.map(d => {
@@ -106,7 +114,7 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ===== SEARCH ===== */
+    /* ===== SEARCH (In-Memory Filter) ===== */
     if (mode === "search" && q) {
       posts = posts.filter(p =>
         p.title?.toLowerCase().includes(q) ||
@@ -115,65 +123,74 @@ export default async function handler(req, res) {
     }
 
     /* ===== ANTI DUPLIKAT GLOBAL ===== */
-    // Filter post yang sudah dilihat (dari seenIds)
-    posts = posts.filter(p => !seenIds.has(p.id));
+    // Hanya filter 'seen' jika bukan mode 'user' agar profile tetap lengkap
+    if (mode !== "user") {
+        posts = posts.filter(p => !seenIds.has(p.id));
+    }
 
-    /* ===== ALGORITMA ===== */
+    /* ===== ALGORITMA SCORING ===== */
     if (mode === "home") {
+      // Home menggunakan campuran Discovery Score dan Shuffle
       posts = posts.map(p => ({ ...p, _s: discoveryScore(p) }))
                    .sort((a,b)=>b._s-a._s);
 
-      const fresh = posts.filter(p => Date.now() - p.timestamp < 86400000);
+      const fresh = posts.filter(p => Date.now() - p.timestamp < 86400000); // 24 jam terakhir
       const old = posts.filter(p => Date.now() - p.timestamp >= 86400000);
 
       posts = [
         ...shuffle(fresh).slice(0, Math.ceil(limitNum * 0.7)),
-        ...shuffle(old).slice(0, limitNum),
+        ...old
       ];
-    }
-
-    if (mode === "popular") {
+    } else if (mode === "popular") {
+      // Popular fokus pada interaksi tertinggi
       posts = posts.map(p => ({ ...p, _s: popularScore(p) }))
                    .sort((a,b)=>b._s-a._s);
     }
 
-    posts = limitPerUser(posts, 2);
+    // Batasi post per user agar feed bervariasi (kecuali di halaman profile user itu sendiri)
+    if (mode !== "user") {
+        posts = limitPerUser(posts, 2);
+    }
+    
     posts = posts.slice(0, limitNum);
 
-    /* ===== JOIN USER ===== */
+    /* ===== JOIN USER DATA ===== */
     const uids = [...new Set(posts.map(p => p.userId))];
     if (uids.length) {
       const snaps = await Promise.all(
         uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
       );
       const map = {};
-      snaps.forEach(s => s.exists && (map[s.id] = s.data()));
+      snaps.forEach(s => {
+        if (s.exists) {
+          map[s.id] = s.data();
+        }
+      });
+      
       posts = posts.map(p => ({
         ...p,
         user: {
-          username: map[p.userId]?.username || "Unknown",
+          username: map[p.userId]?.username || "User",
           photoURL: map[p.userId]?.photoURL || null,
-          email: map[p.userId]?.email || null,
-          reputation: map[p.userId]?.reputation || 0, // Tambahan info user
+          reputation: map[p.userId]?.reputation || 0,
           isDev: map[p.userId]?.email === "irhamdika00@gmail.com"
         },
       }));
     }
 
-    /* ===== UPDATE SEEN ===== */
-    if (viewerId && posts.length) {
+    /* ===== UPDATE SEEN POSTS ===== */
+    if (viewerId && posts.length && mode === "home") {
       await db.doc(`${USERS_PATH}/${viewerId}`).set({
-        seenPosts: [...new Set([...seenIds, ...posts.map(p=>p.id)])]
+        seenPosts: admin.firestore.FieldValue.arrayUnion(...posts.map(p => p.id))
       }, { merge: true });
     }
 
-    // Tentukan Next Cursor untuk Infinite Scroll
-    // Kita gunakan ID dokumen terakhir sebagai cursor
+    // Tentukan Cursor Berikutnya
     const nextCursor = posts.length > 0 ? posts[posts.length - 1].id : null;
 
     res.json({ 
       posts,
-      nextCursor: nextCursor // Kirim balik ke frontend
+      nextCursor 
     });
 
   } catch (e) {
