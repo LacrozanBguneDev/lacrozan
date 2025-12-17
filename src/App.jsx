@@ -99,26 +99,27 @@ class ErrorBoundary extends React.Component {
 // Keamanan data SEPENUHNYA bergantung pada "Firestore Security Rules" di Console Firebase Anda.
 
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = import.meta.env.REACT_ADMIN_EMAIL;
+const DEVELOPER_EMAIL = process.env.REACT_ADMIN_EMAIL;
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 // Variabel Lingkungan Wajib (API SERVER):
 const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
-// Pakai import.meta.env karena kamu pakai React + Vite
+
+// React (CRA) pakai process.env + REACT_APP_
 const firebaseConfig = {
-  apiKey: import.meta.env.REACT_FIREBASE_API_KEY, 
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
   messagingSenderId: "662463693471",
   appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-  measurementId: "G-G0VWNHHVB8"
+  measurementId: "G-G0VWNHHVB8",
 };
 
-const API_KEY = import.meta.env.REACT_APP_API_KEY;
-const VAPID_KEY = import.meta.env.REACT_VAPID_KEY;
+const API_KEY = process.env.REACT_APP_API_KEY;
+const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
