@@ -32,15 +32,6 @@ const shuffle = arr => {
   return a;
 };
 
-// Filter agar user tidak spam (max 2 post per batch)
-const filterSpamUser = (posts, max = 2) => {
-  const map = {};
-  return posts.filter(p => {
-    map[p.userId] = (map[p.userId] || 0) + 1;
-    return map[p.userId] <= max;
-  });
-};
-
 /* ================== HANDLER ================== */
 export default async function handler(req, res) {
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
@@ -52,19 +43,22 @@ export default async function handler(req, res) {
     const mode = req.query.mode || "home";
     const limitReq = Number(req.query.limit) || 10;
     const viewerId = req.query.viewerId || null;
-    const cursorId = req.query.cursor || null; // ID post terakhir dari frontend
+    const cursorId = req.query.cursor || null;
 
     let queryRef = db.collection(POSTS_PATH);
 
-    /* 1. FILTER BERDASARKAN MODE */
+    /* 1. FILTER CATEGORY */
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
 
-    /* 2. ORDERING TETAP BERDASARKAN TIMESTAMP (WAJIB UNTUK CURSOR) */
-    // Kita tidak boleh pakai scoring di level database agar cursor tidak duplikat
+    /* 2. SISTEM AMBIL BANYAK (BUFFERING) */
+    // Kita ambil data lebih banyak dari yang diminta (misal limit 10, kita ambil 30)
+    // Supaya kita punya stok konten untuk diacak-acak agar tidak membosankan
+    const bufferSize = limitReq * 3; 
+    
+    // Tetap urutkan berdasarkan timestamp agar cursor Firestore bekerja 100% (ANTI DUPLIKAT)
     queryRef = queryRef.orderBy("timestamp", "desc");
 
-    /* 3. HANDLING CURSOR (ANTIDUPLIKAT SCROLL) */
     if (cursorId) {
       const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
       if (cursorDoc.exists) {
@@ -72,44 +66,51 @@ export default async function handler(req, res) {
       }
     }
 
-    // Ambil sedikit lebih banyak untuk filter spam user di level aplikasi
-    const snap = await queryRef.limit(limitReq + 5).get();
+    const snap = await queryRef.limit(bufferSize).get();
     
     if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
-    let posts = snap.docs.map(d => {
-      const data = d.data();
-      return {
-        ...data,
-        id: d.id,
-        timestamp: safeMillis(data.timestamp),
-      };
-    });
+    // Mapping data awal
+    let allFetchedPosts = snap.docs.map(d => ({
+      ...d.data(),
+      id: d.id,
+      timestamp: safeMillis(d.data().timestamp),
+    }));
 
-    /* 4. LOGIKA ACAK & ANTI-SPAM (Hanya dilakukan per-batch) */
-    if (mode !== "user") {
-      // Filter spam user dulu
-      posts = filterSpamUser(posts, 2);
-      
-      // Kita acak urutan di dalam batch ini saja agar terasa fresh tiap scroll
-      // Tapi tidak merusak 'nextCursor' karena kita ambil ID asli dari data Firestore
-      if (mode === "home") {
-        posts = shuffle(posts);
-      }
+    /* 3. LOGIKA ACAK & ANTI-SPAM (PINTAR) */
+    let finalPosts = [];
+    if (mode === "home" || mode === "popular") {
+      // Kelompokkan per User untuk mencegah spam beruntun
+      const userGroups = {};
+      allFetchedPosts.forEach(p => {
+        if (!userGroups[p.userId]) userGroups[p.userId] = [];
+        userGroups[p.userId].push(p);
+      });
+
+      // Ambil maksimal 2 post dari tiap user dalam batch ini
+      let pool = [];
+      Object.values(userGroups).forEach(group => {
+        pool.push(...group.slice(0, 2));
+      });
+
+      // ACAK TOTAL agar setiap refresh/scroll posisinya beda-beda
+      finalPosts = shuffle(pool);
+    } else {
+      finalPosts = allFetchedPosts;
     }
 
-    // Kembalikan ke jumlah limit yang diminta
-    posts = posts.slice(0, limitReq);
+    // Kembalikan jumlah data sesuai limit yang diminta frontend
+    const result = finalPosts.slice(0, limitReq);
 
-    /* 5. JOIN DATA USER */
-    const uids = [...new Set(posts.map(p => p.userId))];
+    /* 4. JOIN DATA USER */
+    const uids = [...new Set(result.map(p => p.userId))];
     const userMap = {};
     if (uids.length) {
       const userSnaps = await Promise.all(uids.map(id => db.doc(`${USERS_PATH}/${id}`).get()));
       userSnaps.forEach(s => { if (s.exists) userMap[s.id] = s.data(); });
     }
 
-    posts = posts.map(p => {
+    const postsResponse = result.map(p => {
       const u = userMap[p.userId] || {};
       return {
         ...p,
@@ -122,14 +123,15 @@ export default async function handler(req, res) {
       };
     });
 
-    /* 6. NEXT CURSOR */
-    // PENTING: Cursor harus ID asli dari dokumen terakhir di batch ini
-    // agar request berikutnya 'startAfter' tepat di titik ini.
-    const lastId = posts.length > 0 ? posts[posts.length - 1].id : null;
+    /* 5. PENENTUAN CURSOR YANG AKURAT */
+    // Kita harus ambil ID dari dokumen TERAKHIR yang benar-benar diambil dari Firestore
+    // supaya request berikutnya nyambung, bukan mengulang data yang sama.
+    const lastDocInSnap = snap.docs[snap.docs.length - 1];
+    const nextCursor = allFetchedPosts.length >= bufferSize ? lastDocInSnap.id : (result.length > 0 ? result[result.length - 1].id : null);
 
     res.status(200).json({
-      posts: posts,
-      nextCursor: lastId
+      posts: postsResponse,
+      nextCursor: nextCursor
     });
 
   } catch (e) {
