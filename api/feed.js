@@ -15,15 +15,12 @@ const db = admin.firestore();
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== UTIL (PERBAIKAN TIMESTAMP & ACAK) ================== */
-// Memastikan timestamp balik ke angka murni (ms) agar tidak NaN di frontend
+/* ================== UTIL ================== */
 const safeMillis = ts => {
   if (!ts) return Date.now();
   if (typeof ts.toMillis === 'function') return ts.toMillis();
   if (ts._seconds) return ts._seconds * 1000;
-  if (typeof ts === 'number') return ts;
-  const d = new Date(ts);
-  return isNaN(d.getTime()) ? Date.now() : d.getTime();
+  return Number(ts) || Date.now();
 };
 
 const shuffle = arr => {
@@ -35,26 +32,13 @@ const shuffle = arr => {
   return a;
 };
 
-// Mencegah spam user yang sama muncul berlebihan
-const limitPerUser = (posts, max = 2) => {
+// Filter agar user tidak spam (max 2 post per batch)
+const filterSpamUser = (posts, max = 2) => {
   const map = {};
   return posts.filter(p => {
     map[p.userId] = (map[p.userId] || 0) + 1;
     return map[p.userId] <= max;
   });
-};
-
-/* ================== SCORE (PRIORITAS BARU & TRENDING) ================== */
-const calculateScore = p => {
-  const ageH = (Date.now() - p.timestamp) / 3600000;
-  const likes = p.likes?.length || 0;
-  const comments = p.commentsCount || 0;
-  
-  // Bonus untuk postingan di bawah 24 jam (Postingan baru sangat diprioritaskan)
-  const freshness = Math.max(0, 24 - ageH) * 2; 
-  
-  // Rumus: Likes + Komentar + Bonus Baru - Penalti Waktu
-  return (likes * 3) + (comments * 5) + freshness - (ageH * 0.5);
 };
 
 /* ================== HANDLER ================== */
@@ -68,64 +52,56 @@ export default async function handler(req, res) {
     const mode = req.query.mode || "home";
     const limitReq = Number(req.query.limit) || 10;
     const viewerId = req.query.viewerId || null;
-    const cursor = req.query.cursor || null;
+    const cursorId = req.query.cursor || null; // ID post terakhir dari frontend
 
     let queryRef = db.collection(POSTS_PATH);
 
-    /* ===== FILTER MODE ===== */
+    /* 1. FILTER BERDASARKAN MODE */
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
 
-    // Untuk dapet data yang fresh, kita ambil lebih banyak dulu lalu diacak di server
+    /* 2. ORDERING TETAP BERDASARKAN TIMESTAMP (WAJIB UNTUK CURSOR) */
+    // Kita tidak boleh pakai scoring di level database agar cursor tidak duplikat
     queryRef = queryRef.orderBy("timestamp", "desc");
 
-    if (cursor) {
-      const cursorDoc = await db.collection(POSTS_PATH).doc(cursor).get();
-      if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
+    /* 3. HANDLING CURSOR (ANTIDUPLIKAT SCROLL) */
+    if (cursorId) {
+      const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
+      if (cursorDoc.exists) {
+        queryRef = queryRef.startAfter(cursorDoc);
+      }
     }
 
-    // Ambil data 3x lipat lebih banyak agar kita bisa acak/filter spam user
-    const fetchLimit = cursor ? limitReq * 2 : limitReq * 4;
-    const snap = await queryRef.limit(fetchLimit).get();
+    // Ambil sedikit lebih banyak untuk filter spam user di level aplikasi
+    const snap = await queryRef.limit(limitReq + 5).get();
     
     if (snap.empty) return res.json({ posts: [], nextCursor: null });
 
     let posts = snap.docs.map(d => {
       const data = d.data();
-      const ts = safeMillis(data.timestamp);
       return {
         ...data,
         id: d.id,
-        timestamp: ts, // SEKARANG PASTI ANGKA (MENCEGAH NaN)
+        timestamp: safeMillis(data.timestamp),
       };
     });
 
-    /* ===== ALGORITMA ANTI MONOTON ===== */
-    if (mode === "home" || mode === "popular") {
-      // 1. Hitung skor untuk tiap post
-      posts = posts.map(p => ({ ...p, _score: calculateScore(p) }));
-      
-      // 2. Pisahkan sangat baru vs lama
-      const superFresh = posts.filter(p => (Date.now() - p.timestamp) < 3600000 * 6); // 6 jam terakhir
-      const others = posts.filter(p => (Date.now() - p.timestamp) >= 3600000 * 6);
-
-      // 3. Acak masing-masing grup agar tiap refresh terasa beda
-      posts = [...shuffle(superFresh), ...shuffle(others)];
-      
-      // 4. Sortir berdasarkan skor tapi beri toleransi acak (biar gak itu-itu aja)
-      posts.sort((a, b) => (b._score + Math.random() * 5) - (a._score + Math.random() * 5));
-    }
-
-    /* ===== ANTI SPAM USER ===== */
-    // Maksimal 2 postingan dari user yang sama dalam satu tampilan feed
+    /* 4. LOGIKA ACAK & ANTI-SPAM (Hanya dilakukan per-batch) */
     if (mode !== "user") {
-      posts = limitPerUser(posts, 2);
+      // Filter spam user dulu
+      posts = filterSpamUser(posts, 2);
+      
+      // Kita acak urutan di dalam batch ini saja agar terasa fresh tiap scroll
+      // Tapi tidak merusak 'nextCursor' karena kita ambil ID asli dari data Firestore
+      if (mode === "home") {
+        posts = shuffle(posts);
+      }
     }
 
-    // Ambil sesuai limit asli
+    // Kembalikan ke jumlah limit yang diminta
     posts = posts.slice(0, limitReq);
 
-    /* ===== JOIN DATA USER (BADGE & FOTO) ===== */
+    /* 5. JOIN DATA USER */
     const uids = [...new Set(posts.map(p => p.userId))];
     const userMap = {};
     if (uids.length) {
@@ -146,13 +122,9 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ===== UPDATE SEEN (BIAR GAK MUNCUL LAGI) ===== */
-    if (viewerId && posts.length && mode === "home") {
-      await db.doc(`${USERS_PATH}/${viewerId}`).set({
-        seenPosts: admin.firestore.FieldValue.arrayUnion(...posts.map(p => p.id))
-      }, { merge: true });
-    }
-
+    /* 6. NEXT CURSOR */
+    // PENTING: Cursor harus ID asli dari dokumen terakhir di batch ini
+    // agar request berikutnya 'startAfter' tepat di titik ini.
     const lastId = posts.length > 0 ? posts[posts.length - 1].id : null;
 
     res.status(200).json({
