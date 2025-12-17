@@ -48,7 +48,8 @@ import {
     Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
-    Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid
+    Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
+    WifiHigh
 } from 'lucide-react';
 
 setLogLevel('silent'); 
@@ -427,7 +428,8 @@ const SplashScreen = () => (
         <div className="relative mb-8 animate-bounce-slow"><img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/><div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div></div>
         <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest">{APP_NAME}</h1>
         <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
-        <p className="text-gray-400 text-xs font-medium animate-pulse">Memuat data terbaru...</p>
+        <p className="text-gray-400 text-xs font-medium animate-pulse">Menghubungkan ke server...</p>
+        <p className="text-gray-300 text-[10px] mt-2">Sinkronisasi Profile & Papan Peringkat...</p>
     </div>
 );
 
@@ -437,6 +439,23 @@ const OfflinePage = ({ onRetry }) => (
         <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Kamu Offline</h2>
         <p className="text-gray-500 dark:text-gray-400 mb-8 max-w-xs">Sepertinya internet kamu sedang istirahat.</p>
         <button onClick={onRetry} className="bg-sky-500 text-white px-8 py-3 rounded-full font-bold shadow-lg hover:bg-sky-600 transition flex items-center gap-2"><RefreshCw size={18}/> Coba Lagi</button>
+    </div>
+);
+
+// New Component: DataTimeoutPage
+const DataTimeoutPage = () => (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6 text-center z-[110] relative">
+        <div className="w-24 h-24 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center mb-6 animate-pulse"><AlertTriangle size={40} className="text-red-500"/></div>
+        <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Gagal Memuat Data</h2>
+        <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-xs text-sm leading-relaxed">
+            Data Profile atau Papan Peringkat memakan waktu terlalu lama.
+            <br/><br/>
+            Ini mungkin karena koneksi lambat atau server sedang dalam perbaikan oleh Developer.
+        </p>
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+            <button onClick={() => window.location.reload()} className="bg-sky-500 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition flex items-center justify-center gap-2"><RefreshCw size={18}/> Refresh Total</button>
+            <p className="text-[10px] text-gray-400">Silakan kembali lagi nanti jika masalah berlanjut.</p>
+        </div>
     </div>
 );
 
@@ -582,43 +601,70 @@ const LegalPage = ({ onBack }) => {
 };
 
 const LeaderboardScreen = ({ allUsers, currentUser }) => {
-    // FIX: Leaderboard Logic - Top 50 Only & User Rank Message
+    // FIX: Leaderboard Logic - Top 10 Only (Tingkat Dewa) & User Rank Message
     const sortedUsers = useMemo(() => { return [...allUsers].sort((a, b) => (b.reputation || 0) - (a.reputation || 0)); }, [allUsers]);
-    const top50 = sortedUsers.slice(0, 50);
+    const top10 = sortedUsers.slice(0, 10);
     
     // Cari ranking user saat ini di list FULL (sebelum di slice)
     const myRankIndex = currentUser ? sortedUsers.findIndex(u => u.uid === currentUser.uid) : -1;
-    const isMeInTop50 = myRankIndex !== -1 && myRankIndex < 50;
+    const isMeInTop10 = myRankIndex !== -1 && myRankIndex < 10;
 
     return (
-        <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
-            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top 50 Kreator Viral</h1>
-            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden mb-6">
-                {top50.map((u, index) => {
-                     let rankStyle = ""; let rankIcon = null;
-                     if (index === 0) { rankStyle = "bg-gradient-to-r from-yellow-50 to-transparent dark:from-yellow-900/20 border-l-4 border-yellow-500"; rankIcon = <Crown size={20} className="text-yellow-500 fill-yellow-500 drop-shadow-sm"/>; } else if (index === 1) { rankStyle = "bg-gradient-to-r from-gray-50 to-transparent dark:from-gray-700/30 border-l-4 border-gray-400"; rankIcon = <Medal size={20} className="text-gray-400 fill-gray-200"/>; } else if (index === 2) { rankStyle = "bg-gradient-to-r from-orange-50 to-transparent dark:from-orange-900/20 border-l-4 border-orange-500"; rankIcon = <Medal size={20} className="text-orange-500 fill-orange-200"/>; }
-                     return (
-                        <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${rankStyle}`}>
-                            <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-600':index===1?'text-gray-500':index===2?'text-orange-600':'text-gray-300'}`}>{index + 1}</div>
-                            <div className="relative mr-3"><Avatar src={u.photoURL} fallbackText={u.username} className={`w-12 h-12 rounded-full border-2 ${index===0?'border-yellow-500':index===1?'border-gray-400':index===2?'border-orange-500':'border-gray-200 dark:border-gray-600'}`}/>{index === 0 && <div className="absolute -top-2 -right-1 animate-bounce">{rankIcon}</div>}</div>
-                            <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">{u.followers?.length || 0} Pengikut</p></div>
-                            <div className="text-right"><div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1"><Flame size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>{u.reputation || 0}</div><div className="text-[9px] text-gray-400 uppercase font-bold">Poin</div></div>
-                        </div>
-                     )
-                })}
-            </div>
-
-            {/* Pesan Semangat jika tidak masuk Top 50 */}
-            {!isMeInTop50 && currentUser && (
-                <div className="bg-sky-50 dark:bg-sky-900/20 p-6 rounded-3xl text-center border border-sky-100 dark:border-sky-800">
-                    <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm text-2xl">💪</div>
-                    <h3 className="font-bold text-gray-800 dark:text-white mb-1">Yahh, kamu belum masuk Top 50</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Semangat ya! Teruslah berkarya dan aktif.</p>
-                    <p className="text-xs font-bold text-sky-600 dark:text-sky-400 bg-white dark:bg-gray-800 py-1 px-3 rounded-full inline-block shadow-sm">
-                        Posisi Kamu saat ini: #{myRankIndex + 1}
+        <div className="max-w-lg md:max-w-4xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20">
+            {/* Banner Reset Mingguan */}
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
+                <div className="bg-red-500 text-white p-2 rounded-lg"><TimerReset size={20}/></div>
+                <div>
+                    <h3 className="font-bold text-red-700 dark:text-red-400 text-sm">Reset Poin Mingguan</h3>
+                    <p className="text-xs text-red-600 dark:text-red-300 mt-1 leading-relaxed">
+                        Perhatian! Semua poin reputasi akan <strong>direset menjadi 0</strong> setiap hari <strong>Rabu pukul 16:00 WIB</strong>.
                     </p>
                 </div>
-            )}
+            </div>
+
+            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top 10 Legenda (Hardcore)</h1>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden h-fit">
+                    {top10.map((u, index) => {
+                         let rankStyle = ""; let rankIcon = null;
+                         if (index === 0) { rankStyle = "bg-gradient-to-r from-yellow-50 to-transparent dark:from-yellow-900/20 border-l-4 border-yellow-500"; rankIcon = <Crown size={20} className="text-yellow-500 fill-yellow-500 drop-shadow-sm"/>; } else if (index === 1) { rankStyle = "bg-gradient-to-r from-gray-50 to-transparent dark:from-gray-700/30 border-l-4 border-gray-400"; rankIcon = <Medal size={20} className="text-gray-400 fill-gray-200"/>; } else if (index === 2) { rankStyle = "bg-gradient-to-r from-orange-50 to-transparent dark:from-orange-900/20 border-l-4 border-orange-500"; rankIcon = <Medal size={20} className="text-orange-500 fill-orange-200"/>; }
+                         return (
+                            <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${rankStyle}`}>
+                                <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-600':index===1?'text-gray-500':index===2?'text-orange-600':'text-gray-300'}`}>{index + 1}</div>
+                                <div className="relative mr-3"><Avatar src={u.photoURL} fallbackText={u.username} className={`w-12 h-12 rounded-full border-2 ${index===0?'border-yellow-500':index===1?'border-gray-400':index===2?'border-orange-500':'border-gray-200 dark:border-gray-600'}`}/>{index === 0 && <div className="absolute -top-2 -right-1 animate-bounce">{rankIcon}</div>}</div>
+                                <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">{u.followers?.length || 0} Pengikut</p></div>
+                                <div className="text-right"><div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1"><Flame size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>{u.reputation || 0}</div><div className="text-[9px] text-gray-400 uppercase font-bold">Poin</div></div>
+                            </div>
+                         )
+                    })}
+                </div>
+
+                {/* Info Card di Sebelah Kanan untuk Desktop */}
+                <div className="space-y-4">
+                     {/* Pesan Semangat jika tidak masuk Top 10 */}
+                    {!isMeInTop10 && currentUser && (
+                        <div className="bg-sky-50 dark:bg-sky-900/20 p-6 rounded-3xl text-center border border-sky-100 dark:border-sky-800">
+                            <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm text-2xl">💪</div>
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-1">Perjalanan Masih Panjang!</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Masuk Top 10 butuh dedikasi tinggi.</p>
+                            <p className="text-xs font-bold text-sky-600 dark:text-sky-400 bg-white dark:bg-gray-800 py-1 px-3 rounded-full inline-block shadow-sm">
+                                Posisi Kamu: #{myRankIndex + 1}
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="bg-gray-900 p-6 rounded-3xl text-white shadow-lg relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500 blur-3xl opacity-20 rounded-full"></div>
+                        <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Gamepad2/> Sistem Poin (Tingkat Dewa)</h3>
+                        <ul className="space-y-3 text-sm text-gray-300">
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Membuat Post</span> <span className="text-green-400 font-bold">+2 Poin</span></li>
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Berkomentar</span> <span className="text-green-400 font-bold">+1 Poin</span></li>
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Dapat Like</span> <span className="text-green-400 font-bold">+1 Poin</span></li>
+                            <li className="flex justify-between items-center pt-2"><span className="text-red-400">Hapus Post</span> <span className="text-red-400 font-bold">Sanksi Berat</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
@@ -673,7 +719,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         const ref = doc(db, getPublicCollection('posts'), post.id);
         const authorRef = doc(db, getPublicCollection('userProfiles'), post.userId);
         try {
-            if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(2) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
+            // FIX: HARDCORE MODE - Like cuma +1 Poin (sebelumnya +2)
+            if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(1) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
             else { await updateDoc(ref, { likes: arrayRemove(currentUserId) }); }
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
@@ -687,15 +734,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             const commentData = { postId: post.id, userId: currentUserId, text: newComment, username: profile.username || 'User', timestamp: serverTimestamp(), parentId: replyTo ? replyTo.id : null, replyToUsername: replyTo ? replyTo.username : null };
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
-            if (post.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(5) }); if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
-            if (replyTo && replyTo.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(3) }); sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
+            // FIX: HARDCORE MODE - Komen cuma +1 Poin (sebelumnya +5)
+            if (post.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(1) }); if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
+            if (replyTo && replyTo.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(1) }); sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
             setNewComment(''); setReplyTo(null);
         } catch (error) { console.error(error); }
     };
 
     const handleDelete = async () => {
         const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini? Reputasi yang didapat akan DITARIK KEMBALI.";
-        if (confirm(confirmMsg)) { try { const earnedReputation = 10 + ((post.likes?.length || 0) * 2) + ((post.commentsCount || 0) * 5); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); alert(`Postingan dihapus.`); } catch (e) { alert("Gagal menghapus: " + e.message); } } 
+        if (confirm(confirmMsg)) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); alert(`Postingan dihapus.`); } catch (e) { alert("Gagal menghapus: " + e.message); } } 
     };
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
@@ -809,13 +857,14 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
             if (form.files.length > 0) { const firstFile = form.files[0]; if (firstFile.type.startsWith('image')) { mediaType = 'image'; setProg(10); for (let i = 0; i < form.files.length; i++) { const base64 = await compressImageToBase64(form.files[i]); mediaUrls.push(base64); setProg(10 + ((i + 1) / form.files.length) * 80); } } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) { const uploadedUrl = await uploadToFaaAPI(firstFile, setProg); mediaUrls.push(uploadedUrl); mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio'; setProg(100); } } else if (form.url) { mediaType = 'link'; mediaUrls.push(form.url); }
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             const ref = await addDoc(collection(db, getPublicCollection('posts')), { userId, title: form.title, content: form.content, mediaUrls: mediaUrls, mediaUrl: mediaUrls[0] || '', mediaType: mediaType, timestamp: serverTimestamp(), likes: [], commentsCount: 0, category: category, user: {username, uid: userId} });
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(10), lastPostTime: Date.now() }); 
+            // FIX: HARDCORE MODE - Buat Post cuma +2 Poin (sebelumnya +10)
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(2), lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
         } catch(e){ alert(e.message); } finally { setLoading(false); }
     };
 
     return (
-        <div className="max-w-xl md:max-w-2xl lg:max-w-4xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-xl md:max-w-2xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20">
             <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div><h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
@@ -892,7 +941,8 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     let rank = null;
     if (allUsers) { const sorted = [...allUsers].sort((a,b) => (b.reputation||0) - (a.reputation||0)); rank = sorted.findIndex(u => u.uid === profileData.uid) + 1; }
-    const getNextRankData = (points) => { if (points < 100) return { next: 100, label: 'Rising Star', percent: (points/100)*100 }; if (points < 500) return { next: 500, label: 'Influencer', percent: ((points-100)/400)*100 }; if (points < 1000) return { next: 1000, label: 'Legend', percent: ((points-500)/500)*100 }; return { next: null, label: 'Max Level', percent: 100 }; };
+    // FIX HARDCORE LEVELING: Naik level dipersulit (100 -> 500 -> 2500 -> 5000)
+    const getNextRankData = (points) => { if (points < 500) return { next: 500, label: 'Rising Star', percent: (points/500)*100 }; if (points < 2500) return { next: 2500, label: 'Influencer', percent: ((points-500)/2000)*100 }; if (points < 5000) return { next: 5000, label: 'Legend', percent: ((points-2500)/2500)*100 }; return { next: null, label: 'Max Level', percent: 100 }; };
     const rankProgress = getNextRankData(profileData.reputation || 0);
 
     return (
@@ -1158,7 +1208,12 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
 };
 
 const App = () => {
-    const [user, setUser] = useState(undefined); const [profile, setProfile] = useState(null); const [page, setPage] = useState('home'); const [posts, setPosts] = useState([]); const [users, setUsers] = useState([]); const [targetUid, setTargetUid] = useState(null); const [targetPid, setTargetPid] = useState(null); const [notifCount, setNotifCount] = useState(0); const [newPostId, setNewPostId] = useState(null); const [showSplash, setShowSplash] = useState(true); const [searchQuery, setSearchQuery] = useState(''); const [isLoadingFeed, setIsLoadingFeed] = useState(true); const [feedError, setFeedError] = useState(false); const [refreshTrigger, setRefreshTrigger] = useState(0); const [showAuthModal, setShowAuthModal] = useState(false); const [showOnboarding, setShowOnboarding] = useState(false); const [darkMode, setDarkMode] = useState(false); const [isOffline, setIsOffline] = useState(!navigator.onLine); const [showRewards, setShowRewards] = useState(false); const [canClaimReward, setCanClaimReward] = useState(false); const [nextRewardTime, setNextRewardTime] = useState('');
+    const [user, setUser] = useState(undefined); const [profile, setProfile] = useState(null); const [page, setPage] = useState('home'); const [posts, setPosts] = useState([]); const [users, setUsers] = useState([]); const [targetUid, setTargetUid] = useState(null); const [targetPid, setTargetPid] = useState(null); const [notifCount, setNotifCount] = useState(0); const [newPostId, setNewPostId] = useState(null); const [searchQuery, setSearchQuery] = useState(''); const [isLoadingFeed, setIsLoadingFeed] = useState(true); const [feedError, setFeedError] = useState(false); const [refreshTrigger, setRefreshTrigger] = useState(0); const [showAuthModal, setShowAuthModal] = useState(false); const [showOnboarding, setShowOnboarding] = useState(false); const [darkMode, setDarkMode] = useState(false); const [isOffline, setIsOffline] = useState(!navigator.onLine); const [showRewards, setShowRewards] = useState(false); const [canClaimReward, setCanClaimReward] = useState(false); const [nextRewardTime, setNextRewardTime] = useState('');
+
+    // FIX SPLASH SCREEN: Tambahkan state untuk mendeteksi data profile & users sudah load atau belum
+    const [isProfileLoaded, setIsProfileLoaded] = useState(false);
+    const [isUsersLoaded, setIsUsersLoaded] = useState(false);
+    const [isDataTimeout, setIsDataTimeout] = useState(false);
 
     useEffect(() => {
         const handleError = (event) => { if (!user || user.email !== DEVELOPER_EMAIL) { event.preventDefault(); logSystemError(event.error || new Error(event.message), 'global_error', user); } };
@@ -1173,6 +1228,17 @@ const App = () => {
     useEffect(() => { window.scrollTo(0, 0); }, [page]);
     useEffect(() => { const savedTheme = localStorage.getItem('theme'); if (savedTheme === 'dark') { document.documentElement.classList.add('dark'); setDarkMode(true); } }, []);
 
+    // FIX SPLASH: Timeout logic jika data tidak kunjung datang dalam 15 detik
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            // Jika user sudah login tapi profile/users belum load, atau user null tapi feed belum load
+            if (!isUsersLoaded || (user && !isProfileLoaded)) {
+                setIsDataTimeout(true);
+            }
+        }, 15000); 
+        return () => clearTimeout(timer);
+    }, [isUsersLoaded, isProfileLoaded, user]);
+
     useEffect(() => {
         if (!profile) return;
         const lastClaim = profile.lastRewardClaim ? profile.lastRewardClaim.toMillis() : 0; const now = Date.now(); const diff = now - lastClaim; const oneDay = 24 * 60 * 60 * 1000;
@@ -1182,7 +1248,7 @@ const App = () => {
     const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); alert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas."); setShowRewards(false); } catch (e) { alert("Gagal klaim: " + e.message); } };
     const toggleDarkMode = () => { if (darkMode) { document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light'); setDarkMode(false); } else { document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark'); setDarkMode(true); } };
 
-    useEffect(() => { const timer = setTimeout(() => setShowSplash(false), 3000); const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } return () => clearTimeout(timer); }, []);
+    useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
 
     useEffect(() => {
         if (!user) return;
@@ -1191,12 +1257,51 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    useEffect(() => onAuthStateChanged(auth, async (u) => { if(u) { setUser(u); requestNotificationPermission(u.uid); const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); if (!userDoc.exists()) { setShowOnboarding(true); } else { const userData = userDoc.data(); if (userData.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); setUser(null); setProfile(null); return; } await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); } } else { setUser(null); setProfile(null); } }), []);
+    useEffect(() => onAuthStateChanged(auth, async (u) => { 
+        if(u) { 
+            setUser(u); 
+            requestNotificationPermission(u.uid); 
+            const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+            if (!userDoc.exists()) { 
+                setShowOnboarding(true); 
+                setIsProfileLoaded(true); // Anggap loaded agar splash hilang saat onboarding
+            } else { 
+                const userData = userDoc.data(); 
+                if (userData.isBanned) { 
+                    alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                    await signOut(auth); setUser(null); setProfile(null); 
+                    return; 
+                } 
+                await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+            } 
+        } else { 
+            setUser(null); 
+            setProfile(null); 
+            setIsProfileLoaded(true); // Tidak perlu tunggu profile kalau guest
+        } 
+    }), []);
     
-    useEffect(() => { if(user) { const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } }); const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); return () => { unsubP(); unsubNotif(); }; } }, [user]);
+    useEffect(() => { 
+        if(user) { 
+            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), async s => { 
+                if(s.exists()) { 
+                    const data = s.data(); 
+                    if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } 
+                    setProfile({...data, uid:user.uid, email:user.email}); 
+                    if (showOnboarding) setShowOnboarding(false); 
+                }
+                setIsProfileLoaded(true); // FIX: Profile sudah loaded
+            }); 
+            const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); 
+            return () => { unsubP(); unsubNotif(); }; 
+        } 
+    }, [user]);
 
     useEffect(() => {
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))));
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => {
+            setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
+            setIsUsersLoaded(true); // FIX: Users (leaderboard) sudah loaded
+        });
         const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), s => {
              const raw = s.docs.map(d=>({id:d.id,...d.data()}));
              setPosts(raw); 
@@ -1209,8 +1314,21 @@ const App = () => {
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
-    if (showSplash) return <SplashScreen />;
-    if (user === undefined && !isOffline) return <div className="h-screen flex items-center justify-center bg-[#F0F4F8] dark:bg-gray-900"><Loader2 className="animate-spin text-sky-500" size={40}/></div>;
+    // LOGIKA SPLASH SCREEN BARU:
+    // Tampilkan Splash HANYA jika:
+    // 1. Data PENTING (Users & Profile) BELUM siap
+    // 2. DAN belum Timeout.
+    const isDataReady = isUsersLoaded && isProfileLoaded;
+    
+    // Prioritas Tampilan:
+    // 1. Jika Timeout -> DataTimeoutPage
+    // 2. Jika Belum Ready & Belum Timeout -> SplashScreen
+    // 3. Jika Ready -> App Content
+
+    if (isDataTimeout) return <DataTimeoutPage />;
+    if (!isDataReady) return <SplashScreen />;
+
+    // Cek offline setelah splash selesai
     if (isOffline && !posts.length) return <OfflinePage onRetry={()=>setRefreshTrigger(prev=>prev+1)}/>;
 
     const isMeDeveloper = user && user.email === DEVELOPER_EMAIL; const targetUser = users.find(u => u.uid === targetUid); const isGuest = !user; 
@@ -1233,7 +1351,7 @@ const App = () => {
                             {/* Tombol Buat Post Ditengahkan */}
                             <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2 mx-2"><PlusCircle size={16}/> Buat Post</button>
                             
-                            <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 50</button>
+                            <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 10</button>
                             
                             <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
                         </div>
