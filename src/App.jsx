@@ -99,7 +99,7 @@ class ErrorBoundary extends React.Component {
 // Keamanan data SEPENUHNYA bergantung pada "Firestore Security Rules" di Console Firebase Anda.
 
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = import.meta.env.VITE_ADMIN_EMAIL;
+const DEVELOPER_EMAIL = import.meta.env.REACT_ADMIN_EMAIL;
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
@@ -108,7 +108,7 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 // Pakai import.meta.env karena kamu pakai React + Vite
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY, 
+  apiKey: import.meta.env.REACT_FIREBASE_API_KEY, 
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
@@ -117,8 +117,8 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8"
 };
 
-const API_KEY = import.meta.env.VITE_APP_API_KEY;
-const VAPID_KEY = import.meta.env.VITE_VAPID_KEY;
+const API_KEY = import.meta.env.REACT_APP_API_KEY;
+const VAPID_KEY = import.meta.env.REACT_VAPID_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
