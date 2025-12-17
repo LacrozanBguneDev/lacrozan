@@ -109,7 +109,7 @@ const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
 // React (CRA) pakai process.env + REACT_APP_
 const firebaseConfig = {
-  apiKey: process.env.REACT_FIREBASE_API_KEY,
+  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
