@@ -94,22 +94,20 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// --- DISCLAIMER KEAMANAN ---
-// Catatan: API Key Firebase memang bersifat publik (client-side). 
-// Keamanan data SEPENUHNYA bergantung pada "Firestore Security Rules" di Console Firebase Anda.
-
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = process.env.REACT_ADMIN_EMAIL;
+// Diambil dari REACT_APP_DEV_EMAIL di Vercel
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-// Variabel Lingkungan Wajib (API SERVER):
+// Endpoint API - (Pastikan URL ini benar atau pindahkan ke env jika perlu)
 const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
-// React (CRA) pakai process.env + REACT_APP_
+// Konfigurasi Firebase
+// Mengambil API Key dari REACT_APP_FIREBASE_API_KEY di Vercel
 const firebaseConfig = {
-  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
@@ -118,8 +116,14 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8",
 };
 
+// Mengambil dari REACT_APP_API_KEY di Vercel
 const API_KEY = process.env.REACT_APP_API_KEY;
+
+// Mengambil dari REACT_APP_VAPID_KEY di Vercel
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
+
+// Opsional: Jika kamu butuh FEED_API_KEY yang ada di foto tadi
+const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
