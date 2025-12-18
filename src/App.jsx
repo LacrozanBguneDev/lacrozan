@@ -116,8 +116,7 @@ const firebaseConfig = {
 
 const API_KEY = process.env.REACT_APP_API_KEY;
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_KEY || "6LcPIUIqAAAAAC-blahblah-placeholder-key"; // Ganti dengan key asli di environment variable
-
+const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_KEY;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
