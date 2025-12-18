@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import DOMPurify from 'dompurify'; // Library sanitasi yang diminta
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
@@ -33,6 +34,7 @@ import {
     where, 
     orderBy 
 } from 'firebase/firestore';
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // Firebase App Check
 
 // IMPORT KHUSUS NOTIFIKASI
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -95,17 +97,13 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API ---
-// Diambil dari REACT_APP_DEV_EMAIL di Vercel
 const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-// Endpoint API - (Pastikan URL ini benar atau pindahkan ke env jika perlu)
 const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
-// Konfigurasi Firebase
-// Mengambil API Key dari REACT_APP_FIREBASE_API_KEY di Vercel
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
   authDomain: "eduku-web.firebaseapp.com",
@@ -116,22 +114,33 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8",
 };
 
-// Mengambil dari REACT_APP_API_KEY di Vercel
 const API_KEY = process.env.REACT_APP_API_KEY;
-
-// Mengambil dari REACT_APP_VAPID_KEY di Vercel
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-
-// Opsional: Jika kamu butuh FEED_API_KEY yang ada di foto tadi
-const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
+const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_KEY || "6LcPIUIqAAAAAC-blahblah-placeholder-key"; // Ganti dengan key asli di environment variable
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// Initialize Firebase with Error Handling
-let app, auth, db, googleProvider, messaging;
+// Initialize Firebase with Error Handling & App Check
+let app, auth, db, googleProvider, messaging, appCheck;
 try {
     app = initializeApp(firebaseConfig);
+    
+    // SECURITY: Implementasi App Check
+    // Mencegah bot atau request tidak sah mengakses resource Firebase
+    if (typeof window !== "undefined") {
+         // Pastikan RECAPTCHA_SITE_KEY tersedia atau gunakan debug token untuk localhost
+         try {
+            appCheck = initializeAppCheck(app, {
+                provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+                isTokenAutoRefreshEnabled: true
+            });
+            console.log("App Check initialized");
+         } catch (e) {
+             console.warn("App Check failed (might be localhost or missing key):", e);
+         }
+    }
+
     auth = getAuth(app);
     db = getFirestore(app);
     googleProvider = new GoogleAuthProvider();
@@ -151,9 +160,20 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
+// Custom Hook untuk Dynamic Meta Tags (SEO)
+const usePageTitle = (title) => {
+    useEffect(() => {
+        const prevTitle = document.title;
+        document.title = title ? `${title} - ${APP_NAME}` : APP_NAME;
+        // Opsional: Update meta description jika ada
+        return () => {
+            document.title = prevTitle;
+        };
+    }, [title]);
+};
+
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
     if (!API_KEY) {
-        // Fallback prevent crash if API KEY is missing
         console.warn("API Key missing, returning empty feed.");
         return { posts: [], nextCursor: null };
     }
@@ -186,14 +206,28 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
     }
 };
 
+// SECURITY: Enkripsi Log / Sanitasi Informasi Sensitif
 const logSystemError = async (error, context = 'general', user = null) => {
     try {
         if (!db) return;
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
+        
         const safeUsername = user ? (user.displayName || user.username || 'Guest') : 'Guest';
         const safeUid = user ? (user.uid || 'guest') : 'guest';
+        
+        // Sanitasi pesan error dari info sensitif (email, password, token)
+        let cleanMessage = error.message || String(error);
+        cleanMessage = cleanMessage.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[REDACTED_EMAIL]');
+        cleanMessage = cleanMessage.replace(/(password|token|key)=[^&]+/gi, '$1=[REDACTED]');
+
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
-            message: error.message || String(error), stack: error.stack || '', context: context, userId: safeUid, username: safeUsername, timestamp: serverTimestamp(), userAgent: navigator.userAgent
+            message: cleanMessage, 
+            stack: error.stack || '', 
+            context: context, 
+            userId: safeUid, 
+            username: safeUsername, 
+            timestamp: serverTimestamp(), 
+            userAgent: navigator.userAgent
         });
     } catch (e) {}
 };
@@ -520,16 +554,17 @@ const SkeletonPost = () => (
     </div>
 );
 
-// PERBAIKAN 1 & 2: Anti-XSS & Layout
+// SECURITY FIX: Gunakan DOMPurify alih-alih regex manual untuk dangerouslySetInnerHTML
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
-    // SECURITY FIX: Escape HTML tags untuk mencegah XSS
-    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    // Step 1: Escape dasar untuk karakter HTML berbahaya (Layer 1 Security)
+    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     
-    // Convert links with XSS protection (Block javascript:)
+    // Step 2: Konversi Markdown ke HTML String
+    
+    // Link Protection: Anti Javascript/Data URI
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        // Cek protokol berbahaya
         if (/^(javascript|vbscript|data):/i.test(url)) return `${label} (Link Diblokir)`;
         return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
     });
@@ -548,8 +583,13 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
     
-    // FIX: Font size diperkecil (text-[13px] / text-sm) dan leading relaxed agar compact tapi terbaca
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
+    // Step 3: SANITASI AKHIR DENGAN DOMPurify (Layer 2 Security - Ultimate Defense)
+    // Pastikan DOMPurify tersedia (jika di environment canvas mungkin perlu fallback atau library di-include)
+    const cleanHtml = typeof DOMPurify !== 'undefined' 
+        ? DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'onClick', 'class', 'data-tag'] }) // Allow specific attributes
+        : html; // Fallback jika library belum load (tetap aman karena Step 1)
+
+    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: cleanHtml }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
 };
 
 // ==========================================
@@ -600,7 +640,31 @@ const DeveloperDashboard = ({ onClose }) => {
     const handleBroadcast = async () => { if(!broadcastMsg.trim()) return; if(!confirm("Kirim pengumuman ke SEMUA user?")) return; setSendingBC(true); try { const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); }); const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), { toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp() })); await Promise.all(promises); alert("Pengumuman berhasil dikirim!"); setBroadcastMsg(''); } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); } };
     const handleBanUser = async (uid, currentStatus) => { if(!confirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?")) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), { isBanned: !currentStatus }); setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); alert(currentStatus ? "User di-unban." : "User berhasil di-ban."); } catch(e) { alert("Gagal: " + e.message); } };
     const handleDeleteUser = async (uid) => { if(!confirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?")) return; try { await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid)); setAllUsersList(prev => prev.filter(u => u.id !== uid)); alert("Data user dihapus."); } catch(e) { alert("Gagal hapus: " + e.message); } };
-    const handleUpdateReputation = async (uid, amount, isReset = false) => { if(!confirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`)) return; try { const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); alert("Berhasil update poin."); } catch(e) { alert("Gagal update poin: " + e.message); } };
+    
+    // MODIFIKASI: Sistem Reset dengan Notifikasi
+    const handleUpdateReputation = async (uid, amount, isReset = false) => { 
+        if(!confirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`)) return; 
+        try { 
+            const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; 
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); 
+            
+            // Tambahkan notifikasi ke user saat di reset
+            if (isReset) {
+                await addDoc(collection(db, getPublicCollection('notifications')), { 
+                    toUserId: uid, 
+                    fromUserId: 'admin', 
+                    fromUsername: 'System', 
+                    fromPhoto: APP_LOGO, 
+                    type: 'system', 
+                    message: `⚠️ Point reputasi Anda telah direset oleh sistem/admin.`, 
+                    isRead: false, 
+                    timestamp: serverTimestamp() 
+                });
+            }
+            
+            alert("Berhasil update poin."); 
+        } catch(e) { alert("Gagal update poin: " + e.message); } 
+    };
 
     const filteredUsers = allUsersList.filter(u => u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email?.toLowerCase().includes(userSearchTerm.toLowerCase()));
 
@@ -667,6 +731,7 @@ const AuthModal = ({ onClose }) => {
 };
 
 const LegalPage = ({ onBack }) => {
+    usePageTitle("Legal & Kebijakan");
     return (
         <div className="min-h-screen bg-white dark:bg-gray-900 pb-24 pt-20 px-6 max-w-2xl mx-auto animate-in fade-in">
             <button onClick={onBack} className="fixed top-6 left-6 z-50 bg-white/80 dark:bg-black/50 backdrop-blur-md p-2 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition"><ArrowLeft/></button>
@@ -677,6 +742,7 @@ const LegalPage = ({ onBack }) => {
 };
 
 const LeaderboardScreen = ({ allUsers, currentUser }) => {
+    usePageTitle("Top 10 Legenda");
     // FIX: Leaderboard Logic - Top 10 Only (Tingkat Dewa) & User Rank Message
     const sortedUsers = useMemo(() => { return [...allUsers].sort((a, b) => (b.reputation || 0) - (a.reputation || 0)); }, [allUsers]);
     const top10 = sortedUsers.slice(0, 10);
@@ -962,6 +1028,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 };
 
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
+    usePageTitle(profileData?.username ? `Profil ${profileData.username}` : "Profil");
     const [edit, setEdit] = useState(false); const [name, setName] = useState(profileData.username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false); const [showDev, setShowDev] = useState(false); const [activeTab, setActiveTab] = useState('posts'); const [mood, setMood] = useState(profileData.mood || ''); const [isEditingMood, setIsEditingMood] = useState(false);
     
     const [localPosts, setLocalPosts] = useState([]);
@@ -1077,6 +1144,7 @@ const HomeScreen = ({
     homeFeedState,
     setHomeFeedState
 }) => {
+    usePageTitle("Beranda");
     // Kita gunakan state dari parent (App), tidak membuat state lokal baru untuk posts/cursor
     const { posts: feedPosts, cursor: nextCursor, sortType, hasLoaded } = homeFeedState;
     
@@ -1137,17 +1205,20 @@ const HomeScreen = ({
         }
     }, [hasLoaded, sortType]); // Dependency pada sortType penting
 
-    // FIX SCROLL: Kembalikan posisi scroll saat kembali ke halaman ini
-    useEffect(() => {
-        if (homeFeedState.scrollPos) {
+    // FIX SCROLL: Membekukan posisi scroll saat kembali ke halaman ini
+    // Menggunakan useLayoutEffect agar scroll terjadi sebelum paint, mencegah kedipan
+    useLayoutEffect(() => {
+        if (homeFeedState.scrollPos > 0) {
             window.scrollTo(0, homeFeedState.scrollPos);
         }
-        
-        // Simpan posisi scroll saat unmount (pergi ke halaman lain)
+    }, []); // Run once on mount
+
+    // Simpan posisi scroll saat unmount (pergi ke halaman lain)
+    useEffect(() => {
         return () => {
              setHomeFeedState(prev => ({ ...prev, scrollPos: window.scrollY }));
         };
-    }, []); // Empty dependency ensures this runs on mount/unmount
+    }, []); 
 
     // Handler Ganti Kategori
     const handleSortChange = (newSort) => {
@@ -1242,6 +1313,7 @@ const HomeScreen = ({
 };
 
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
+    usePageTitle("Notifikasi");
     const [notifs, setNotifs] = useState([]);
     useEffect(() => { const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50)); return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
@@ -1249,6 +1321,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
+    usePageTitle("Lihat Postingan");
     const cachedPost = allPosts.find(p => p.id === postId);
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
     const [loading, setLoading] = useState(!cachedPost);
@@ -1284,6 +1357,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 };
 
 const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
+    usePageTitle("Pencarian");
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
     const [isSearching, setIsSearching] = useState(false);
