@@ -32,7 +32,8 @@ import {
     limit, 
     query, 
     where, 
-    orderBy 
+    orderBy,
+    writeBatch // Ditambahkan untuk fitur Reset Massal
 } from 'firebase/firestore';
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // Firebase App Check
 
@@ -125,18 +126,27 @@ let app, auth, db, googleProvider, messaging, appCheck;
 try {
     app = initializeApp(firebaseConfig);
     
-    // SECURITY: Implementasi App Check
-    // Mencegah bot atau request tidak sah mengakses resource Firebase
+    // SECURITY: Implementasi App Check (UPDATED)
+    // Solusi Anti-Throttle & Debug Token
     if (typeof window !== "undefined") {
-         // Pastikan RECAPTCHA_SITE_KEY tersedia atau gunakan debug token untuk localhost
+         // Aktifkan debug token otomatis di localhost/dev environment
+         if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+             self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+             console.log("App Check: Debug Mode Enabled for Localhost");
+         }
+
          try {
-            appCheck = initializeAppCheck(app, {
-                provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
-                isTokenAutoRefreshEnabled: true
-            });
-            console.log("App Check initialized");
+            if (RECAPTCHA_SITE_KEY) {
+                appCheck = initializeAppCheck(app, {
+                    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+                    isTokenAutoRefreshEnabled: true // Penting untuk mencegah token expired (400 error)
+                });
+                console.log("App Check initialized successfully");
+            } else {
+                console.warn("App Check skipped: RECAPTCHA_SITE_KEY missing");
+            }
          } catch (e) {
-             console.warn("App Check failed (might be localhost or missing key):", e);
+             console.warn("App Check failed to init (Check console for Recaptcha errors):", e);
          }
     }
 
@@ -665,6 +675,44 @@ const DeveloperDashboard = ({ onClose }) => {
         } catch(e) { alert("Gagal update poin: " + e.message); } 
     };
 
+    // FITUR BARU: GLOBAL WEEKLY RESET MANUAL
+    const handleGlobalReset = async () => {
+        if(!confirm("⚠️ DARURAT: Reset semua poin user jadi 0? Lakukan ini HANYA jika auto-reset hari Kamis gagal.")) return;
+        setSendingBC(true);
+        try {
+            // Menggunakan writeBatch untuk performa lebih baik (Chunking 400 user per batch karena limit Firestore 500)
+            const chunkSize = 400;
+            const chunks = [];
+            for (let i = 0; i < allUsersList.length; i += chunkSize) {
+                chunks.push(allUsersList.slice(i, i + chunkSize));
+            }
+
+            let totalReset = 0;
+            for (const chunk of chunks) {
+                const batch = writeBatch(db);
+                chunk.forEach(user => {
+                    const ref = doc(db, getPublicCollection('userProfiles'), user.id);
+                    batch.update(ref, { reputation: 0 });
+                });
+                await batch.commit();
+                totalReset += chunk.length;
+            }
+
+            // Log System
+            await addDoc(collection(db, getPublicCollection('systemLogs')), {
+                 message: `Manual Weekly Reset by Admin (${totalReset} users)`,
+                 timestamp: serverTimestamp(),
+                 type: 'manual_reset'
+            });
+
+            alert(`SUKSES: ${totalReset} user telah direset ke 0 poin.`);
+        } catch(e) {
+            alert("GAGAL RESET: " + e.message);
+        } finally {
+            setSendingBC(false);
+        }
+    };
+
     const filteredUsers = allUsersList.filter(u => u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email?.toLowerCase().includes(userSearchTerm.toLowerCase()));
 
     return (
@@ -683,10 +731,22 @@ const DeveloperDashboard = ({ onClose }) => {
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-purple-100 dark:border-gray-700 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-emerald-100 dark:border-gray-700 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
                         </div>
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
+                        
+                        {/* FITUR BARU: RESET GLOBAL */}
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700 flex items-center justify-between">
+                            <div>
+                                <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2"><TimerReset size={18} className="text-orange-500"/> Reset Mingguan Manual</h3>
+                                <p className="text-xs text-gray-500">Gunakan jika auto-reset hari Kamis macet.</p>
+                            </div>
+                            <button onClick={handleGlobalReset} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-lg hover:bg-orange-600 transition disabled:opacity-50">
+                                {sendingBC ? 'Memproses...' : 'Reset Semua Poin'}
+                            </button>
+                        </div>
+
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-blue-100 dark:border-gray-700">
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-blue-500"/> Kirim Pengumuman</h3>
                             <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-3 rounded-xl text-sm border border-gray-200 dark:border-gray-600 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
-                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-blue-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-red-100 dark:border-gray-700">
                              <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><UserX size={18} className="text-red-500"/> Manajemen User (Ban/Hapus)</h3>
@@ -714,7 +774,14 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
                 <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
-                <form onSubmit={handleSubmit} className="space-y-4"><div className="text-left"><label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label><input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500 outline-none"/></div><button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button></form>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="text-left">
+                        <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
+                        {/* FIX: Warna teks input diubah jadi kuning sesuai request */}
+                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-600 focus:ring-2 focus:ring-sky-500 outline-none"/>
+                    </div>
+                    <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button>
+                </form>
             </div>
         </div>
     );
@@ -1433,7 +1500,14 @@ const App = () => {
     useEffect(() => { if (user && user.email !== DEVELOPER_EMAIL) { console.error = (...args) => {}; } }, [user]);
     useEffect(() => { const handleOff = () => setIsOffline(true); const handleOn = () => { setIsOffline(false); setRefreshTrigger(prev=>prev+1); }; window.addEventListener('offline', handleOff); window.addEventListener('online', handleOn); return () => { window.removeEventListener('offline', handleOff); window.removeEventListener('online', handleOn); } }, []);
     useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
-    useEffect(() => { window.scrollTo(0, 0); }, [page]);
+    
+    // FIX SCROLL SPA: Jangan scroll otomatis jika ke Beranda (karena feed punya memori scroll sendiri)
+    useEffect(() => { 
+        if (page !== 'home') {
+            window.scrollTo(0, 0); 
+        }
+    }, [page]);
+    
     useEffect(() => { const savedTheme = localStorage.getItem('theme'); if (savedTheme === 'dark') { document.documentElement.classList.add('dark'); setDarkMode(true); } }, []);
 
     // FIX SPLASH: Timeout logic jika data tidak kunjung datang dalam 15 detik
@@ -1574,7 +1648,15 @@ const App = () => {
                             
                             {/* DESKTOP NAV - FIX: Reordered as requested */}
                             <div className="hidden md:flex items-center gap-6 mr-4">
-                                <button onClick={()=>setPage('home')} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
+                                <button 
+                                    onClick={()=>setPage('home')} 
+                                    onDoubleClick={() => {
+                                        if (page === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }}
+                                    className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}
+                                >
+                                    <Home size={18}/> Beranda
+                                </button>
                                 
                                 {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
                                 
@@ -1606,7 +1688,22 @@ const App = () => {
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) */}
-                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {page!=='legal' && ( 
+                        <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40">
+                            <NavBtn 
+                                icon={Home} 
+                                active={page==='home'} 
+                                onClick={()=>setPage('home')} 
+                                onDoubleClick={() => {
+                                    if (page === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                            />
+                            <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
+                            <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button>
+                            <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
+                            {isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}
+                        </nav> 
+                    )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
@@ -1618,6 +1715,7 @@ const App = () => {
     );
 };
 
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} strokeWidth={active?2.5:2} /></button>);
+// FIX: NavBtn sekarang bisa menerima props tambahan (misal: onDoubleClick)
+const NavBtn = ({ icon: Icon, active, onClick, ...props }) => (<button onClick={onClick} {...props} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
