@@ -33,7 +33,7 @@ import {
     query, 
     where, 
     orderBy,
-    writeBatch // Ditambahkan untuk fitur Reset Massal
+    getDocs // Ditambahkan untuk fitur Reset All
 } from 'firebase/firestore';
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // Firebase App Check
 
@@ -126,28 +126,27 @@ let app, auth, db, googleProvider, messaging, appCheck;
 try {
     app = initializeApp(firebaseConfig);
     
-    // SECURITY: Implementasi App Check (UPDATED)
-    // Solusi Anti-Throttle & Debug Token
+    // SECURITY FIX: Implementasi App Check Stabil
+    // Menggunakan Token Auto Refresh & Debug Token untuk mencegah throttling 400
     if (typeof window !== "undefined") {
-         // Aktifkan debug token otomatis di localhost/dev environment
-         if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-             self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-             console.log("App Check: Debug Mode Enabled for Localhost");
-         }
+        // Aktifkan Debug Token otomatis di localhost agar tidak spam reCAPTCHA
+        if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+            self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        }
 
-         try {
-            if (RECAPTCHA_SITE_KEY) {
+        try {
+            // Cek apakah appCheck sudah ada di global scope untuk mencegah init ganda (hot-reload friendly)
+            if (!window._firebaseAppCheckInit) {
                 appCheck = initializeAppCheck(app, {
                     provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
-                    isTokenAutoRefreshEnabled: true // Penting untuk mencegah token expired (400 error)
+                    isTokenAutoRefreshEnabled: true // PENTING: Auto refresh token agar tidak kadaluarsa
                 });
-                console.log("App Check initialized successfully");
-            } else {
-                console.warn("App Check skipped: RECAPTCHA_SITE_KEY missing");
+                window._firebaseAppCheckInit = true;
+                console.log("App Check initialized securely.");
             }
-         } catch (e) {
-             console.warn("App Check failed to init (Check console for Recaptcha errors):", e);
-         }
+        } catch (e) {
+             console.warn("App Check warning (ignore if localhost):", e);
+        }
     }
 
     auth = getAuth(app);
@@ -650,7 +649,7 @@ const DeveloperDashboard = ({ onClose }) => {
     const handleBanUser = async (uid, currentStatus) => { if(!confirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?")) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), { isBanned: !currentStatus }); setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); alert(currentStatus ? "User di-unban." : "User berhasil di-ban."); } catch(e) { alert("Gagal: " + e.message); } };
     const handleDeleteUser = async (uid) => { if(!confirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?")) return; try { await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid)); setAllUsersList(prev => prev.filter(u => u.id !== uid)); alert("Data user dihapus."); } catch(e) { alert("Gagal hapus: " + e.message); } };
     
-    // MODIFIKASI: Sistem Reset dengan Notifikasi
+    // MODIFIKASI: Sistem Reset dengan Notifikasi & MANUAL RESET ALL
     const handleUpdateReputation = async (uid, amount, isReset = false) => { 
         if(!confirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`)) return; 
         try { 
@@ -675,41 +674,42 @@ const DeveloperDashboard = ({ onClose }) => {
         } catch(e) { alert("Gagal update poin: " + e.message); } 
     };
 
-    // FITUR BARU: GLOBAL WEEKLY RESET MANUAL
-    const handleGlobalReset = async () => {
-        if(!confirm("⚠️ DARURAT: Reset semua poin user jadi 0? Lakukan ini HANYA jika auto-reset hari Kamis gagal.")) return;
-        setSendingBC(true);
+    // FITUR BARU: RESET SEMUA POIN (MANUAL TRIGGER)
+    const handleResetAllPoints = async () => {
+        if (!confirm("⚠️ BAHAYA: Apakah Anda yakin ingin MERESET POIN SEMUA USER menjadi 0? Tindakan ini tidak dapat dibatalkan!")) return;
+        setLoading(true);
         try {
-            // Menggunakan writeBatch untuk performa lebih baik (Chunking 400 user per batch karena limit Firestore 500)
-            const chunkSize = 400;
-            const chunks = [];
-            for (let i = 0; i < allUsersList.length; i += chunkSize) {
-                chunks.push(allUsersList.slice(i, i + chunkSize));
-            }
-
-            let totalReset = 0;
-            for (const chunk of chunks) {
-                const batch = writeBatch(db);
-                chunk.forEach(user => {
-                    const ref = doc(db, getPublicCollection('userProfiles'), user.id);
-                    batch.update(ref, { reputation: 0 });
-                });
-                await batch.commit();
-                totalReset += chunk.length;
-            }
-
-            // Log System
-            await addDoc(collection(db, getPublicCollection('systemLogs')), {
-                 message: `Manual Weekly Reset by Admin (${totalReset} users)`,
-                 timestamp: serverTimestamp(),
-                 type: 'manual_reset'
+            // Ambil semua user profile
+            const usersSnapshot = await getDocs(collection(db, getPublicCollection('userProfiles')));
+            
+            // Batch update tidak support > 500, jadi kita loop manual satu per satu (client-side batching simple)
+            // Untuk app skala kecil ini acceptable.
+            let successCount = 0;
+            const promises = usersSnapshot.docs.map(async (docSnap) => {
+                try {
+                    await updateDoc(docSnap.ref, { reputation: 0 });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Gagal reset user ${docSnap.id}:`, err);
+                }
             });
 
-            alert(`SUKSES: ${totalReset} user telah direset ke 0 poin.`);
-        } catch(e) {
-            alert("GAGAL RESET: " + e.message);
+            await Promise.all(promises);
+            
+            // Catat log reset
+            await addDoc(collection(db, getPublicCollection('systemLogs')), {
+                message: `MANUAL RESET: ${successCount} user points reset to 0`,
+                context: 'admin_action',
+                userId: 'admin',
+                username: 'Developer',
+                timestamp: serverTimestamp()
+            });
+
+            alert(`Selesai! ${successCount} user telah direset.`);
+        } catch (e) {
+            alert("Gagal reset massal: " + e.message);
         } finally {
-            setSendingBC(false);
+            setLoading(false);
         }
     };
 
@@ -732,21 +732,17 @@ const DeveloperDashboard = ({ onClose }) => {
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-emerald-100 dark:border-gray-700 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
                         </div>
                         
-                        {/* FITUR BARU: RESET GLOBAL */}
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700 flex items-center justify-between">
-                            <div>
-                                <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2"><TimerReset size={18} className="text-orange-500"/> Reset Mingguan Manual</h3>
-                                <p className="text-xs text-gray-500">Gunakan jika auto-reset hari Kamis macet.</p>
-                            </div>
-                            <button onClick={handleGlobalReset} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-lg hover:bg-orange-600 transition disabled:opacity-50">
-                                {sendingBC ? 'Memproses...' : 'Reset Semua Poin'}
-                            </button>
+                        {/* FITUR TOMBOL RESET ALL */}
+                        <div className="bg-red-50 dark:bg-red-900/30 p-6 rounded-3xl shadow-sm border border-red-200 dark:border-red-700">
+                             <h3 className="font-bold text-red-700 dark:text-red-400 mb-3 flex items-center gap-2"><TimerReset size={18}/> Kontrol Reset Mingguan</h3>
+                             <p className="text-xs text-red-600 dark:text-red-300 mb-4">Jika otomatisasi gagal, gunakan tombol ini setiap Kamis jam 11:00 WIB.</p>
+                             <button onClick={handleResetAllPoints} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold text-sm w-full shadow-lg hover:bg-red-700 transition flex items-center justify-center gap-2"><Trash2 size={16}/> RESET SEMUA POIN SEKARANG</button>
                         </div>
 
-                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-blue-100 dark:border-gray-700">
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-blue-500"/> Kirim Pengumuman</h3>
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
                             <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-3 rounded-xl text-sm border border-gray-200 dark:border-gray-600 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
-                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-blue-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
+                            <button onClick={handleBroadcast} disabled={sendingBC} className="bg-orange-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full disabled:opacity-50 hover:bg-orange-600 transition">{sendingBC ? 'Mengirim...' : 'Kirim ke Semua'}</button>
                         </div>
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-red-100 dark:border-gray-700">
                              <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><UserX size={18} className="text-red-500"/> Manajemen User (Ban/Hapus)</h3>
@@ -777,8 +773,13 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="text-left">
                         <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
-                        {/* FIX: Warna teks input diubah jadi kuning sesuai request */}
-                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-600 focus:ring-2 focus:ring-sky-500 outline-none"/>
+                        {/* PERBAIKAN: Input text warna kuning (text-yellow-600 agar readable di bg putih) */}
+                        <input 
+                            value={username} 
+                            onChange={e=>setUsername(e.target.value)} 
+                            placeholder="Contoh: user_keren123" 
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-600 focus:ring-2 focus:ring-sky-500 outline-none placeholder:text-gray-400"
+                        />
                     </div>
                     <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button>
                 </form>
@@ -818,7 +819,8 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
     const isMeInTop10 = myRankIndex !== -1 && myRankIndex < 10;
 
     return (
-        <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
+        // PERBAIKAN RESPONSIF UI: Lebar container diperbesar untuk desktop
+        <div className="max-w-lg md:max-w-2xl lg:max-w-4xl mx-auto p-4 pb-24 pt-20">
             {/* Banner Reset Mingguan */}
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
                 <div className="bg-red-500 text-white p-2 rounded-lg"><TimerReset size={20}/></div>
@@ -1332,8 +1334,9 @@ const HomeScreen = ({
         }
     }
 
+    // PERBAIKAN RESPONSIF UI: Gunakan max-w-2xl untuk feed agar lebih lebar di desktop
     return (
-        <div className="w-full max-w-xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
+        <div className="w-full max-w-xl md:max-w-2xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
             <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
                      <button onClick={() => handleSortChange('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
@@ -1501,7 +1504,7 @@ const App = () => {
     useEffect(() => { const handleOff = () => setIsOffline(true); const handleOn = () => { setIsOffline(false); setRefreshTrigger(prev=>prev+1); }; window.addEventListener('offline', handleOff); window.addEventListener('online', handleOn); return () => { window.removeEventListener('offline', handleOff); window.removeEventListener('online', handleOn); } }, []);
     useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
     
-    // FIX SCROLL SPA: Jangan scroll otomatis jika ke Beranda (karena feed punya memori scroll sendiri)
+    // FIX SCROLL: Reset scroll ke atas HANYA jika bukan ke home
     useEffect(() => { 
         if (page !== 'home') {
             window.scrollTo(0, 0); 
@@ -1625,6 +1628,15 @@ const App = () => {
 
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
+    
+    // LOGIKA SCROLL PINTAR: Klik tombol home saat di home -> scroll ke atas
+    const handleHomeClick = () => {
+        if (page === 'home') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            setPage('home');
+        }
+    };
 
     // LOGIKA SPLASH SCREEN BARU:
     const isDataReady = isUsersLoaded && isProfileLoaded;
@@ -1644,19 +1656,11 @@ const App = () => {
                     <NetworkStatus />
                     {page!=='legal' && ( 
                         <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 md:px-8 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
-                            <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={handleHomeClick}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                             
                             {/* DESKTOP NAV - FIX: Reordered as requested */}
                             <div className="hidden md:flex items-center gap-6 mr-4">
-                                <button 
-                                    onClick={()=>setPage('home')} 
-                                    onDoubleClick={() => {
-                                        if (page === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
-                                    }}
-                                    className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}
-                                >
-                                    <Home size={18}/> Beranda
-                                </button>
+                                <button onClick={handleHomeClick} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
                                 
                                 {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
                                 
@@ -1688,22 +1692,7 @@ const App = () => {
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) */}
-                    {page!=='legal' && ( 
-                        <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40">
-                            <NavBtn 
-                                icon={Home} 
-                                active={page==='home'} 
-                                onClick={()=>setPage('home')} 
-                                onDoubleClick={() => {
-                                    if (page === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
-                                }}
-                            />
-                            <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
-                            <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button>
-                            <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
-                            {isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}
-                        </nav> 
-                    )}
+                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={handleHomeClick}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
@@ -1715,7 +1704,6 @@ const App = () => {
     );
 };
 
-// FIX: NavBtn sekarang bisa menerima props tambahan (misal: onDoubleClick)
-const NavBtn = ({ icon: Icon, active, onClick, ...props }) => (<button onClick={onClick} {...props} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} strokeWidth={active?2.5:2} /></button>);
+const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={22} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
