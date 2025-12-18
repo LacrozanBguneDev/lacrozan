@@ -1,7 +1,7 @@
 import admin from "firebase-admin";
 
 /* ================== KONFIG ================== */
-const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
+const REQUIRED_API_KEY = process.env.REACT_APP_FEED_API_KEY?.trim() || null;
 
 if (!admin.apps.length) {
   admin.initializeApp({
