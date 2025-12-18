@@ -132,7 +132,7 @@ try {
          // Pastikan RECAPTCHA_SITE_KEY tersedia atau gunakan debug token untuk localhost
          try {
             appCheck = initializeAppCheck(app, {
-                provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+                provider: new ReCaptchaV3Provider(6LeiYC8sAAAAADnhUL_N_2DQP-XcXHiZjQuaePgn),
                 isTokenAutoRefreshEnabled: true
             });
             console.log("App Check initialized");
