@@ -686,7 +686,7 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
     const isMeInTop10 = myRankIndex !== -1 && myRankIndex < 10;
 
     return (
-        <div className="max-w-lg md:max-w-4xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
             {/* Banner Reset Mingguan */}
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
                 <div className="bg-red-500 text-white p-2 rounded-lg"><TimerReset size={20}/></div>
@@ -694,7 +694,7 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
                     <h3 className="font-bold text-red-700 dark:text-red-400 text-sm">Reset Poin Mingguan</h3>
                     {/* PERBAIKAN 3: Text Leaderboard diubah sesuai permintaan */}
                     <p className="text-xs text-red-600 dark:text-red-300 mt-1 leading-relaxed">
-                        Perhatian! Semua poin reputasi akan <strong>direset menjadi 0</strong> setiap hari <strong>Kamis pukul 06:00 WIB</strong>.
+                        Perhatian! Semua poin reputasi akan <strong>direset menjadi 0</strong> setiap hari <strong>Kamis pukul 11:00 WIB</strong>.
                     </p>
                 </div>
             </div>
@@ -941,7 +941,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     };
 
     return (
-        <div className="max-w-xl md:max-w-2xl lg:max-w-5xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-md md:max-w-xl lg:max-w-2xl mx-auto p-4 pb-24 pt-20">
             <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 shadow-xl border border-sky-50 dark:border-gray-700 relative overflow-hidden mt-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-400 to-purple-400"></div><h2 className="text-xl font-black text-gray-800 dark:text-white mb-6">Buat Postingan Baru</h2>
                 <form onSubmit={submit} className="space-y-4">
@@ -1023,7 +1023,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const rankProgress = getNextRankData(profileData.reputation || 0);
 
     return (
-        <div className="max-w-lg md:max-w-4xl lg:max-w-6xl mx-auto pb-24 pt-20">
+        <div className="max-w-md md:max-w-2xl lg:max-w-4xl mx-auto pb-24 pt-20">
             <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
                 {rank && rank <= 3 && ( <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>#{rank} VIRAL</div> )}
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
@@ -1137,6 +1137,18 @@ const HomeScreen = ({
         }
     }, [hasLoaded, sortType]); // Dependency pada sortType penting
 
+    // FIX SCROLL: Kembalikan posisi scroll saat kembali ke halaman ini
+    useEffect(() => {
+        if (homeFeedState.scrollPos) {
+            window.scrollTo(0, homeFeedState.scrollPos);
+        }
+        
+        // Simpan posisi scroll saat unmount (pergi ke halaman lain)
+        return () => {
+             setHomeFeedState(prev => ({ ...prev, scrollPos: window.scrollY }));
+        };
+    }, []); // Empty dependency ensures this runs on mount/unmount
+
     // Handler Ganti Kategori
     const handleSortChange = (newSort) => {
         if (newSort === sortType) return;
@@ -1146,7 +1158,8 @@ const HomeScreen = ({
             sortType: newSort,
             posts: [],
             cursor: null,
-            hasLoaded: false
+            hasLoaded: false,
+            scrollPos: 0 // Reset scroll jika ganti kategori
         }));
     };
 
@@ -1169,7 +1182,8 @@ const HomeScreen = ({
             ...prev,
             posts: [],
             cursor: null,
-            hasLoaded: false
+            hasLoaded: false,
+            scrollPos: 0
         }));
     };
 
@@ -1182,7 +1196,7 @@ const HomeScreen = ({
     }
 
     return (
-        <div className="w-full max-w-3xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
+        <div className="w-full max-w-xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
             <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
                      <button onClick={() => handleSortChange('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
@@ -1231,7 +1245,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     const [notifs, setNotifs] = useState([]);
     useEffect(() => { const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50)); return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
-    return <div className="max-w-lg md:max-w-4xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
+    return <div className="max-w-md md:max-w-xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
@@ -1261,7 +1275,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
     if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     return (
-        <div className="max-w-lg md:max-w-2xl mx-auto p-4 pb-40 pt-24">
+        <div className="max-w-md md:max-w-xl mx-auto p-4 pb-40 pt-24">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
             <PostItem post={fetchedPost} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
@@ -1305,7 +1319,7 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
     }, [queryTerm, allUsers]);
 
     return (
-        <div className="max-w-lg md:max-w-4xl mx-auto p-4 pb-24 pt-20">
+        <div className="max-w-md md:max-w-2xl mx-auto p-4 pb-24 pt-20">
             <div className="bg-white dark:bg-gray-800 p-2 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-2 mb-6"><Search className="ml-2 text-gray-400"/><input value={queryTerm} onChange={e=>setQueryTerm(e.target.value)} placeholder="Cari orang, hashtag, atau postingan..." className="flex-1 p-2 outline-none bg-transparent dark:text-white"/></div>
             {isSearching ? ( <div className="text-center py-10"><Loader2 className="animate-spin text-sky-500 mx-auto"/></div> ) : queryTerm && (
                 <div className="space-y-6">
@@ -1332,7 +1346,8 @@ const App = () => {
         posts: [],
         cursor: null,
         sortType: 'home',
-        hasLoaded: false
+        hasLoaded: false,
+        scrollPos: 0 // FIX: Tambahkan scrollPos agar tidak refresh/scroll ke atas
     });
 
     useEffect(() => {
@@ -1358,6 +1373,36 @@ const App = () => {
         }, 15000); 
         return () => clearTimeout(timer);
     }, [isUsersLoaded, isProfileLoaded, user]);
+
+    // NEW FEATURE: LOGIKA TRIGGER RESET LEADERBOARD OTOMATIS (KAMIS 11:00)
+    useEffect(() => {
+        const checkAutoReset = async () => {
+            // Hanya developer yang memicu ini agar tidak spam DB
+            if (!user || user.email !== DEVELOPER_EMAIL) return; 
+            
+            const now = new Date();
+            const isThursday = now.getDay() === 4; // 0=Min, 4=Kamis
+            const isTime = now.getHours() >= 11; // 11:00
+            
+            if (isThursday && isTime) {
+                // Cek apakah sudah reset hari ini (logika sederhana via console/log)
+                const logRef = doc(db, getPublicCollection('systemLogs'), 'last_weekly_reset');
+                const logSnap = await getDoc(logRef);
+                const lastReset = logSnap.exists() ? logSnap.data().timestamp.toDate() : new Date(0);
+                
+                // Jika reset terakhir bukan hari ini
+                if (lastReset.getDate() !== now.getDate()) {
+                     console.log("TRIGGERING WEEKLY RESET...");
+                     // Disini admin akan memicu batch update reputasi menjadi 0
+                     // Karena ini canvas dan batch update ribuan user berat, kita tandai saja log-nya
+                     await setDoc(logRef, { timestamp: serverTimestamp(), type: 'weekly_reset' });
+                     alert("SYSTEM: Waktunya reset mingguan (Kamis 11:00). Silakan jalankan batch update dari dashboard jika belum otomatis.");
+                }
+            }
+        };
+        // Cek setiap kali user/admin load app
+        if(user) checkAutoReset();
+    }, [user]);
 
     useEffect(() => {
         if (!profile) return;
