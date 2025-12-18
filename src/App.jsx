@@ -127,19 +127,16 @@ try {
     app = initializeApp(firebaseConfig);
     
     // SECURITY FIX: Implementasi App Check Stabil
-    // Menggunakan Token Auto Refresh & Debug Token untuk mencegah throttling 400
     if (typeof window !== "undefined") {
-        // Aktifkan Debug Token otomatis di localhost agar tidak spam reCAPTCHA
         if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
             self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
         }
 
         try {
-            // Cek apakah appCheck sudah ada di global scope untuk mencegah init ganda (hot-reload friendly)
             if (!window._firebaseAppCheckInit) {
                 appCheck = initializeAppCheck(app, {
                     provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
-                    isTokenAutoRefreshEnabled: true // PENTING: Auto refresh token agar tidak kadaluarsa
+                    isTokenAutoRefreshEnabled: true
                 });
                 window._firebaseAppCheckInit = true;
                 console.log("App Check initialized securely.");
@@ -168,16 +165,60 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-// Custom Hook untuk Dynamic Meta Tags (SEO)
-const usePageTitle = (title) => {
+// Custom Hook untuk Dynamic Meta Tags (SEO & Share)
+const usePageTitle = (title, description = "", image = "") => {
     useEffect(() => {
         const prevTitle = document.title;
         document.title = title ? `${title} - ${APP_NAME}` : APP_NAME;
-        // Opsional: Update meta description jika ada
+
+        // Update Meta Tags Dinamis
+        const updateMeta = (name, content) => {
+            if (!content) return;
+            let tag = document.querySelector(`meta[property="${name}"]`) || document.querySelector(`meta[name="${name}"]`);
+            if (!tag) {
+                tag = document.createElement('meta');
+                tag.setAttribute('property', name); // Gunakan property untuk OG
+                // Fallback untuk name biasa jika bukan OG
+                if (!name.startsWith('og:')) tag.setAttribute('name', name);
+                document.head.appendChild(tag);
+            }
+            tag.setAttribute('content', content);
+        };
+
+        if (title) {
+            updateMeta('og:title', title);
+            updateMeta('twitter:title', title);
+        }
+        if (description) {
+            updateMeta('description', description);
+            updateMeta('og:description', description);
+            updateMeta('twitter:description', description);
+        }
+        if (image) {
+            updateMeta('og:image', image);
+            updateMeta('twitter:image', image);
+        }
+
         return () => {
             document.title = prevTitle;
         };
-    }, [title]);
+    }, [title, description, image]);
+};
+
+// URL Helper untuk mengupdate link tanpa reload
+const updateUrl = (params) => {
+    const url = new URL(window.location);
+    // Hapus parameter lama agar bersih
+    url.searchParams.delete('post');
+    url.searchParams.delete('user');
+    url.searchParams.delete('q');
+    
+    // Set parameter baru
+    Object.keys(params).forEach(key => {
+        if (params[key]) url.searchParams.set(key, params[key]);
+    });
+    
+    window.history.pushState({}, '', url);
 };
 
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
@@ -958,7 +999,14 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
-    const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin! Orang lain bisa membukanya langsung.'); } catch (e) { alert('Gagal menyalin link'); } };
+    const sharePost = async () => { 
+        try { 
+            // FIX SHARE LINK: Use ?post=ID format
+            const shareUrl = `${window.location.origin}?post=${post.id}`;
+            await navigator.clipboard.writeText(shareUrl); 
+            alert('Link Postingan Disalin! Meta data akan mengikuti saat dibagikan.'); 
+        } catch (e) { alert('Gagal menyalin link'); } 
+    };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
 
@@ -1096,7 +1144,13 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 };
 
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
-    usePageTitle(profileData?.username ? `Profil ${profileData.username}` : "Profil");
+    // Dynamic Meta Tags untuk Profil
+    usePageTitle(
+        profileData?.username ? `Profil ${profileData.username}` : "Profil",
+        `Lihat profil ${profileData?.username || 'Pengguna'} di ${APP_NAME}. Bergabunglah untuk melihat postingan mereka!`,
+        profileData?.photoURL || APP_LOGO
+    );
+
     const [edit, setEdit] = useState(false); const [name, setName] = useState(profileData.username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false); const [showDev, setShowDev] = useState(false); const [activeTab, setActiveTab] = useState('posts'); const [mood, setMood] = useState(profileData.mood || ''); const [isEditingMood, setIsEditingMood] = useState(false);
     
     const [localPosts, setLocalPosts] = useState([]);
@@ -1228,14 +1282,14 @@ const HomeScreen = ({
         return sorted.length > 0 ? {tag: sorted[0][0], count: sorted[0][1]} : null;
     }, [allPosts]);
 
-    // Modifikasi: Logic Load Feed
+    // Modifikasi: Logic Load Feed (Updated for Following)
     const loadFeed = async (reset = false) => {
         if (loading) return;
         setLoading(true);
         setFeedError(false);
 
         const currentCursor = reset ? null : nextCursor;
-        const currentSort = sortType; // Gunakan sortType dari state persisten
+        const currentSort = sortType; 
         
         try {
             const data = await fetchFeedData({
@@ -1288,9 +1342,15 @@ const HomeScreen = ({
         };
     }, []); 
 
-    // Handler Ganti Kategori
+    // Handler Ganti Kategori (Tambahan: Following)
     const handleSortChange = (newSort) => {
         if (newSort === sortType) return;
+        // Jika mode following & guest, minta login
+        if (newSort === 'following' && isGuest) {
+            onRequestLogin();
+            return;
+        }
+
         // Reset state di parent, set hasLoaded false untuk memicu fetch baru
         setHomeFeedState(prev => ({
             ...prev,
@@ -1340,6 +1400,7 @@ const HomeScreen = ({
             <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
                      <button onClick={() => handleSortChange('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
+                     <button onClick={() => handleSortChange('following')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap flex items-center gap-1 ${sortType==='following'?'bg-emerald-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}><Users size={12}/> Mengikuti</button>
                      <button onClick={() => handleSortChange('meme')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
                      <button onClick={() => handleSortChange('popular')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
                      
@@ -1390,11 +1451,17 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
-    usePageTitle("Lihat Postingan");
     const cachedPost = allPosts.find(p => p.id === postId);
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
     const [loading, setLoading] = useState(!cachedPost);
     const [error, setError] = useState(false);
+
+    // Dynamic Meta Tags untuk Single Post
+    const postTitle = fetchedPost?.title || `Postingan oleh ${fetchedPost?.user?.username || 'Pengguna'}`;
+    const postDesc = fetchedPost?.content ? fetchedPost.content.substring(0, 150) : "Lihat postingan menarik ini di BguneNet!";
+    const postImage = fetchedPost?.mediaUrl || APP_LOGO;
+    usePageTitle(postTitle, postDesc, postImage);
+
     useEffect(() => {
         if (cachedPost) { setFetchedPost(cachedPost); setLoading(false); return; }
         const fetchSinglePost = async () => {
@@ -1413,7 +1480,13 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         };
         if (postId) fetchSinglePost();
     }, [postId, cachedPost]);
-    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
+    const handleBack = () => { 
+        // Bersihkan parameter post di URL
+        const url = new URL(window.location);
+        url.searchParams.delete('post');
+        window.history.pushState({}, '', url);
+        goBack(); 
+    };
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
     if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     return (
@@ -1426,12 +1499,15 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 };
 
 const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
-    usePageTitle("Pencarian");
+    usePageTitle(initialQuery ? `Cari: ${initialQuery}` : "Pencarian");
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
     const [isSearching, setIsSearching] = useState(false);
 
     useEffect(() => {
+        // Update URL saat query berubah
+        if (queryTerm) updateUrl({ q: queryTerm });
+        
         if (!queryTerm.trim()) { setResults({ users: [], posts: [] }); return; }
         
         const doSearch = async () => {
@@ -1492,6 +1568,27 @@ const App = () => {
         hasLoaded: false,
         scrollPos: 0 // FIX: Tambahkan scrollPos agar tidak refresh/scroll ke atas
     });
+
+    // SISTEM ROUTING UNIK (URL PARSER)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const postParam = params.get('post');
+        const userParam = params.get('user');
+        const qParam = params.get('q');
+
+        // Prioritaskan Post, lalu User, lalu Search
+        if (postParam) {
+            setTargetPid(postParam);
+            setPage('view_post');
+        } else if (userParam) {
+            setTargetUid(userParam);
+            setPage('other-profile');
+        } else if (qParam) {
+            setSearchQuery(qParam);
+            setPage('search');
+        }
+        // Jika tidak ada param, default ke 'home' (sudah default state)
+    }, []);
 
     useEffect(() => {
         const handleError = (event) => { if (!user || user.email !== DEVELOPER_EMAIL) { event.preventDefault(); logSystemError(event.error || new Error(event.message), 'global_error', user); } };
@@ -1563,8 +1660,6 @@ const App = () => {
     const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); alert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas."); setShowRewards(false); } catch (e) { alert("Gagal klaim: " + e.message); } };
     const toggleDarkMode = () => { if (darkMode) { document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light'); setDarkMode(false); } else { document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark'); setDarkMode(true); } };
 
-    useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
-
     useEffect(() => {
         if (!user) return;
         const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
@@ -1629,13 +1724,21 @@ const App = () => {
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
     
-    // LOGIKA SCROLL PINTAR: Klik tombol home saat di home -> scroll ke atas
+    // LOGIKA SCROLL PINTAR & LINK HANDLER
     const handleHomeClick = () => {
         if (page === 'home') {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
             setPage('home');
+            updateUrl({}); // Reset URL ke root
         }
+    };
+    
+    // Wrapper untuk pindah halaman yang juga update URL
+    const goToProfileSafe = (uid) => {
+        setTargetUid(uid);
+        setPage('other-profile');
+        updateUrl({ user: uid });
     };
 
     // LOGIKA SPLASH SCREEN BARU:
@@ -1662,14 +1765,14 @@ const App = () => {
                             <div className="hidden md:flex items-center gap-6 mr-4">
                                 <button onClick={handleHomeClick} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
                                 
-                                {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
+                                {!isGuest && <button onClick={()=>{ setPage('profile'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
                                 
                                 {/* Tombol Buat Post Ditengahkan */}
                                 <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2 mx-2"><PlusCircle size={16}/> Buat Post</button>
                                 
-                                <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 10</button>
+                                <button onClick={()=>{ setPage('leaderboard'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 10</button>
                                 
-                                <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
+                                <button onClick={()=>{ setPage('search'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
                             </div>
 
                             <div className="flex gap-2 items-center">
@@ -1680,19 +1783,19 @@ const App = () => {
                         </header> 
                     )}
                     <main className={page!=='legal' ? 'pt-16 md:pt-20' : ''}>
-                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
+                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={goToProfileSafe} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
-                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
+                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={goToProfileSafe} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={(pid)=>{ setTargetPid(pid); updateUrl({post: pid}); }} />}
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
                         {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
-                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={(pid)=>{ setTargetPid(pid); updateUrl({post: pid}); }} setTargetProfileId={goToProfileSafe}/>}
                         {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
                         {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
-                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
+                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={goToProfileSafe} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) */}
-                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={handleHomeClick}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={handleHomeClick}/><NavBtn icon={Search} active={page==='search'} onClick={()=>{ setPage('search'); updateUrl({}); }}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>{ setPage('leaderboard'); updateUrl({}); } }/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>{ setPage('profile'); updateUrl({}); } }/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
