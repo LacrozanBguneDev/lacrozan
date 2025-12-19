@@ -172,32 +172,36 @@ const usePageTitle = (title, description = "", image = "") => {
         document.title = title ? `${title} - ${APP_NAME}` : APP_NAME;
 
         // Update Meta Tags Dinamis
-        const updateMeta = (name, content) => {
+        const updateMeta = (name, content, attribute = 'name') => {
             if (!content) return;
-            let tag = document.querySelector(`meta[property="${name}"]`) || document.querySelector(`meta[name="${name}"]`);
+            let tag = document.querySelector(`meta[${attribute}="${name}"]`);
             if (!tag) {
                 tag = document.createElement('meta');
-                tag.setAttribute('property', name); // Gunakan property untuk OG
-                // Fallback untuk name biasa jika bukan OG
-                if (!name.startsWith('og:')) tag.setAttribute('name', name);
+                tag.setAttribute(attribute, name);
                 document.head.appendChild(tag);
             }
             tag.setAttribute('content', content);
         };
 
         if (title) {
-            updateMeta('og:title', title);
+            updateMeta('title', title);
+            updateMeta('og:title', title, 'property');
             updateMeta('twitter:title', title);
         }
         if (description) {
             updateMeta('description', description);
-            updateMeta('og:description', description);
+            updateMeta('og:description', description, 'property');
             updateMeta('twitter:description', description);
         }
         if (image) {
-            updateMeta('og:image', image);
+            updateMeta('og:image', image, 'property');
             updateMeta('twitter:image', image);
         }
+        
+        // Tambahan Standar OG Tags untuk WhatsApp
+        updateMeta('og:type', 'website', 'property');
+        updateMeta('og:site_name', APP_NAME, 'property');
+        updateMeta('og:url', window.location.href, 'property');
 
         return () => {
             document.title = prevTitle;
@@ -626,7 +630,7 @@ const renderMarkdown = (text, onHashtagClick) => {
     // Formatting Markdown
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                .replace(/\*(.*?)\*/g, '<em>$1</em>')
-               .replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
+               .replace(/`(.*?)`/g, '<code class="bg-sky-5 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
     
     // Hashtags
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
@@ -948,6 +952,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [lightboxOpen, setLightboxOpen] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState(0);
 
+    // FITUR BARU: Title Truncation Logic
+    const [expandedTitle, setExpandedTitle] = useState(false);
+    const isTitleLong = post.title && post.title.length > 60;
+    const displayTitle = expandedTitle || !isTitleLong ? post.title : post.title.substring(0, 60) + "...";
+
     const isOwner = currentUserId && post.userId === currentUserId;
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
@@ -999,13 +1008,31 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
+    
+    // PERBAIKAN: SHARE LINK DENGAN WEB SHARE API & FALLBACK
     const sharePost = async () => { 
-        try { 
-            // FIX SHARE LINK: Use ?post=ID format
-            const shareUrl = `${window.location.origin}?post=${post.id}`;
-            await navigator.clipboard.writeText(shareUrl); 
-            alert('Link Postingan Disalin! Meta data akan mengikuti saat dibagikan.'); 
-        } catch (e) { alert('Gagal menyalin link'); } 
+        const shareUrl = `${window.location.origin}?post=${post.id}`;
+        const shareData = {
+            title: post.title || 'Postingan BguneNet',
+            text: post.content ? post.content.substring(0, 100) + '...' : 'Lihat postingan menarik ini!',
+            url: shareUrl
+        };
+
+        if (navigator.share) {
+            try {
+                await navigator.share(shareData);
+            } catch (err) {
+                 // Fallback ke copy jika user batal/error di native share
+                 try {
+                     await navigator.clipboard.writeText(shareUrl);
+                 } catch(e){}
+            }
+        } else {
+            try { 
+                await navigator.clipboard.writeText(shareUrl); 
+                alert('Link Postingan Disalin! Meta data akan mengikuti saat dibagikan.'); 
+            } catch (e) { alert('Gagal menyalin link'); } 
+        }
     };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
@@ -1066,7 +1093,23 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-3"><input value={editedTitle} onChange={(e) => setEditedTitle(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg font-bold text-sm dark:text-white"/><textarea value={editedContent} onChange={(e) => setEditedContent(e.target.value)} className="w-full p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg text-sm resize-none dark:text-white" rows="4"/><div className="flex justify-end gap-2"><button onClick={() => setIsEditing(false)} className="text-xs font-bold text-gray-500 px-3 py-1">Batal</button><button onClick={handleUpdatePost} className="text-xs font-bold text-white bg-sky-500 px-3 py-1 rounded-lg">Simpan</button></div></div>
             ) : (
                 <div className="flex-1 flex flex-col">
-                    {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-1 text-[15px] line-clamp-1">{post.title}</h3>}
+                     {/* PERBAIKAN: Title Truncation Logic & View More */}
+                    {post.title && (
+                        <div className="mb-1">
+                            <h3 className={`font-bold text-gray-900 dark:text-white text-[15px] inline ${expandedTitle ? '' : 'line-clamp-1'}`}>
+                                {displayTitle}
+                            </h3>
+                            {isTitleLong && (
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); setExpandedTitle(!expandedTitle); }} 
+                                    className="text-[10px] text-sky-500 font-bold ml-1 hover:underline"
+                                >
+                                    {expandedTitle ? 'Tutup' : 'Selengkapnya'}
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    
                     <div className="text-sm text-gray-600 dark:text-gray-300 mb-2 leading-relaxed flex-1">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     <div onDoubleClick={handleDoubleTap} className="relative mt-auto">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
@@ -1394,11 +1437,12 @@ const HomeScreen = ({
         }
     }
 
-    // PERBAIKAN RESPONSIF UI: Gunakan max-w-2xl untuk feed agar lebih lebar di desktop
+    // PERBAIKAN RESPONSIF UI: Navbar Kategori TIDAK Sticky & Lebih Rapi
     return (
         <div className="w-full max-w-xl md:max-w-2xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
-            <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
-                <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
+            {/* PERBAIKAN: Hapus 'sticky top-14 md:top-16 z-30' agar tidak lengket */}
+            <div className="flex items-center justify-start mb-4 py-2 relative overflow-x-auto no-scrollbar gap-2 -mx-4 px-4">
+                <div className="flex gap-2 items-center">
                      <button onClick={() => handleSortChange('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
                      <button onClick={() => handleSortChange('following')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap flex items-center gap-1 ${sortType==='following'?'bg-emerald-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}><Users size={12}/> Mengikuti</button>
                      <button onClick={() => handleSortChange('meme')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
@@ -1409,8 +1453,9 @@ const HomeScreen = ({
                             <TrendingUp size={12} className="mr-1 text-sky-500"/> {topTrend.tag}
                         </div>
                      )}
+                     
+                     <button onClick={manualRefresh} className="p-1.5 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500 border border-gray-100 dark:border-gray-700"><RefreshCw size={14}/></button>
                 </div>
-                <button onClick={manualRefresh} className="ml-auto p-2 bg-white dark:bg-gray-800 text-gray-500 rounded-full shadow-sm hover:rotate-180 transition duration-500"><RefreshCw size={18}/></button>
             </div>
 
             {feedError && (
