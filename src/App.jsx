@@ -128,12 +128,14 @@ try {
     
     // SECURITY FIX: Implementasi App Check Stabil
     if (typeof window !== "undefined") {
-        if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+        // Fix Login Google: Pastikan debug token aktif di localhost/canvas agar App Check tidak memblokir auth
+        if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost' || window.location.hostname.includes('googleusercontent')) {
             self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
         }
 
         try {
             if (!window._firebaseAppCheckInit) {
+                // Gunakan try-catch di dalam init agar jika gagal, aplikasi tetap jalan
                 appCheck = initializeAppCheck(app, {
                     provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
                     isTokenAutoRefreshEnabled: true
@@ -299,6 +301,7 @@ const requestNotificationPermission = async (userId) => {
     } catch (error) { console.error("Gagal request notifikasi:", error); }
 };
 
+// OPTIMASI DATA: Kompresi Gambar Lebih Efisien
 const compressImageToBase64 = (file) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -308,14 +311,16 @@ const compressImageToBase64 = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 600; 
+                // PENGHEMATAN DATA: Kurangi resolusi maksimal dari 600 ke 480
+                const MAX_WIDTH = 480; 
                 let width = img.width;
                 let height = img.height;
                 if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
                 canvas.width = width; canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+                // PENGHEMATAN DATA: Kualitas dikurangi dari 0.5 ke 0.35 (cukup untuk layar HP)
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.35);
                 resolve(dataUrl);
             };
             img.onerror = (error) => reject(error);
@@ -416,8 +421,34 @@ const isUserOnline = (lastSeen) => {
 };
 
 // ==========================================
-// BAGIAN 3: KOMPONEN UI KECIL
+// BAGIAN 3: KOMPONEN UI KECIL & CUSTOM DIALOG
 // ==========================================
+
+// CUSTOM UI: Dialog Alert & Confirm yang Cantik
+const CustomDialog = ({ isOpen, type, title, message, onConfirm, onCancel }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 w-full max-w-xs shadow-2xl scale-100 animate-in zoom-in-95 border border-gray-100 dark:border-gray-700">
+                <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 ${type === 'danger' ? 'bg-red-100 text-red-500' : 'bg-sky-100 text-sky-500'}`}>
+                    {type === 'danger' ? <AlertCircle size={32}/> : <Info size={32}/>}
+                </div>
+                <h3 className="text-xl font-black text-center text-gray-800 dark:text-white mb-2">{title}</h3>
+                <p className="text-sm text-center text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">{message}</p>
+                <div className="flex gap-3">
+                    {onCancel && (
+                        <button onClick={onCancel} className="flex-1 py-3 rounded-xl font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm">
+                            Batal
+                        </button>
+                    )}
+                    <button onClick={onConfirm} className={`flex-1 py-3 rounded-xl font-bold text-white shadow-lg transition text-sm ${type === 'danger' ? 'bg-red-500 hover:bg-red-600 shadow-red-200' : 'bg-sky-500 hover:bg-sky-600 shadow-sky-200'}`}>
+                        {type === 'danger' ? 'Ya, Hapus' : 'OK, Mengerti'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
     const [position, setPosition] = useState({ x: window.innerWidth - 70, y: window.innerHeight - 180 });
@@ -834,10 +865,42 @@ const OnboardingScreen = ({ onComplete, user }) => {
 };
 
 const AuthModal = ({ onClose }) => {
-    const handleGoogleLogin = async () => { try { await signInWithPopup(auth, googleProvider); onClose(); } catch (error) { console.error(error); alert("Gagal login dengan Google."); } };
+    // FIX LOGIN ERROR: Tampilkan error spesifik
+    const [errorMsg, setErrorMsg] = useState('');
+    
+    const handleGoogleLogin = async () => { 
+        setErrorMsg('');
+        try { 
+            await signInWithPopup(auth, googleProvider); 
+            onClose(); 
+        } catch (error) { 
+            console.error("Auth Error:", error); 
+            // Parsing pesan error agar lebih mudah dibaca user
+            let msg = "Gagal login.";
+            if (error.code === 'auth/popup-closed-by-user') msg = "Login dibatalkan.";
+            else if (error.code === 'auth/network-request-failed') msg = "Periksa koneksi internet.";
+            else if (error.code === 'auth/unauthorized-domain') msg = "Domain ini belum diizinkan di Firebase.";
+            else if (error.message.includes('app-check')) msg = "Gagal verifikasi keamanan (App Check).";
+            
+            setErrorMsg(msg + " (" + error.code + ")");
+        } 
+    };
+
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
-            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative"><button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button><div className="text-center mb-6"><img src={APP_LOGO} className="w-16 h-16 mx-auto mb-3"/><h2 className="text-xl font-black text-gray-800 dark:text-white">Masuk ke {APP_NAME}</h2><p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Bergabunglah dengan komunitas sekarang!</p></div><button onClick={handleGoogleLogin} className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-white py-3 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition shadow-sm"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5"/> Lanjutkan dengan Google</button><p className="text-[10px] text-center text-gray-400 mt-4">Dengan masuk, Anda menyetujui Ketentuan Layanan kami.</p></div>
+            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
+                <div className="text-center mb-6"><img src={APP_LOGO} className="w-16 h-16 mx-auto mb-3"/><h2 className="text-xl font-black text-gray-800 dark:text-white">Masuk ke {APP_NAME}</h2><p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Bergabunglah dengan komunitas sekarang!</p></div>
+                
+                {errorMsg && (
+                    <div className="bg-red-50 text-red-600 p-3 rounded-xl text-xs mb-4 border border-red-100 font-medium">
+                        <AlertTriangle size={14} className="inline mr-1 mb-0.5"/> {errorMsg}
+                    </div>
+                )}
+
+                <button onClick={handleGoogleLogin} className="w-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-white py-3 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition shadow-sm"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5"/> Lanjutkan dengan Google</button>
+                <p className="text-[10px] text-center text-gray-400 mt-4">Dengan masuk, Anda menyetujui Ketentuan Layanan kami.</p>
+            </div>
         </div>
     );
 };
@@ -952,6 +1015,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [lightboxOpen, setLightboxOpen] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState(0);
 
+    // STATE UNTUK DIALOG KONFIRMASI (MENGGANTIKAN CONFIRM)
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
     // FITUR BARU: Title Truncation Logic
     const [expandedTitle, setExpandedTitle] = useState(false);
     const isTitleLong = post.title && post.title.length > 60;
@@ -1002,10 +1068,22 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         } catch (error) { console.error(error); }
     };
 
-    const handleDelete = async () => {
-        const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini? Reputasi yang didapat akan DITARIK KEMBALI.";
-        if (confirm(confirmMsg)) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); alert(`Postingan dihapus.`); } catch (e) { alert("Gagal menghapus: " + e.message); } } 
+    // UPDATE: Menggunakan CustomDialog untuk menghapus post
+    const confirmDelete = async () => {
+        setShowDeleteDialog(false); // Tutup dialog
+        try { 
+            const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); 
+            const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); 
+            await updateDoc(userRef, { reputation: increment(-earnedReputation) }); 
+            await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); 
+            // Alert kecil bisa diganti toast, tapi untuk sekarang pakai alert standar atau silent
+        } catch (e) { alert("Gagal menghapus: " + e.message); }
     };
+
+    const handleDeleteClick = () => {
+        setShowDeleteDialog(true);
+    };
+
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
     
@@ -1069,6 +1147,15 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     // Label MEME dirapikan di header (inline)
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-3 mb-2 md:mb-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition hover:shadow-lg flex flex-col">
+            <CustomDialog 
+                isOpen={showDeleteDialog} 
+                type="danger" 
+                title="Hapus Postingan?" 
+                message="Reputasi (XP) yang Anda dapatkan dari postingan ini akan ditarik kembali."
+                onConfirm={confirmDelete}
+                onCancel={() => setShowDeleteDialog(false)}
+            />
+            
             {post.isShort && <div className="absolute top-3 right-3 bg-black/80 text-white text-[9px] font-bold px-2 py-0.5 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</div>}
             
             <div className="flex items-center justify-between mb-2">
@@ -1086,7 +1173,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 </div>
                 <div className="flex gap-1">
                     {!isOwner && post.userId !== currentUserId && ( <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 ${isFriend ? 'bg-emerald-100 text-emerald-600 border border-emerald-200' : isFollowing ? 'bg-gray-100 text-gray-500' : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-sm'}`}>{isFriend ? <><UserCheck size={10}/> Teman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
-                    {(isOwner || isMeDeveloper) && !isGuest && ( <div className="flex gap-1">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-1.5 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={14}/></button>}<button onClick={handleDelete} className={`p-1.5 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={14}/> : <Trash2 size={14}/>}</button></div> )}
+                    {(isOwner || isMeDeveloper) && !isGuest && ( <div className="flex gap-1">{isOwner && <button onClick={() => setIsEditing(!isEditing)} className="p-1.5 text-gray-400 hover:text-sky-600 rounded-full"><Edit size={14}/></button>}<button onClick={handleDeleteClick} className={`p-1.5 rounded-full ${isMeDeveloper && !isOwner ? 'bg-red-100 text-red-600 animate-pulse' : 'text-gray-400 hover:text-red-600'}`}>{isMeDeveloper && !isOwner ? <ShieldAlert size={14}/> : <Trash2 size={14}/>}</button></div> )}
                 </div>
             </div>
             {isEditing ? (
