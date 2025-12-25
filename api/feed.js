@@ -9,7 +9,11 @@ try {
     if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
       throw new Error("FIREBASE_SERVICE_ACCOUNT env var missing");
     }
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    // Replace \n literal supaya private_key terbaca dengan benar
+    const serviceAccount = JSON.parse(
+      process.env.FIREBASE_SERVICE_ACCOUNT.replace(/\\n/g, '\n')
+    );
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
@@ -61,7 +65,7 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
-    const limitReq = Math.min(Number(req.query.limit) || 10, 50); // batasi max 50
+    const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
 
@@ -79,7 +83,7 @@ export default async function handler(req, res) {
         else {
           const viewerData = viewerSnap.data() || {};
           followingIds = Array.isArray(viewerData.following)
-            ? viewerData.following.slice(0, 10) // pastikan max 10
+            ? viewerData.following.slice(0, 10)
             : [];
           if (followingIds.length === 0) isFollowingFallback = true;
         }
