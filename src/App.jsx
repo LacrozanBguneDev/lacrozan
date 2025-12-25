@@ -1,65 +1,71 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
-import DOMPurify from 'dompurify';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  useLayoutEffect
+} from "react";
+import DOMPurify from "dompurify";
 
 // ==========================================
 // FIREBASE IMPORT
 // ==========================================
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithCustomToken
+} from "firebase/auth";
 
-import { initializeApp } from 'firebase/app';
-import { 
-    getAuth, 
-    onAuthStateChanged, 
-    signOut, 
-    GoogleAuthProvider,
-    signInWithPopup,
-    signInWithCustomToken 
-} from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  collection,
+  onSnapshot,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  setDoc,
+  serverTimestamp,
+  addDoc,
+  getDoc,
+  setLogLevel,
+  deleteDoc,
+  increment,
+  limit,
+  query,
+  where,
+  orderBy,
+  getDocs
+} from "firebase/firestore";
 
-import { 
-    getFirestore, 
-    doc, 
-    collection, 
-    onSnapshot, 
-    updateDoc, 
-    arrayUnion, 
-    arrayRemove, 
-    setDoc, 
-    serverTimestamp, 
-    addDoc, 
-    getDoc, 
-    setLogLevel, 
-    deleteDoc, 
-    increment,
-    limit, 
-    query, 
-    where, 
-    orderBy,
-    getDocs 
-} from 'firebase/firestore';
-
-// NOTIFIKASI
-import { getMessaging } from "firebase/messaging";
+// NOTIFICATION
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 // ICONS
 import {
-    LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2,
-    Link as LinkIcon, ListOrdered, Shuffle, Code, Calendar, Lock, Mail,
-    UserPlus, LogIn, AlertCircle, Edit, Trash2, X, Check, Save, PlusCircle,
-    Search, UserCheck, ChevronRight, Share2, Film, TrendingUp, Flame,
-    ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle, RefreshCw, Info,
-    Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
-    CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert,
-    Trash, BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy,
-    Laugh, Moon, Sun, Award, Crown, Gem, Medal, Bookmark, Coffee, Smile,
-    Frown, Meh, CloudRain, SunMedium, Hash, Tag, Wifi, Smartphone,
-    Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX,
-    WifiOff, Signal, Gift as GiftIcon, Bug, ArrowUp, Move,
-    ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid,
-    TimerReset, WifiHigh
-} from 'lucide-react';
+  LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon,
+  Loader2, Link as LinkIcon, ListOrdered, Shuffle, Code, Calendar,
+  Lock, Mail, UserPlus, LogIn, AlertCircle, Edit, Trash2, X, Check,
+  Save, PlusCircle, Search, UserCheck, ChevronRight, Share2, Film,
+  TrendingUp, Flame, ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle,
+  RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen,
+  Users, Globe, CheckCircle, Sparkles, Zap, ShieldCheck,
+  MoreHorizontal, ShieldAlert, Trash, BarChart3, Activity, Gift, Eye,
+  RotateCw, Megaphone, Trophy, Laugh, Moon, Sun, Award, Crown, Gem,
+  Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium,
+  Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play,
+  Pause, Volume2, Minimize2, Scale, FileText, ChevronLeft,
+  CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
+  Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle,
+  RefreshCcw, LayoutGrid, TimerReset, WifiHigh
+} from "lucide-react";
 
-setLogLevel('silent');
+setLogLevel("silent");
 
 // ==========================================
 // ERROR BOUNDARY
@@ -74,33 +80,36 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, info) {
-    console.error("App Crash:", error, info);
+  componentDidCatch(error, errorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-          <div className="bg-white p-8 rounded-xl shadow-xl max-w-md text-center">
+        <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-6 text-center">
+          <div className="bg-white p-8 rounded-3xl shadow-xl border border-red-100 max-w-md">
             <AlertTriangle size={48} className="text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold mb-2">Terjadi Kesalahan</h2>
-            <p className="text-gray-500 text-sm mb-4">
-              Aplikasi error. Silakan reload halaman.
+            <h2 className="text-2xl font-black text-gray-800 mb-2">
+              Terjadi Kesalahan
+            </h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Aplikasi mengalami crash.
             </p>
-            <pre className="text-xs bg-gray-100 p-3 rounded overflow-auto max-h-32">
+            <div className="bg-gray-100 p-4 rounded-xl text-left text-xs font-mono text-red-600 mb-6 overflow-auto max-h-32">
               {this.state.error?.toString()}
-            </pre>
+            </div>
             <button
               onClick={() => window.location.reload()}
-              className="mt-4 bg-sky-500 text-white px-6 py-2 rounded-lg font-semibold"
+              className="bg-sky-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-sky-600 transition w-full"
             >
-              Muat Ulang
+              Muat Ulang Aplikasi
             </button>
           </div>
         </div>
       );
     }
+
     return this.props.children;
   }
 }
@@ -108,7 +117,6 @@ class ErrorBoundary extends React.Component {
 // ==========================================
 // KONFIGURASI GLOBAL
 // ==========================================
-
 const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL;
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
@@ -116,10 +124,7 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 const API_ENDPOINT = "https://app.bgunenet.my.id/api/feed";
 
-// ==========================================
 // FIREBASE CONFIG
-// ==========================================
-
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: "eduku-web.firebaseapp.com",
@@ -130,35 +135,42 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8"
 };
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const getPublicCollection = (name) => `artifacts/${appId}/public/data/${name}`;
+const API_KEY = process.env.REACT_APP_API_KEY;
+const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
+
+const appId =
+  typeof __app_id !== "undefined" ? __app_id : "default-app-id";
+
+const getPublicCollection = (collectionName) =>
+  `artifacts/${appId}/public/data/${collectionName}`;
 
 // ==========================================
-// INIT FIREBASE (TANPA APP CHECK)
+// FIREBASE INIT (TANPA APP CHECK)
 // ==========================================
-
 let app, auth, db, googleProvider, messaging;
 
 try {
-    app = initializeApp(firebaseConfig);
+  app = initializeApp(firebaseConfig);
 
-    auth = getAuth(app);
-    db = getFirestore(app);
-    googleProvider = new GoogleAuthProvider();
+  auth = getAuth(app);
+  db = getFirestore(app);
+  googleProvider = new GoogleAuthProvider();
 
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        try {
-            messaging = getMessaging(app);
-        } catch (e) {
-            console.warn("Messaging not supported");
-        }
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      messaging = getMessaging(app);
+    } catch (e) {
+      console.warn("FCM tidak tersedia:", e);
     }
+  }
 
-} catch (err) {
-    console.error("Firebase Init Error:", err);
+} catch (error) {
+  console.error("Firebase init error:", error);
 }
 
-// ==========================================
+
+
+// ==================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
