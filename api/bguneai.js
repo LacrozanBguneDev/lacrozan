@@ -1,6 +1,8 @@
-// BguneAI Ultra Core
+// ================================
+// BguneAI ULTRA MAX
 // Creator: Muhammad Irham Andika Putra
 // Owner: Tuan Irham
+// ================================
 
 export default async function handler(req, res) {
   try {
@@ -17,7 +19,7 @@ export default async function handler(req, res) {
     }
 
     // ==============================
-    // AI ENDPOINT POOL
+    // DAFTAR AI
     // ==============================
     const AI = {
       chat: "https://api-faa.my.id/faa/chatai",
@@ -29,7 +31,7 @@ export default async function handler(req, res) {
     };
 
     // ==============================
-    // INTENT DETECTOR
+    // DETEKSI INTENT
     // ==============================
     const detectIntent = (text) => {
       text = text.toLowerCase();
@@ -40,7 +42,7 @@ export default async function handler(req, res) {
     };
 
     // ==============================
-    // STRATEGI CERDAS
+    // STRATEGI AI
     // ==============================
     const planAI = (intent, mode) => {
       if (mode === "fast") return ["chat"];
@@ -55,28 +57,32 @@ export default async function handler(req, res) {
     };
 
     // ==============================
-    // SAFE FETCH (ANTI ERROR)
+    // UNIVERSAL FETCH
     // ==============================
     const callAI = async (url, prompt) => {
       try {
         const r = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ q: prompt })
+          body: JSON.stringify({
+            q: prompt,
+            prompt: prompt,
+            text: prompt
+          })
         });
 
         const data = await r.json();
 
-        // UNIVERSAL PARSER
         if (typeof data === "string") return data;
         if (data.result) return data.result;
         if (data.text) return data.text;
         if (data.answer) return data.answer;
         if (data.message) return data.message;
-        if (data.data) return JSON.stringify(data.data);
+        if (data.data?.answer) return data.data.answer;
+        if (data.data?.text) return data.data.text;
 
         return JSON.stringify(data);
-      } catch (e) {
+      } catch (err) {
         return null;
       }
     };
@@ -93,6 +99,7 @@ export default async function handler(req, res) {
 
       return res.json({
         ai: "BguneAI",
+        version: "ULTRA",
         creator: "Muhammad Irham Andika Putra",
         owner: "Tuan Irham",
         used_ai: ai,
