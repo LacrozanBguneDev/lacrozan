@@ -139,7 +139,7 @@ const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-const API_ENDPOINT = "https://app.bgunenet.my.id/api/feed";
+const API_ENDPOINT = "/api/feed";
 
 // FIX: FIREBASE CONFIG AUTO DETECT
 // Menggunakan __firebase_config dari environment canvas jika tersedia
