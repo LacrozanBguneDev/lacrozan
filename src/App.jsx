@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
-import DOMPurify from 'dompurify'; // Library sanitasi yang diminta
+import DOMPurify from 'dompurify';
 
 // ==========================================
-// BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
+// FIREBASE IMPORT
 // ==========================================
 
 import { initializeApp } from 'firebase/app';
@@ -14,6 +14,7 @@ import {
     signInWithPopup,
     signInWithCustomToken 
 } from 'firebase/auth';
+
 import { 
     getFirestore, 
     doc, 
@@ -33,31 +34,36 @@ import {
     query, 
     where, 
     orderBy,
-    getDocs // Ditambahkan untuk fitur Reset All
+    getDocs 
 } from 'firebase/firestore';
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // Firebase App Check
 
-// IMPORT KHUSUS NOTIFIKASI
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
+// NOTIFIKASI
+import { getMessaging } from "firebase/messaging";
 
-import { 
-    LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2, Link as LinkIcon, 
-    ListOrdered, Shuffle, Code, Calendar, Lock, Mail, UserPlus, LogIn, AlertCircle, 
-    Edit, Trash2, X, Check, Save, PlusCircle, Search, UserCheck, ChevronRight,
-    Share2, Film, TrendingUp, Flame, ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle,
-    RefreshCw, Info, Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
-    CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert, Trash,
-    BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy, Laugh, Moon, Sun,
-    Award, Crown, Gem, Medal, Bookmark, Coffee, Smile, Frown, Meh, CloudRain, SunMedium, 
-    Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
-    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
-    Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
-    WifiHigh
+// ICONS
+import {
+    LogOut, Home, User, Send, Heart, MessageSquare, Image as ImageIcon, Loader2,
+    Link as LinkIcon, ListOrdered, Shuffle, Code, Calendar, Lock, Mail,
+    UserPlus, LogIn, AlertCircle, Edit, Trash2, X, Check, Save, PlusCircle,
+    Search, UserCheck, ChevronRight, Share2, Film, TrendingUp, Flame,
+    ArrowLeft, AlertTriangle, Bell, Phone, HelpCircle, RefreshCw, Info,
+    Clock, Star, ExternalLink, Gamepad2, BookOpen, Users, Globe,
+    CheckCircle, Sparkles, Zap, ShieldCheck, MoreHorizontal, ShieldAlert,
+    Trash, BarChart3, Activity, Gift, Eye, RotateCw, Megaphone, Trophy,
+    Laugh, Moon, Sun, Award, Crown, Gem, Medal, Bookmark, Coffee, Smile,
+    Frown, Meh, CloudRain, SunMedium, Hash, Tag, Wifi, Smartphone,
+    Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
+    Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX,
+    WifiOff, Signal, Gift as GiftIcon, Bug, ArrowUp, Move,
+    ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid,
+    TimerReset, WifiHigh
 } from 'lucide-react';
 
-setLogLevel('silent'); 
+setLogLevel('silent');
 
-// --- ERROR BOUNDARY UNTUK MENCEGAH WHITE SCREEN ---
+// ==========================================
+// ERROR BOUNDARY
+// ==========================================
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -68,28 +74,30 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, errorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
+  componentDidCatch(error, info) {
+    console.error("App Crash:", error, info);
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-6 text-center">
-            <div className="bg-white p-8 rounded-3xl shadow-xl border border-red-100 max-w-md">
-                <AlertTriangle size={48} className="text-red-500 mx-auto mb-4" />
-                <h2 className="text-2xl font-black text-gray-800 mb-2">Terjadi Kesalahan</h2>
-                <p className="text-gray-500 text-sm mb-6">Aplikasi mengalami crash. Mohon maaf atas ketidaknyamanan ini.</p>
-                <div className="bg-gray-100 p-4 rounded-xl text-left text-xs font-mono text-red-600 mb-6 overflow-auto max-h-32">
-                    {this.state.error?.toString()}
-                </div>
-                <button 
-                    onClick={() => window.location.reload()} 
-                    className="bg-sky-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-sky-600 transition w-full"
-                >
-                    Muat Ulang Aplikasi
-                </button>
-            </div>
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+          <div className="bg-white p-8 rounded-xl shadow-xl max-w-md text-center">
+            <AlertTriangle size={48} className="text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold mb-2">Terjadi Kesalahan</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              Aplikasi error. Silakan reload halaman.
+            </p>
+            <pre className="text-xs bg-gray-100 p-3 rounded overflow-auto max-h-32">
+              {this.state.error?.toString()}
+            </pre>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 bg-sky-500 text-white px-6 py-2 rounded-lg font-semibold"
+            >
+              Muat Ulang
+            </button>
+          </div>
         </div>
       );
     }
@@ -97,70 +105,57 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
+// ==========================================
+// KONFIGURASI GLOBAL
+// ==========================================
+
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL;
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
+const API_ENDPOINT = "https://app.bgunenet.my.id/api/feed";
+
+// ==========================================
+// FIREBASE CONFIG
+// ==========================================
 
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
   messagingSenderId: "662463693471",
   appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-  measurementId: "G-G0VWNHHVB8",
+  measurementId: "G-G0VWNHHVB8"
 };
 
-const API_KEY = process.env.REACT_APP_API_KEY;
-const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_KEY;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
+const getPublicCollection = (name) => `artifacts/${appId}/public/data/${name}`;
 
-// Initialize Firebase with Error Handling & App Check
-let app, auth, db, googleProvider, messaging, appCheck;
+// ==========================================
+// INIT FIREBASE (TANPA APP CHECK)
+// ==========================================
+
+let app, auth, db, googleProvider, messaging;
+
 try {
     app = initializeApp(firebaseConfig);
-    
-    // SECURITY FIX: Implementasi App Check Stabil
-    if (typeof window !== "undefined") {
-        // Fix Login Google: Pastikan debug token aktif di localhost/canvas agar App Check tidak memblokir auth
-        if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost' || window.location.hostname.includes('googleusercontent')) {
-            self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-        }
-
-        try {
-            if (!window._firebaseAppCheckInit) {
-                // Gunakan try-catch di dalam init agar jika gagal, aplikasi tetap jalan
-                appCheck = initializeAppCheck(app, {
-                    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
-                    isTokenAutoRefreshEnabled: true
-                });
-                window._firebaseAppCheckInit = true;
-                console.log("App Check initialized securely.");
-            }
-        } catch (e) {
-             console.warn("App Check warning (ignore if localhost):", e);
-        }
-    }
 
     auth = getAuth(app);
     db = getFirestore(app);
     googleProvider = new GoogleAuthProvider();
-    
+
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         try {
             messaging = getMessaging(app);
         } catch (e) {
-            console.log("Messaging skipped/not supported");
+            console.warn("Messaging not supported");
         }
     }
-} catch (error) {
-    console.error("Firebase Initialization Error:", error);
+
+} catch (err) {
+    console.error("Firebase Init Error:", err);
 }
 
 // ==========================================
