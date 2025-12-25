@@ -1,3 +1,7 @@
+// BguneAI Ultra Core
+// Creator: Muhammad Irham Andika Putra
+// Owner: Tuan Irham
+
 export default async function handler(req, res) {
   try {
     const q = req.query.q;
@@ -12,6 +16,9 @@ export default async function handler(req, res) {
       });
     }
 
+    // ==============================
+    // AI ENDPOINT POOL
+    // ==============================
     const AI = {
       chat: "https://api-faa.my.id/faa/chatai",
       bard: "https://api-faa.my.id/faa/bard-google",
@@ -21,16 +28,20 @@ export default async function handler(req, res) {
       veo: "https://api-faa.my.id/faa/veo3"
     };
 
-    // 🔍 Deteksi niat user
+    // ==============================
+    // INTENT DETECTOR
+    // ==============================
     const detectIntent = (text) => {
       text = text.toLowerCase();
-      if (/gambar|foto|visual/.test(text)) return "image";
-      if (/video|film/.test(text)) return "video";
-      if (/riset|sumber|penelitian/.test(text)) return "research";
+      if (/gambar|foto|visual|desain/.test(text)) return "image";
+      if (/video|film|cinematic/.test(text)) return "video";
+      if (/riset|penelitian|sumber|ilmiah/.test(text)) return "research";
       return "general";
     };
 
-    // 🧠 Strategi AI
+    // ==============================
+    // STRATEGI CERDAS
+    // ==============================
     const planAI = (intent, mode) => {
       if (mode === "fast") return ["chat"];
       if (mode === "creative") return ["bard"];
@@ -43,7 +54,9 @@ export default async function handler(req, res) {
       return ["chat", "bard"];
     };
 
-    // 🧪 Safe fetch
+    // ==============================
+    // SAFE FETCH (ANTI ERROR)
+    // ==============================
     const callAI = async (url, prompt) => {
       try {
         const r = await fetch(url, {
@@ -53,13 +66,24 @@ export default async function handler(req, res) {
         });
 
         const data = await r.json();
-        return data?.result || data?.text || JSON.stringify(data);
+
+        // UNIVERSAL PARSER
+        if (typeof data === "string") return data;
+        if (data.result) return data.result;
+        if (data.text) return data.text;
+        if (data.answer) return data.answer;
+        if (data.message) return data.message;
+        if (data.data) return JSON.stringify(data.data);
+
+        return JSON.stringify(data);
       } catch (e) {
         return null;
       }
     };
 
-    // 🔧 MODE MANUAL
+    // ==============================
+    // MODE MANUAL
+    // ==============================
     if (mode === "manual") {
       if (!AI[ai]) {
         return res.json({ error: "AI tidak valid" });
@@ -76,7 +100,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // 🤖 MODE CERDAS
+    // ==============================
+    // MODE CERDAS (AUTO)
+    // ==============================
     const intent = detectIntent(q);
     const plan = planAI(intent, mode);
     const results = [];
@@ -88,17 +114,20 @@ export default async function handler(req, res) {
 
     return res.json({
       ai: "BguneAI",
+      version: "ULTRA",
       creator: "Muhammad Irham Andika Putra",
       owner: "Tuan Irham",
       mode,
       intent,
       used_models: plan,
-      result: results.join("\n\n—\n\n")
+      result: results.join("\n\n—\n\n"),
+      status: "ONLINE",
+      confidence: "0.99"
     });
 
   } catch (err) {
     return res.status(500).json({
-      error: "INTERNAL_ERROR",
+      error: "INTERNAL_SERVER_ERROR",
       message: err.message
     });
   }
