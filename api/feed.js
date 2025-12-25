@@ -1,26 +1,29 @@
 import admin from "firebase-admin";
 
 /* ================== KONFIG ================== */
-const REQUIRED_API_KEY = process.env.REACT_APP_FEED_API_KEY?.trim() || null;
+const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
-let db = null;
-try {
-  if (!admin.apps.length) {
-    if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-      throw new Error("FIREBASE_SERVICE_ACCOUNT env var missing");
-    }
-    // Replace \n literal supaya private_key terbaca dengan benar
+let db;
+
+if (!admin.apps.length) {
+  try {
+    if (!process.env.FIREBASE_SERVICE_ACCOUNT) throw new Error("Env var FIREBASE_SERVICE_ACCOUNT missing");
+
     const serviceAccount = JSON.parse(
-      process.env.FIREBASE_SERVICE_ACCOUNT.replace(/\\n/g, '\n')
+      process.env.FIREBASE_SERVICE_ACCOUNT.replace(/\\n/g, "\n")
     );
 
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
+
+    db = admin.firestore();
+    console.log("Firestore initialized ✅");
+  } catch (err) {
+    console.error("FIREBASE INIT ERROR:", err);
   }
+} else {
   db = admin.firestore();
-} catch (err) {
-  console.error("FIREBASE_INIT_ERROR:", err);
 }
 
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
