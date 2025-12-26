@@ -129,48 +129,93 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+
 // ==========================================
 // KONFIGURASI GLOBAL
 // ==========================================
-// FIX: Fallback values jika process.env undefined
-const getEnv = (key, fallback) => (typeof process !== 'undefined' && process.env && process.env[key]) ? process.env[key] : fallback;
+// FIX: ENV WAJIB ADA — TIDAK ADA FALLBACK PALSU
+const getEnv = (key) => {
+  if (
+    typeof process === "undefined" ||
+    !process.env ||
+    !process.env[key]
+  ) {
+    throw new Error(`
+❌ ENV TIDAK DITEMUKAN: ${key}
 
-const DEVELOPER_EMAIL = getEnv('REACT_APP_DEV_EMAIL', "admin@bgunenet.com");
+SOLUSI:
+- Pastikan sudah diset di environment (Vercel / .env)
+- Contoh:
+  ${key}=value_kamu
+
+Aplikasi dihentikan demi keamanan.
+`);
+  }
+  return process.env[key];
+};
+
+const DEVELOPER_EMAIL = getEnv('REACT_APP_DEV_EMAIL');
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 const API_ENDPOINT = "/api/feed";
 
-// FIX: FIREBASE CONFIG AUTO DETECT
-// Menggunakan __firebase_config dari environment canvas jika tersedia
+// ==========================================
+// FIREBASE CONFIG (WAJIB VALID)
+// ==========================================
 let firebaseConfig;
+
 try {
-    firebaseConfig = typeof __firebase_config !== 'undefined' 
-        ? JSON.parse(__firebase_config) 
-        : {
-            // Fallback ke process.env atau dummy agar tidak crash saat init
-            apiKey: getEnv('REACT_APP_FIREBASE_API_KEY', "dummy-key"),
-            authDomain: "eduku-web.firebaseapp.com",
-            projectId: "eduku-web",
-            storageBucket: "eduku-web.firebasestorage.com",
-            messagingSenderId: "662463693471",
-            appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-            measurementId: "G-G0VWNHHVB8"
-        };
+  if (typeof __firebase_config !== 'undefined') {
+    firebaseConfig = JSON.parse(__firebase_config);
+  } else {
+    firebaseConfig = {
+      apiKey: getEnv('REACT_APP_FIREBASE_API_KEY'), // WAJIB
+      authDomain: "eduku-web.firebaseapp.com",
+      projectId: "eduku-web",
+      storageBucket: "eduku-web.firebasestorage.com",
+      messagingSenderId: "662463693471",
+      appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+      measurementId: "G-G0VWNHHVB8"
+    };
+  }
+
+  if (!firebaseConfig.apiKey) {
+    throw new Error(`
+❌ FIREBASE API KEY KOSONG
+
+SOLUSI:
+Tambahkan di environment:
+REACT_APP_FIREBASE_API_KEY=AIzaSyxxxx
+`);
+  }
+
 } catch (e) {
-    console.error("Config parsing error", e);
-    firebaseConfig = {};
+  console.error("❌ GAGAL MEMUAT KONFIGURASI FIREBASE");
+  console.error(e);
+  throw e;
 }
 
-const API_KEY = getEnv('REACT_APP_API_KEY', "dummy-api-key");
-const VAPID_KEY = getEnv('REACT_APP_VAPID_KEY', "dummy-vapid-key");
+// ==========================================
+// API & PUSH CONFIG
+// ==========================================
+const API_KEY = getEnv('REACT_APP_API_KEY');
+const VAPID_KEY = getEnv('REACT_APP_VAPID_KEY');
 
-const appId = typeof __app_id !== "undefined" ? __app_id : "default-app-id";
+const appId = typeof __app_id !== "undefined"
+  ? __app_id
+  : (() => {
+      throw new Error(`
+❌ __app_id TIDAK TERSEDIA
+
+SOLUSI:
+Pastikan environment runtime menyediakan __app_id.
+`);
+    })();
 
 const getPublicCollection = (collectionName) =>
   `artifacts/${appId}/public/data/${collectionName}`;
-
 // ==========================================
 // FIREBASE INIT
 // ==========================================
