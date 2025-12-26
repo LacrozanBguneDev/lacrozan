@@ -150,7 +150,7 @@ try {
         ? JSON.parse(__firebase_config) 
         : {
             // Fallback ke process.env atau dummy agar tidak crash saat init
-            apiKey: getEnv('REACT_APP_FIREBASE_API_KEY', "dummy-key"),
+            apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
             authDomain: "eduku-web.firebaseapp.com",
             projectId: "eduku-web",
             storageBucket: "eduku-web.firebasestorage.com",
