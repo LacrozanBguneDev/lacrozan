@@ -129,93 +129,48 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-
 // ==========================================
 // KONFIGURASI GLOBAL
 // ==========================================
-// FIX: ENV WAJIB ADA — TIDAK ADA FALLBACK PALSU
-const getEnv = (key) => {
-  if (
-    typeof process === "undefined" ||
-    !process.env ||
-    !process.env[key]
-  ) {
-    throw new Error(`
-❌ ENV TIDAK DITEMUKAN: ${key}
+// FIX: Fallback values jika process.env undefined
+const getEnv = (key, fallback) => (typeof process !== 'undefined' && process.env && process.env[key]) ? process.env[key] : fallback;
 
-SOLUSI:
-- Pastikan sudah diset di environment (Vercel / .env)
-- Contoh:
-  ${key}=value_kamu
-
-Aplikasi dihentikan demi keamanan.
-`);
-  }
-  return process.env[key];
-};
-
-const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
+const DEVELOPER_EMAIL = getEnv('REACT_APP_DEV_EMAIL', "admin@bgunenet.com");
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 const API_ENDPOINT = "/api/feed";
 
-// ==========================================
-// FIREBASE CONFIG (WAJIB VALID)
-// ==========================================
+// FIX: FIREBASE CONFIG AUTO DETECT
+// Menggunakan __firebase_config dari environment canvas jika tersedia
 let firebaseConfig;
-
 try {
-  if (typeof __firebase_config !== 'undefined') {
-    firebaseConfig = JSON.parse(__firebase_config);
-  } else {
-    firebaseConfig = {
-      apiKey: getEnv('REACT_APP_FIREBASE_API_KEY'), // WAJIB
-      authDomain: "eduku-web.firebaseapp.com",
-      projectId: "eduku-web",
-      storageBucket: "eduku-web.firebasestorage.com",
-      messagingSenderId: "662463693471",
-      appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-      measurementId: "G-G0VWNHHVB8"
-    };
-  }
-
-  if (!firebaseConfig.apiKey) {
-    throw new Error(`
-❌ FIREBASE API KEY KOSONG
-
-SOLUSI:
-Tambahkan di environment:
-REACT_APP_FIREBASE_API_KEY=AIzaSyxxxx
-`);
-  }
-
+    firebaseConfig = typeof __firebase_config !== 'undefined' 
+        ? JSON.parse(__firebase_config) 
+        : {
+            // Fallback ke process.env atau dummy agar tidak crash saat init
+            apiKey: getEnv('REACT_APP_FIREBASE_API_KEY', "dummy-key"),
+            authDomain: "eduku-web.firebaseapp.com",
+            projectId: "eduku-web",
+            storageBucket: "eduku-web.firebasestorage.com",
+            messagingSenderId: "662463693471",
+            appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+            measurementId: "G-G0VWNHHVB8"
+        };
 } catch (e) {
-  console.error("❌ GAGAL MEMUAT KONFIGURASI FIREBASE");
-  console.error(e);
-  throw e;
+    console.error("Config parsing error", e);
+    firebaseConfig = {};
 }
 
-// ==========================================
-// API & PUSH CONFIG
-// ==========================================
-const API_KEY = getEnv('REACT_APP_API_KEY');
-const VAPID_KEY = getEnv('REACT_APP_VAPID_KEY');
+const API_KEY = getEnv('REACT_APP_API_KEY', "dummy-api-key");
+const VAPID_KEY = getEnv('REACT_APP_VAPID_KEY', "dummy-vapid-key");
 
-const appId = typeof __app_id !== "undefined"
-  ? __app_id
-  : (() => {
-      throw new Error(`
-❌ __app_id TIDAK TERSEDIA
-
-SOLUSI:
-Pastikan environment runtime menyediakan __app_id.
-`);
-    })();
+const appId = typeof __app_id !== "undefined" ? __app_id : "default-app-id";
 
 const getPublicCollection = (collectionName) =>
   `artifacts/${appId}/public/data/${collectionName}`;
+
 // ==========================================
 // FIREBASE INIT
 // ==========================================
@@ -339,19 +294,12 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         
         // PERBAIKAN CRITICAL: Mencegah 'Unexpected token <'
         const textData = await response.text();
-        
-        // Cek apakah response berupa HTML (error page) atau JSON valid
-        if (textData.trim().startsWith('<')) {
-            // Silent fallback, jangan throw error yang mengotori konsol
-            return { posts: [], nextCursor: null };
-        }
-
         let data;
         try {
             data = JSON.parse(textData);
         } catch (parseError) {
-            // Jika gagal parse JSON tapi bukan HTML (jarang terjadi), fallback silent
-            return { posts: [], nextCursor: null };
+            // Jika gagal parse JSON (misal server balikin HTML 404), throw error agar masuk catch blok bawah
+            throw new Error("Invalid JSON response (HTML received)");
         }
 
         return { 
@@ -359,7 +307,7 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
             nextCursor: data.nextCursor
         };
     } catch (error) {
-        // console.warn("API Fetch Error (Using Local Fallback):", error);
+        console.warn("API Fetch Error (Using Local Fallback):", error);
         // Fallback: Kembalikan array kosong agar UI tidak crash, biarkan Firestore cache bekerja jika ada
         return { posts: [], nextCursor: null };
     }
@@ -2267,28 +2215,19 @@ const App = () => {
             if(u) { 
                 setUser(u); 
                 requestNotificationPermission(u.uid); 
-                
-                // FIX: Gunakan try catch agar getDoc tidak memblokir splash screen jika gagal
-                try {
-                    const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                    if (!userDoc.exists()) { 
-                        setShowOnboarding(true); 
-                    } else { 
-                        const userData = userDoc.data(); 
-                        if (userData.isBanned) { 
-                            alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
-                            await signOut(auth); setUser(null); setProfile(null); 
-                            return; 
-                        } 
-                        await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                    } 
-                } catch(e) {
-                    console.error("Gagal load profil auth", e);
-                } finally {
-                    // PENTING: Selalu set true agar splash hilang meskipun error
+                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                if (!userDoc.exists()) { 
+                    setShowOnboarding(true); 
                     setIsProfileLoaded(true); 
-                }
-
+                } else { 
+                    const userData = userDoc.data(); 
+                    if (userData.isBanned) { 
+                        alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                        await signOut(auth); setUser(null); setProfile(null); 
+                        return; 
+                    } 
+                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                } 
             } else { 
                 setUser(null); 
                 setProfile(null); 
@@ -2314,38 +2253,16 @@ const App = () => {
         } 
     }, [user]);
 
-    // FIX: TAMBAHKAN ERROR HANDLING PADA ONSNAPSHOT UTAMA
     useEffect(() => {
-        if (!db) {
-            setIsUsersLoaded(true);
-            setIsLoadingFeed(false);
-            return;
-        }
-
-        const unsubUsers = onSnapshot(
-            collection(db, getPublicCollection('userProfiles')), 
-            (s) => {
-                setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
-                setIsUsersLoaded(true); // Normal case
-            },
-            (error) => {
-                console.warn("Gagal memuat users (Permission/Network):", error);
-                setIsUsersLoaded(true); // Force loaded agar splash hilang
-            }
-        );
-
-        const unsubCache = onSnapshot(
-            query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), 
-            (s) => {
-                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-                 setPosts(raw); 
-                 setIsLoadingFeed(false);
-            },
-            (error) => {
-                 console.warn("Gagal memuat cache posts:", error);
-                 setIsLoadingFeed(false); // Force stop loading
-            }
-        );
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => {
+            setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
+            setIsUsersLoaded(true); // FIX: Users (leaderboard) sudah loaded
+        });
+        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), s => {
+             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+             setPosts(raw); 
+             setIsLoadingFeed(false);
+        });
         
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
