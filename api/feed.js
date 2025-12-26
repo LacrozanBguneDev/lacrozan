@@ -1,35 +1,62 @@
 import admin from "firebase-admin";
 
-/* ================== KONFIG ================== */
-const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
+/* ================== KONFIGURASI & INISIALISASI ================== */
+const REQUIRED_API_KEY = process.env.REACT_APP_FEED_API_KEY?.trim() || null;
 
-let db;
-
-if (!admin.apps.length) {
-  try {
-    if (!process.env.FIREBASE_SERVICE_ACCOUNT) throw new Error("Env var FIREBASE_SERVICE_ACCOUNT missing");
-
-    const serviceAccount = JSON.parse(
-      process.env.FIREBASE_SERVICE_ACCOUNT.replace(/\\n/g, "\n")
-    );
-
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-
-    db = admin.firestore();
-    console.log("Firestore initialized ✅");
-  } catch (err) {
-    console.error("FIREBASE INIT ERROR:", err);
-  }
-} else {
-  db = admin.firestore();
-}
+// Variabel global untuk menyimpan koneksi dan error
+let db = null;
+let initError = null;
 
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== UTIL ================== */
+/* --- Helper: Parse Service Account (Support JSON & Base64) --- */
+const getServiceAccount = () => {
+  const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!rawEnv) throw new Error("Environment Variable FIREBASE_SERVICE_ACCOUNT tidak ditemukan/kosong.");
+
+  let serviceAccount;
+  try {
+    // Percobaan 1: Parse sebagai JSON string biasa
+    serviceAccount = JSON.parse(rawEnv);
+  } catch (jsonErr) {
+    try {
+      // Percobaan 2: Jika gagal, coba decode dari Base64
+      const decoded = Buffer.from(rawEnv, 'base64').toString('utf-8');
+      serviceAccount = JSON.parse(decoded);
+    } catch (base64Err) {
+      // Jika kedua cara gagal, berarti format string rusak
+      throw new Error("Format FIREBASE_SERVICE_ACCOUNT tidak valid (Bukan JSON valid ataupun Base64).");
+    }
+  }
+
+  // Perbaikan format private_key (mengubah \n string menjadi newline karakter asli)
+  if (serviceAccount.private_key) {
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+  } else {
+    throw new Error("Properti 'private_key' tidak ditemukan dalam JSON Service Account.");
+  }
+
+  return serviceAccount;
+};
+
+/* --- Inisialisasi Firebase --- */
+try {
+  if (!admin.apps.length) {
+    const serviceAccount = getServiceAccount();
+    
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+  }
+  db = admin.firestore();
+} catch (err) {
+  console.error("FIREBASE_INIT_ERROR:", err);
+  // Simpan pesan error asli untuk ditampilkan di response nanti
+  initError = err.message || "Unknown Initialization Error";
+}
+
+/* ================== UTILITAS (LOGIKA FEED) ================== */
 const safeMillis = ts => {
   if (!ts) return Date.now();
   if (typeof ts.toMillis === "function") return ts.toMillis();
@@ -55,12 +82,19 @@ const dailySeedSort = posts => {
   });
 };
 
-/* ================== HANDLER ================== */
+/* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
+  // 1. Cek Kesiapan Database
   if (!db) {
-    return res.status(500).json({ error: true, message: "Firestore not initialized" });
+    // Tampilkan error asli agar mudah didebug
+    return res.status(500).json({ 
+      error: true, 
+      message: "Firestore not initialized", 
+      details: initError // <--- INI PENTING: Baca ini di response browser kamu
+    });
   }
 
+  // 2. Cek API Key
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
@@ -99,7 +133,7 @@ export default async function handler(req, res) {
     if (mode === "following" && followingIds?.length && !isFollowingFallback)
       queryRef = queryRef.where("userId", "in", followingIds);
 
-    /* ================== BUFFERING ================== */
+    /* ================== BUFFERING & QUERY ================== */
     const bufferSize = limitReq * 3;
     queryRef = queryRef.orderBy("timestamp", "desc");
 
@@ -122,7 +156,7 @@ export default async function handler(req, res) {
       timestamp: safeMillis(d.data()?.timestamp),
     }));
 
-    /* ================== LOGIKA FEED ================== */
+    /* ================== LOGIKA PENGACAKAN FEED ================== */
     let finalPosts = [];
     if (mode === "home" || mode === "popular" || (mode === "following" && isFollowingFallback)) {
       const userGroups = {};
@@ -162,7 +196,7 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ================== CURSOR ================== */
+    /* ================== NEXT CURSOR ================== */
     const lastDocInSnap = snap.docs[snap.docs.length - 1];
     const nextCursor = allFetchedPosts.length >= bufferSize
       ? lastDocInSnap?.id || null
@@ -171,8 +205,9 @@ export default async function handler(req, res) {
       : null;
 
     res.status(200).json({ posts: postsResponse, nextCursor });
+
   } catch (e) {
     console.error("FEED_ERROR:", e);
-    res.status(500).json({ error: true, message: e.message || "Unknown error" });
+    res.status(500).json({ error: true, message: e.message || "Unknown runtime error" });
   }
 }
