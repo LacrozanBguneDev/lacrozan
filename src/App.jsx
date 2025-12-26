@@ -294,12 +294,19 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         
         // PERBAIKAN CRITICAL: Mencegah 'Unexpected token <'
         const textData = await response.text();
+        
+        // Cek apakah response berupa HTML (error page) atau JSON valid
+        if (textData.trim().startsWith('<')) {
+            // Silent fallback, jangan throw error yang mengotori konsol
+            return { posts: [], nextCursor: null };
+        }
+
         let data;
         try {
             data = JSON.parse(textData);
         } catch (parseError) {
-            // Jika gagal parse JSON (misal server balikin HTML 404), throw error agar masuk catch blok bawah
-            throw new Error("Invalid JSON response (HTML received)");
+            // Jika gagal parse JSON tapi bukan HTML (jarang terjadi), fallback silent
+            return { posts: [], nextCursor: null };
         }
 
         return { 
@@ -307,7 +314,7 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
             nextCursor: data.nextCursor
         };
     } catch (error) {
-        console.warn("API Fetch Error (Using Local Fallback):", error);
+        // console.warn("API Fetch Error (Using Local Fallback):", error);
         // Fallback: Kembalikan array kosong agar UI tidak crash, biarkan Firestore cache bekerja jika ada
         return { posts: [], nextCursor: null };
     }
@@ -2215,19 +2222,28 @@ const App = () => {
             if(u) { 
                 setUser(u); 
                 requestNotificationPermission(u.uid); 
-                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                if (!userDoc.exists()) { 
-                    setShowOnboarding(true); 
-                    setIsProfileLoaded(true); 
-                } else { 
-                    const userData = userDoc.data(); 
-                    if (userData.isBanned) { 
-                        alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
-                        await signOut(auth); setUser(null); setProfile(null); 
-                        return; 
+                
+                // FIX: Gunakan try catch agar getDoc tidak memblokir splash screen jika gagal
+                try {
+                    const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                    if (!userDoc.exists()) { 
+                        setShowOnboarding(true); 
+                    } else { 
+                        const userData = userDoc.data(); 
+                        if (userData.isBanned) { 
+                            alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                            await signOut(auth); setUser(null); setProfile(null); 
+                            return; 
+                        } 
+                        await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                     } 
-                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                } 
+                } catch(e) {
+                    console.error("Gagal load profil auth", e);
+                } finally {
+                    // PENTING: Selalu set true agar splash hilang meskipun error
+                    setIsProfileLoaded(true); 
+                }
+
             } else { 
                 setUser(null); 
                 setProfile(null); 
@@ -2253,16 +2269,38 @@ const App = () => {
         } 
     }, [user]);
 
+    // FIX: TAMBAHKAN ERROR HANDLING PADA ONSNAPSHOT UTAMA
     useEffect(() => {
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => {
-            setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
-            setIsUsersLoaded(true); // FIX: Users (leaderboard) sudah loaded
-        });
-        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), s => {
-             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-             setPosts(raw); 
-             setIsLoadingFeed(false);
-        });
+        if (!db) {
+            setIsUsersLoaded(true);
+            setIsLoadingFeed(false);
+            return;
+        }
+
+        const unsubUsers = onSnapshot(
+            collection(db, getPublicCollection('userProfiles')), 
+            (s) => {
+                setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
+                setIsUsersLoaded(true); // Normal case
+            },
+            (error) => {
+                console.warn("Gagal memuat users (Permission/Network):", error);
+                setIsUsersLoaded(true); // Force loaded agar splash hilang
+            }
+        );
+
+        const unsubCache = onSnapshot(
+            query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), 
+            (s) => {
+                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+                 setPosts(raw); 
+                 setIsLoadingFeed(false);
+            },
+            (error) => {
+                 console.warn("Gagal memuat cache posts:", error);
+                 setIsLoadingFeed(false); // Force stop loading
+            }
+        );
         
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
