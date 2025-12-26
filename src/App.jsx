@@ -102,12 +102,12 @@ const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 // Endpoint API - (Pastikan URL ini benar atau pindahkan ke env jika perlu)
-const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
+const API_ENDPOINT =/api/feed';
 
 // Konfigurasi Firebase
 // Mengambil API Key dari REACT_APP_FIREBASE_API_KEY di Vercel
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
+  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc", 
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
