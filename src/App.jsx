@@ -102,7 +102,7 @@ const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 // Endpoint API - (Pastikan URL ini benar atau pindahkan ke env jika perlu)
-const API_ENDPOINT =/api/feed';
+const API_ENDPOINT = '/api/feed';
 
 // Konfigurasi Firebase
 // Mengambil API Key dari REACT_APP_FIREBASE_API_KEY di Vercel
