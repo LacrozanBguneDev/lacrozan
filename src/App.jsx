@@ -154,7 +154,7 @@ Aplikasi dihentikan demi keamanan.
   return process.env[key];
 };
 
-const DEVELOPER_EMAIL = getEnv('REACT_APP_DEV_EMAIL');
+const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
