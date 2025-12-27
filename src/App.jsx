@@ -103,10 +103,17 @@ const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
 // Endpoint API
-const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
+const API_ENDPOINT = '/api/feed';
 
-// Konfigurasi Firebase (DIUBAH KE CONFIG ENVIRONEMNT)
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+‎  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
+‎  authDomain: "eduku-web.firebaseapp.com",
+‎  projectId: "eduku-web",
+‎  storageBucket: "eduku-web.firebasestorage.com",
+‎  messagingSenderId: "662463693471",
+‎  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+‎  measurementId: "G-G0VWNHHVB8"
+‎};
 
 const API_KEY = process.env.REACT_APP_API_KEY;
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
