@@ -52,7 +52,8 @@ import {
     WifiHigh
 } from 'lucide-react';
 
-setLogLevel('silent'); 
+// DEBUGGING: Matikan silent mode agar error firebase terlihat di console
+// setLogLevel('silent'); 
 
 // --- ERROR BOUNDARY UNTUK MENCEGAH WHITE SCREEN ---
 class ErrorBoundary extends React.Component {
@@ -95,19 +96,17 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API ---
-// Diambil dari REACT_APP_DEV_EMAIL di Vercel
 const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-// Endpoint API - (Pastikan URL ini benar atau pindahkan ke env jika perlu)
-const API_ENDPOINT = '/api/feed';
+// Endpoint API
+const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
 // Konfigurasi Firebase
-// Mengambil API Key dari REACT_APP_FIREBASE_API_KEY di Vercel
 const firebaseConfig = {
-  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc", 
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
@@ -116,17 +115,15 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8",
 };
 
-// Mengambil dari REACT_APP_API_KEY di Vercel
 const API_KEY = process.env.REACT_APP_API_KEY;
-
-// Mengambil dari REACT_APP_VAPID_KEY di Vercel
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-
-// Opsional: Jika kamu butuh FEED_API_KEY yang ada di foto tadi
 const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
+
+// DEBUGGING: Cek path collection di console
+console.log("DEBUG: Firestore Path ->", getPublicCollection('userProfiles'));
 
 // Initialize Firebase with Error Handling
 let app, auth, db, googleProvider, messaging;
@@ -140,7 +137,7 @@ try {
         try {
             messaging = getMessaging(app);
         } catch (e) {
-            console.log("Messaging skipped/not supported");
+            console.log("Messaging skipped/not supported:", e);
         }
     }
 } catch (error) {
@@ -153,7 +150,6 @@ try {
 
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
     if (!API_KEY) {
-        // Fallback prevent crash if API KEY is missing
         console.warn("API Key missing, returning empty feed.");
         return { posts: [], nextCursor: null };
     }
@@ -174,19 +170,21 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
                 'x-api-key': API_KEY, 
             },
         });
-        if (!response.ok) throw new Error("Gagal mengambil data dari server.");
+        if (!response.ok) throw new Error(`Server Error: ${response.status} ${response.statusText}`);
         const data = await response.json();
         return { 
             posts: data.posts || [], 
             nextCursor: data.nextCursor
         };
     } catch (error) {
-        console.error("API Fetch Error:", error);
+        console.error("API Fetch Error (Feed):", error);
         return { posts: [], nextCursor: null };
     }
 };
 
 const logSystemError = async (error, context = 'general', user = null) => {
+    // DEBUGGING: Tampilkan error sistem di console juga
+    console.error(`[SystemLog:${context}]`, error);
     try {
         if (!db) return;
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
@@ -195,7 +193,9 @@ const logSystemError = async (error, context = 'general', user = null) => {
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
             message: error.message || String(error), stack: error.stack || '', context: context, userId: safeUid, username: safeUsername, timestamp: serverTimestamp(), userAgent: navigator.userAgent
         });
-    } catch (e) {}
+    } catch (e) {
+        console.warn("Gagal menulis log ke Firestore:", e);
+    }
 };
 
 const requestNotificationPermission = async (userId) => {
@@ -570,25 +570,41 @@ const DeveloperDashboard = ({ onClose }) => {
     useEffect(() => {
         const fetchData = async () => {
             if (!db) return;
-            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
-            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), (snap) => { resolve(snap); unsub(); }); });
-            const now = new Date();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-            const rawPosts = postsSnap.docs.map(d => d.data());
-            const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
-            setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
-            const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-            const last7Days = [];
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date(); d.setDate(d.getDate() - i);
-                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-                const dayEnd = dayStart + 86400000;
-                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
-                last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
+            // FIX: Tambahkan error handling di sini juga
+            try {
+                const usersSnap = await new Promise((resolve, reject) => { 
+                    const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
+                    (snap) => { resolve(snap); unsub(); },
+                    (err) => reject(err)
+                    ); 
+                });
+                const postsSnap = await new Promise((resolve, reject) => { 
+                    const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), 
+                    (snap) => { resolve(snap); unsub(); },
+                    (err) => reject(err)
+                    ); 
+                });
+                const now = new Date();
+                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                const rawPosts = postsSnap.docs.map(d => d.data());
+                const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+                setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
+                const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+                const last7Days = [];
+                for (let i = 6; i >= 0; i--) {
+                    const d = new Date(); d.setDate(d.getDate() - i);
+                    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+                    const dayEnd = dayStart + 86400000;
+                    const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
+                    last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
+                }
+                setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
+                setChartData(last7Days);
+                setLoading(false);
+            } catch(e) {
+                console.error("Dashboard error:", e);
+                setLoading(false);
             }
-            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
-            setChartData(last7Days);
-            setLoading(false);
         };
         fetchData();
         if (db) {
@@ -1426,19 +1442,26 @@ const App = () => {
         if(u) { 
             setUser(u); 
             requestNotificationPermission(u.uid); 
-            const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-            if (!userDoc.exists()) { 
-                setShowOnboarding(true); 
-                setIsProfileLoaded(true); // Anggap loaded agar splash hilang saat onboarding
-            } else { 
-                const userData = userDoc.data(); 
-                if (userData.isBanned) { 
-                    alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
-                    await signOut(auth); setUser(null); setProfile(null); 
-                    return; 
-                } 
-                await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-            } 
+            // FIX: Tambahkan error handling
+            try {
+                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                if (!userDoc.exists()) { 
+                    setShowOnboarding(true); 
+                    setIsProfileLoaded(true); // Anggap loaded agar splash hilang saat onboarding
+                } else { 
+                    const userData = userDoc.data(); 
+                    if (userData.isBanned) { 
+                        alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                        await signOut(auth); setUser(null); setProfile(null); 
+                        return; 
+                    } 
+                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                }
+            } catch(e) {
+                console.error("Auth State change error:", e);
+                // Force load agar tidak stuck splash
+                setIsProfileLoaded(true);
+            }
         } else { 
             setUser(null); 
             setProfile(null); 
@@ -1448,30 +1471,50 @@ const App = () => {
     
     useEffect(() => { 
         if(user) { 
-            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), async s => { 
-                if(s.exists()) { 
-                    const data = s.data(); 
-                    if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } 
-                    setProfile({...data, uid:user.uid, email:user.email}); 
-                    if (showOnboarding) setShowOnboarding(false); 
+            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
+                async s => { 
+                    if(s.exists()) { 
+                        const data = s.data(); 
+                        if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } 
+                        setProfile({...data, uid:user.uid, email:user.email}); 
+                        if (showOnboarding) setShowOnboarding(false); 
+                    }
+                    setIsProfileLoaded(true); // FIX: Profile sudah loaded
+                },
+                (error) => {
+                    console.error("Profile Snapshot Error:", error);
+                    setIsProfileLoaded(true); // Fail-safe: Tetap anggap loaded agar app terbuka
                 }
-                setIsProfileLoaded(true); // FIX: Profile sudah loaded
-            }); 
+            ); 
             const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); 
             return () => { unsubP(); unsubNotif(); }; 
         } 
     }, [user]);
 
     useEffect(() => {
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => {
-            setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
-            setIsUsersLoaded(true); // FIX: Users (leaderboard) sudah loaded
-        });
-        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), s => {
-             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-             setPosts(raw); 
-             setIsLoadingFeed(false);
-        });
+        // PERBAIKAN UTAMA: Tambahkan Error Callback pada onSnapshot agar tidak stuck
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
+            (s) => {
+                setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
+                setIsUsersLoaded(true); // Sukses load
+            }, 
+            (error) => {
+                console.error("CRITICAL ERROR: Gagal load userProfiles.", error);
+                setIsUsersLoaded(true); // Tetap set true agar splash screen hilang (Fail-safe)
+            }
+        );
+
+        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), 
+            (s) => {
+                const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+                setPosts(raw); 
+                setIsLoadingFeed(false);
+            },
+            (error) => {
+                console.error("CRITICAL ERROR: Gagal load posts cache.", error);
+                setIsLoadingFeed(false);
+            }
+        );
         
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
