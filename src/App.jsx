@@ -107,7 +107,7 @@ const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
 // Konfigurasi Firebase
 const firebaseConfig = {
-  apiKey: typeof process !== 'undefined' && process.env.REACT_APP_FIREBASE_API_KEY ? process.env.REACT_APP_FIREBASE_API_KEY : "", 
+  apiKey: typeof process !== 'undefined' && process.env.REACT_APP_FIREBASE_API_KEY ? process.env.REACT_APP_FIREBASE_API_KEY : "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc", 
   authDomain: "eduku-web.firebaseapp.com",
   projectId: "eduku-web",
   storageBucket: "eduku-web.firebasestorage.com",
