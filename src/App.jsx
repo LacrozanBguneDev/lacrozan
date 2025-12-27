@@ -11,7 +11,8 @@ import {
     signOut, 
     GoogleAuthProvider,
     signInWithPopup,
-    signInWithCustomToken 
+    signInWithCustomToken,
+    signInAnonymously
 } from 'firebase/auth';
 import { 
     getFirestore, 
@@ -104,16 +105,8 @@ const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 // Endpoint API
 const API_ENDPOINT = 'https://app.bgunenet.my.id/api/feed';
 
-// Konfigurasi Firebase
-const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
-  authDomain: "eduku-web.firebaseapp.com",
-  projectId: "eduku-web",
-  storageBucket: "eduku-web.firebasestorage.com",
-  messagingSenderId: "662463693471",
-  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-  measurementId: "G-G0VWNHHVB8",
-};
+// Konfigurasi Firebase (DIUBAH KE CONFIG ENVIRONEMNT)
+const firebaseConfig = JSON.parse(__firebase_config);
 
 const API_KEY = process.env.REACT_APP_API_KEY;
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
@@ -149,13 +142,19 @@ try {
 // ==========================================
 
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
-    if (!API_KEY) {
+    // FIX: Gunakan FEED_API_KEY jika API_KEY kosong (sesuai backend user)
+    const keyToUse = FEED_API_KEY || API_KEY;
+    
+    if (!keyToUse) {
         console.warn("API Key missing, returning empty feed.");
         return { posts: [], nextCursor: null };
     }
     const params = new URLSearchParams();
     params.append('mode', mode);
     params.append('limit', limit);
+    // Tambahkan apiKey ke query params juga sebagai fallback jika header gagal
+    params.append('apiKey', keyToUse);
+    
     if (cursor) params.append('cursor', cursor);
     if (viewerId) params.append('viewerId', viewerId);
     if (userId) params.append('userId', userId);
@@ -167,7 +166,7 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         const response = await fetch(url, {
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': API_KEY, 
+                'x-api-key': keyToUse, 
             },
         });
         if (!response.ok) throw new Error(`Server Error: ${response.status} ${response.statusText}`);
@@ -186,7 +185,7 @@ const logSystemError = async (error, context = 'general', user = null) => {
     // DEBUGGING: Tampilkan error sistem di console juga
     console.error(`[SystemLog:${context}]`, error);
     try {
-        if (!db) return;
+        if (!db || !auth.currentUser) return; // FIX: Guard auth
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
         const safeUsername = user ? (user.displayName || user.username || 'Guest') : 'Guest';
         const safeUid = user ? (user.uid || 'guest') : 'guest';
@@ -267,7 +266,7 @@ const shuffleArray = (array) => {
 };
 
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
-    if (!toUserId || !fromUser || toUserId === fromUser.uid || !db) return; 
+    if (!toUserId || !fromUser || toUserId === fromUser.uid || !db || !auth.currentUser) return; 
     try {
         await addDoc(collection(db, getPublicCollection('notifications')), {
             toUserId: toUserId, fromUserId: fromUser.uid, fromUsername: fromUser.username, fromPhoto: fromUser.photoURL || '',
@@ -1438,37 +1437,58 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    useEffect(() => onAuthStateChanged(auth, async (u) => { 
-        if(u) { 
-            setUser(u); 
-            requestNotificationPermission(u.uid); 
-            // FIX: Tambahkan error handling
+    // ===============================================
+    // AUTH & DATA INITIALIZATION (CRITICAL FIX)
+    // ===============================================
+
+    useEffect(() => {
+        // 1. Inisialisasi Auth terlebih dahulu
+        const initAuth = async () => {
             try {
-                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                if (!userDoc.exists()) { 
-                    setShowOnboarding(true); 
-                    setIsProfileLoaded(true); // Anggap loaded agar splash hilang saat onboarding
-                } else { 
-                    const userData = userDoc.data(); 
-                    if (userData.isBanned) { 
-                        alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
-                        await signOut(auth); setUser(null); setProfile(null); 
-                        return; 
-                    } 
-                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
                 }
-            } catch(e) {
-                console.error("Auth State change error:", e);
-                // Force load agar tidak stuck splash
-                setIsProfileLoaded(true);
+            } catch (error) {
+                console.error("Auth Init Error:", error);
+                // Fail safe: jangan block app, biarkan onAuthStateChanged handle
             }
-        } else { 
-            setUser(null); 
-            setProfile(null); 
-            setIsProfileLoaded(true); // Tidak perlu tunggu profile kalau guest
-        } 
-    }), []);
-    
+        };
+        initAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, async (u) => { 
+            if(u) { 
+                setUser(u); 
+                requestNotificationPermission(u.uid); 
+                try {
+                    const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                    if (!userDoc.exists()) { 
+                        setShowOnboarding(true); 
+                        setIsProfileLoaded(true); 
+                    } else { 
+                        const userData = userDoc.data(); 
+                        if (userData.isBanned) { 
+                            alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                            await signOut(auth); setUser(null); setProfile(null); 
+                            return; 
+                        } 
+                        await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                    }
+                } catch(e) {
+                    console.error("Auth State change error:", e);
+                    setIsProfileLoaded(true);
+                }
+            } else { 
+                setUser(null); 
+                setProfile(null); 
+                setIsProfileLoaded(true); 
+            } 
+        });
+
+        return () => unsubscribe();
+    }, []); // Empty dependency
+
     useEffect(() => { 
         if(user) { 
             const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
@@ -1479,11 +1499,11 @@ const App = () => {
                         setProfile({...data, uid:user.uid, email:user.email}); 
                         if (showOnboarding) setShowOnboarding(false); 
                     }
-                    setIsProfileLoaded(true); // FIX: Profile sudah loaded
+                    setIsProfileLoaded(true); 
                 },
                 (error) => {
                     console.error("Profile Snapshot Error:", error);
-                    setIsProfileLoaded(true); // Fail-safe: Tetap anggap loaded agar app terbuka
+                    setIsProfileLoaded(true); 
                 }
             ); 
             const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); 
@@ -1491,19 +1511,24 @@ const App = () => {
         } 
     }, [user]);
 
+    // PERBAIKAN: Listener Data User & Posts hanya jalan jika user (atau guest) sudah terautentikasi
+    // Ini mencegah error permission-denied saat app baru dibuka
     useEffect(() => {
-        // PERBAIKAN UTAMA: Tambahkan Error Callback pada onSnapshot agar tidak stuck
+        if (!user) return; // Tunggu auth siap
+
+        // Load All Users
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
             (s) => {
                 setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
-                setIsUsersLoaded(true); // Sukses load
+                setIsUsersLoaded(true); 
             }, 
             (error) => {
                 console.error("CRITICAL ERROR: Gagal load userProfiles.", error);
-                setIsUsersLoaded(true); // Tetap set true agar splash screen hilang (Fail-safe)
+                setIsUsersLoaded(true); // Fail-safe agar tidak stuck loading
             }
         );
 
+        // Load Posts Cache
         const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), 
             (s) => {
                 const raw = s.docs.map(d=>({id:d.id,...d.data()}));
@@ -1512,12 +1537,12 @@ const App = () => {
             },
             (error) => {
                 console.error("CRITICAL ERROR: Gagal load posts cache.", error);
-                setIsLoadingFeed(false);
+                setIsLoadingFeed(false); // Fail-safe
             }
         );
         
         return () => { unsubUsers(); unsubCache(); };
-    }, [refreshTrigger]); 
+    }, [user, refreshTrigger]); // Dependency pada user
 
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
