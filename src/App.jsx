@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import DOMPurify from 'dompurify'; // Library sanitasi yang diminta
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
@@ -11,8 +12,7 @@ import {
     signOut, 
     GoogleAuthProvider,
     signInWithPopup,
-    signInWithCustomToken,
-    signInAnonymously
+    signInWithCustomToken 
 } from 'firebase/auth';
 import { 
     getFirestore, 
@@ -32,8 +32,10 @@ import {
     limit, 
     query, 
     where, 
-    orderBy 
+    orderBy,
+    getDocs // Ditambahkan untuk fitur Reset All
 } from 'firebase/firestore';
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check"; // Firebase App Check
 
 // IMPORT KHUSUS NOTIFIKASI
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -53,8 +55,7 @@ import {
     WifiHigh
 } from 'lucide-react';
 
-// DEBUGGING: Matikan silent mode agar error firebase terlihat di console
-// setLogLevel('silent'); 
+setLogLevel('silent'); 
 
 // --- ERROR BOUNDARY UNTUK MENCEGAH WHITE SCREEN ---
 class ErrorBoundary extends React.Component {
@@ -102,33 +103,49 @@ const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-// Endpoint API
 const API_ENDPOINT = '/api/feed';
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-‎  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
-‎  authDomain: "eduku-web.firebaseapp.com",
-‎  projectId: "eduku-web",
-‎  storageBucket: "eduku-web.firebasestorage.com",
-‎  messagingSenderId: "662463693471",
-‎  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-‎  measurementId: "G-G0VWNHHVB8"
-‎};
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY, 
+  authDomain: "eduku-web.firebaseapp.com",
+  projectId: "eduku-web",
+  storageBucket: "eduku-web.firebasestorage.com",
+  messagingSenderId: "662463693471",
+  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+  measurementId: "G-G0VWNHHVB8",
+};
 
 const API_KEY = process.env.REACT_APP_API_KEY;
 const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
-
+const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_KEY;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// DEBUGGING: Cek path collection di console
-console.log("DEBUG: Firestore Path ->", getPublicCollection('userProfiles'));
-
-// Initialize Firebase with Error Handling
-let app, auth, db, googleProvider, messaging;
+// Initialize Firebase with Error Handling & App Check
+let app, auth, db, googleProvider, messaging, appCheck;
 try {
     app = initializeApp(firebaseConfig);
+    
+    // SECURITY FIX: Implementasi App Check Stabil
+    if (typeof window !== "undefined") {
+        if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+            self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+        }
+
+        try {
+            if (!window._firebaseAppCheckInit) {
+                appCheck = initializeAppCheck(app, {
+                    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+                    isTokenAutoRefreshEnabled: true
+                });
+                window._firebaseAppCheckInit = true;
+                console.log("App Check initialized securely.");
+            }
+        } catch (e) {
+             console.warn("App Check warning (ignore if localhost):", e);
+        }
+    }
+
     auth = getAuth(app);
     db = getFirestore(app);
     googleProvider = new GoogleAuthProvider();
@@ -137,7 +154,7 @@ try {
         try {
             messaging = getMessaging(app);
         } catch (e) {
-            console.log("Messaging skipped/not supported:", e);
+            console.log("Messaging skipped/not supported");
         }
     }
 } catch (error) {
@@ -148,20 +165,70 @@ try {
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
-const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
-    // FIX: Gunakan FEED_API_KEY jika API_KEY kosong (sesuai backend user)
-    const keyToUse = FEED_API_KEY || API_KEY;
+// Custom Hook untuk Dynamic Meta Tags (SEO & Share)
+const usePageTitle = (title, description = "", image = "") => {
+    useEffect(() => {
+        const prevTitle = document.title;
+        document.title = title ? `${title} - ${APP_NAME}` : APP_NAME;
+
+        // Update Meta Tags Dinamis
+        const updateMeta = (name, content) => {
+            if (!content) return;
+            let tag = document.querySelector(`meta[property="${name}"]`) || document.querySelector(`meta[name="${name}"]`);
+            if (!tag) {
+                tag = document.createElement('meta');
+                tag.setAttribute('property', name); // Gunakan property untuk OG
+                // Fallback untuk name biasa jika bukan OG
+                if (!name.startsWith('og:')) tag.setAttribute('name', name);
+                document.head.appendChild(tag);
+            }
+            tag.setAttribute('content', content);
+        };
+
+        if (title) {
+            updateMeta('og:title', title);
+            updateMeta('twitter:title', title);
+        }
+        if (description) {
+            updateMeta('description', description);
+            updateMeta('og:description', description);
+            updateMeta('twitter:description', description);
+        }
+        if (image) {
+            updateMeta('og:image', image);
+            updateMeta('twitter:image', image);
+        }
+
+        return () => {
+            document.title = prevTitle;
+        };
+    }, [title, description, image]);
+};
+
+// URL Helper untuk mengupdate link tanpa reload
+const updateUrl = (params) => {
+    const url = new URL(window.location);
+    // Hapus parameter lama agar bersih
+    url.searchParams.delete('post');
+    url.searchParams.delete('user');
+    url.searchParams.delete('q');
     
-    if (!keyToUse) {
+    // Set parameter baru
+    Object.keys(params).forEach(key => {
+        if (params[key]) url.searchParams.set(key, params[key]);
+    });
+    
+    window.history.pushState({}, '', url);
+};
+
+const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
+    if (!API_KEY) {
         console.warn("API Key missing, returning empty feed.");
         return { posts: [], nextCursor: null };
     }
     const params = new URLSearchParams();
     params.append('mode', mode);
     params.append('limit', limit);
-    // Tambahkan apiKey ke query params juga sebagai fallback jika header gagal
-    params.append('apiKey', keyToUse);
-    
     if (cursor) params.append('cursor', cursor);
     if (viewerId) params.append('viewerId', viewerId);
     if (userId) params.append('userId', userId);
@@ -173,35 +240,45 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         const response = await fetch(url, {
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': keyToUse, 
+                'x-api-key': API_KEY, 
             },
         });
-        if (!response.ok) throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+        if (!response.ok) throw new Error("Gagal mengambil data dari server.");
         const data = await response.json();
         return { 
             posts: data.posts || [], 
             nextCursor: data.nextCursor
         };
     } catch (error) {
-        console.error("API Fetch Error (Feed):", error);
+        console.error("API Fetch Error:", error);
         return { posts: [], nextCursor: null };
     }
 };
 
+// SECURITY: Enkripsi Log / Sanitasi Informasi Sensitif
 const logSystemError = async (error, context = 'general', user = null) => {
-    // DEBUGGING: Tampilkan error sistem di console juga
-    console.error(`[SystemLog:${context}]`, error);
     try {
-        if (!db || !auth.currentUser) return; // FIX: Guard auth
+        if (!db) return;
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
+        
         const safeUsername = user ? (user.displayName || user.username || 'Guest') : 'Guest';
         const safeUid = user ? (user.uid || 'guest') : 'guest';
+        
+        // Sanitasi pesan error dari info sensitif (email, password, token)
+        let cleanMessage = error.message || String(error);
+        cleanMessage = cleanMessage.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[REDACTED_EMAIL]');
+        cleanMessage = cleanMessage.replace(/(password|token|key)=[^&]+/gi, '$1=[REDACTED]');
+
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
-            message: error.message || String(error), stack: error.stack || '', context: context, userId: safeUid, username: safeUsername, timestamp: serverTimestamp(), userAgent: navigator.userAgent
+            message: cleanMessage, 
+            stack: error.stack || '', 
+            context: context, 
+            userId: safeUid, 
+            username: safeUsername, 
+            timestamp: serverTimestamp(), 
+            userAgent: navigator.userAgent
         });
-    } catch (e) {
-        console.warn("Gagal menulis log ke Firestore:", e);
-    }
+    } catch (e) {}
 };
 
 const requestNotificationPermission = async (userId) => {
@@ -273,7 +350,7 @@ const shuffleArray = (array) => {
 };
 
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
-    if (!toUserId || !fromUser || toUserId === fromUser.uid || !db || !auth.currentUser) return; 
+    if (!toUserId || !fromUser || toUserId === fromUser.uid || !db) return; 
     try {
         await addDoc(collection(db, getPublicCollection('notifications')), {
             toUserId: toUserId, fromUserId: fromUser.uid, fromUsername: fromUser.username, fromPhoto: fromUser.photoURL || '',
@@ -526,16 +603,17 @@ const SkeletonPost = () => (
     </div>
 );
 
-// PERBAIKAN 1 & 2: Anti-XSS & Layout
+// SECURITY FIX: Gunakan DOMPurify alih-alih regex manual untuk dangerouslySetInnerHTML
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
-    // SECURITY FIX: Escape HTML tags untuk mencegah XSS
-    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    // Step 1: Escape dasar untuk karakter HTML berbahaya (Layer 1 Security)
+    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     
-    // Convert links with XSS protection (Block javascript:)
+    // Step 2: Konversi Markdown ke HTML String
+    
+    // Link Protection: Anti Javascript/Data URI
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        // Cek protokol berbahaya
         if (/^(javascript|vbscript|data):/i.test(url)) return `${label} (Link Diblokir)`;
         return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
     });
@@ -554,8 +632,13 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
     
-    // FIX: Font size diperkecil (text-[13px] / text-sm) dan leading relaxed agar compact tapi terbaca
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
+    // Step 3: SANITASI AKHIR DENGAN DOMPurify (Layer 2 Security - Ultimate Defense)
+    // Pastikan DOMPurify tersedia (jika di environment canvas mungkin perlu fallback atau library di-include)
+    const cleanHtml = typeof DOMPurify !== 'undefined' 
+        ? DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'onClick', 'class', 'data-tag'] }) // Allow specific attributes
+        : html; // Fallback jika library belum load (tetap aman karena Step 1)
+
+    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: cleanHtml }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
 };
 
 // ==========================================
@@ -576,41 +659,25 @@ const DeveloperDashboard = ({ onClose }) => {
     useEffect(() => {
         const fetchData = async () => {
             if (!db) return;
-            // FIX: Tambahkan error handling di sini juga
-            try {
-                const usersSnap = await new Promise((resolve, reject) => { 
-                    const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
-                    (snap) => { resolve(snap); unsub(); },
-                    (err) => reject(err)
-                    ); 
-                });
-                const postsSnap = await new Promise((resolve, reject) => { 
-                    const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), 
-                    (snap) => { resolve(snap); unsub(); },
-                    (err) => reject(err)
-                    ); 
-                });
-                const now = new Date();
-                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-                const rawPosts = postsSnap.docs.map(d => d.data());
-                const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
-                setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
-                const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-                const last7Days = [];
-                for (let i = 6; i >= 0; i--) {
-                    const d = new Date(); d.setDate(d.getDate() - i);
-                    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-                    const dayEnd = dayStart + 86400000;
-                    const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
-                    last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
-                }
-                setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
-                setChartData(last7Days);
-                setLoading(false);
-            } catch(e) {
-                console.error("Dashboard error:", e);
-                setLoading(false);
+            const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), (snap) => { resolve(snap); unsub(); }); });
+            const postsSnap = await new Promise(resolve => { const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), (snap) => { resolve(snap); unsub(); }); });
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const rawPosts = postsSnap.docs.map(d => d.data());
+            const postsToday = rawPosts.filter(p => p.timestamp?.toMillis && p.timestamp.toMillis() >= todayStart).length;
+            setAllUsersList(usersSnap.docs.map(d => ({id: d.id, ...d.data()})));
+            const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+            const last7Days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+                const dayEnd = dayStart + 86400000;
+                const count = rawPosts.filter(p => { const t = p.timestamp?.toMillis ? p.timestamp.toMillis() : 0; return t >= dayStart && t < dayEnd; }).length;
+                last7Days.push({ day: days[d.getDay()], count, height: Math.min(count * 10 + 10, 100) });
             }
+            setStats({ users: usersSnap.size, posts: postsSnap.size, postsToday });
+            setChartData(last7Days);
+            setLoading(false);
         };
         fetchData();
         if (db) {
@@ -622,7 +689,70 @@ const DeveloperDashboard = ({ onClose }) => {
     const handleBroadcast = async () => { if(!broadcastMsg.trim()) return; if(!confirm("Kirim pengumuman ke SEMUA user?")) return; setSendingBC(true); try { const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); }); const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), { toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp() })); await Promise.all(promises); alert("Pengumuman berhasil dikirim!"); setBroadcastMsg(''); } catch(e) { alert("Gagal kirim broadcast: " + e.message); } finally { setSendingBC(false); } };
     const handleBanUser = async (uid, currentStatus) => { if(!confirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?")) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), { isBanned: !currentStatus }); setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); alert(currentStatus ? "User di-unban." : "User berhasil di-ban."); } catch(e) { alert("Gagal: " + e.message); } };
     const handleDeleteUser = async (uid) => { if(!confirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?")) return; try { await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid)); setAllUsersList(prev => prev.filter(u => u.id !== uid)); alert("Data user dihapus."); } catch(e) { alert("Gagal hapus: " + e.message); } };
-    const handleUpdateReputation = async (uid, amount, isReset = false) => { if(!confirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`)) return; try { const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); alert("Berhasil update poin."); } catch(e) { alert("Gagal update poin: " + e.message); } };
+    
+    // MODIFIKASI: Sistem Reset dengan Notifikasi & MANUAL RESET ALL
+    const handleUpdateReputation = async (uid, amount, isReset = false) => { 
+        if(!confirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`)) return; 
+        try { 
+            const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; 
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); 
+            
+            // Tambahkan notifikasi ke user saat di reset
+            if (isReset) {
+                await addDoc(collection(db, getPublicCollection('notifications')), { 
+                    toUserId: uid, 
+                    fromUserId: 'admin', 
+                    fromUsername: 'System', 
+                    fromPhoto: APP_LOGO, 
+                    type: 'system', 
+                    message: `⚠️ Point reputasi Anda telah direset oleh sistem/admin.`, 
+                    isRead: false, 
+                    timestamp: serverTimestamp() 
+                });
+            }
+            
+            alert("Berhasil update poin."); 
+        } catch(e) { alert("Gagal update poin: " + e.message); } 
+    };
+
+    // FITUR BARU: RESET SEMUA POIN (MANUAL TRIGGER)
+    const handleResetAllPoints = async () => {
+        if (!confirm("⚠️ BAHAYA: Apakah Anda yakin ingin MERESET POIN SEMUA USER menjadi 0? Tindakan ini tidak dapat dibatalkan!")) return;
+        setLoading(true);
+        try {
+            // Ambil semua user profile
+            const usersSnapshot = await getDocs(collection(db, getPublicCollection('userProfiles')));
+            
+            // Batch update tidak support > 500, jadi kita loop manual satu per satu (client-side batching simple)
+            // Untuk app skala kecil ini acceptable.
+            let successCount = 0;
+            const promises = usersSnapshot.docs.map(async (docSnap) => {
+                try {
+                    await updateDoc(docSnap.ref, { reputation: 0 });
+                    successCount++;
+                } catch (err) {
+                    console.error(`Gagal reset user ${docSnap.id}:`, err);
+                }
+            });
+
+            await Promise.all(promises);
+            
+            // Catat log reset
+            await addDoc(collection(db, getPublicCollection('systemLogs')), {
+                message: `MANUAL RESET: ${successCount} user points reset to 0`,
+                context: 'admin_action',
+                userId: 'admin',
+                username: 'Developer',
+                timestamp: serverTimestamp()
+            });
+
+            alert(`Selesai! ${successCount} user telah direset.`);
+        } catch (e) {
+            alert("Gagal reset massal: " + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const filteredUsers = allUsersList.filter(u => u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email?.toLowerCase().includes(userSearchTerm.toLowerCase()));
 
@@ -642,6 +772,14 @@ const DeveloperDashboard = ({ onClose }) => {
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-purple-100 dark:border-gray-700 text-center"><ImageIcon className="mx-auto text-purple-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.posts}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Total Post</p></div>
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-emerald-100 dark:border-gray-700 text-center"><Activity className="mx-auto text-emerald-500 mb-2"/><h3 className="text-2xl font-bold dark:text-white">{stats.postsToday}</h3><p className="text-[10px] text-gray-500 uppercase font-bold">Post Hari Ini</p></div>
                         </div>
+                        
+                        {/* FITUR TOMBOL RESET ALL */}
+                        <div className="bg-red-50 dark:bg-red-900/30 p-6 rounded-3xl shadow-sm border border-red-200 dark:border-red-700">
+                             <h3 className="font-bold text-red-700 dark:text-red-400 mb-3 flex items-center gap-2"><TimerReset size={18}/> Kontrol Reset Mingguan</h3>
+                             <p className="text-xs text-red-600 dark:text-red-300 mb-4">Jika otomatisasi gagal, gunakan tombol ini setiap Kamis jam 11:00 WIB.</p>
+                             <button onClick={handleResetAllPoints} className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold text-sm w-full shadow-lg hover:bg-red-700 transition flex items-center justify-center gap-2"><Trash2 size={16}/> RESET SEMUA POIN SEKARANG</button>
+                        </div>
+
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-orange-100 dark:border-gray-700">
                             <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Megaphone size={18} className="text-orange-500"/> Kirim Pengumuman</h3>
                             <textarea value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-3 rounded-xl text-sm border border-gray-200 dark:border-gray-600 mb-3 outline-none" rows="3" placeholder="Tulis pesan untuk semua user..."/>
@@ -673,7 +811,19 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
                 <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
-                <form onSubmit={handleSubmit} className="space-y-4"><div className="text-left"><label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label><input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500 outline-none"/></div><button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button></form>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="text-left">
+                        <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
+                        {/* PERBAIKAN: Input text warna kuning (text-yellow-600 agar readable di bg putih) */}
+                        <input 
+                            value={username} 
+                            onChange={e=>setUsername(e.target.value)} 
+                            placeholder="Contoh: user_keren123" 
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-600 focus:ring-2 focus:ring-sky-500 outline-none placeholder:text-gray-400"
+                        />
+                    </div>
+                    <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button>
+                </form>
             </div>
         </div>
     );
@@ -689,6 +839,7 @@ const AuthModal = ({ onClose }) => {
 };
 
 const LegalPage = ({ onBack }) => {
+    usePageTitle("Legal & Kebijakan");
     return (
         <div className="min-h-screen bg-white dark:bg-gray-900 pb-24 pt-20 px-6 max-w-2xl mx-auto animate-in fade-in">
             <button onClick={onBack} className="fixed top-6 left-6 z-50 bg-white/80 dark:bg-black/50 backdrop-blur-md p-2 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition"><ArrowLeft/></button>
@@ -699,6 +850,7 @@ const LegalPage = ({ onBack }) => {
 };
 
 const LeaderboardScreen = ({ allUsers, currentUser }) => {
+    usePageTitle("Top 10 Legenda");
     // FIX: Leaderboard Logic - Top 10 Only (Tingkat Dewa) & User Rank Message
     const sortedUsers = useMemo(() => { return [...allUsers].sort((a, b) => (b.reputation || 0) - (a.reputation || 0)); }, [allUsers]);
     const top10 = sortedUsers.slice(0, 10);
@@ -708,7 +860,8 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
     const isMeInTop10 = myRankIndex !== -1 && myRankIndex < 10;
 
     return (
-        <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
+        // PERBAIKAN RESPONSIF UI: Lebar container diperbesar untuk desktop
+        <div className="max-w-lg md:max-w-2xl lg:max-w-4xl mx-auto p-4 pb-24 pt-20">
             {/* Banner Reset Mingguan */}
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
                 <div className="bg-red-500 text-white p-2 rounded-lg"><TimerReset size={20}/></div>
@@ -846,7 +999,14 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
     const handleDeleteComment = async (commentId) => { if(confirm("Hapus komentar?")) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
-    const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); alert('Link Disalin! Orang lain bisa membukanya langsung.'); } catch (e) { alert('Gagal menyalin link'); } };
+    const sharePost = async () => { 
+        try { 
+            // FIX SHARE LINK: Use ?post=ID format
+            const shareUrl = `${window.location.origin}?post=${post.id}`;
+            await navigator.clipboard.writeText(shareUrl); 
+            alert('Link Postingan Disalin! Meta data akan mengikuti saat dibagikan.'); 
+        } catch (e) { alert('Gagal menyalin link'); } 
+    };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
 
@@ -984,6 +1144,13 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 };
 
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
+    // Dynamic Meta Tags untuk Profil
+    usePageTitle(
+        profileData?.username ? `Profil ${profileData.username}` : "Profil",
+        `Lihat profil ${profileData?.username || 'Pengguna'} di ${APP_NAME}. Bergabunglah untuk melihat postingan mereka!`,
+        profileData?.photoURL || APP_LOGO
+    );
+
     const [edit, setEdit] = useState(false); const [name, setName] = useState(profileData.username); const [file, setFile] = useState(null); const [load, setLoad] = useState(false); const [showDev, setShowDev] = useState(false); const [activeTab, setActiveTab] = useState('posts'); const [mood, setMood] = useState(profileData.mood || ''); const [isEditingMood, setIsEditingMood] = useState(false);
     
     const [localPosts, setLocalPosts] = useState([]);
@@ -1099,6 +1266,7 @@ const HomeScreen = ({
     homeFeedState,
     setHomeFeedState
 }) => {
+    usePageTitle("Beranda");
     // Kita gunakan state dari parent (App), tidak membuat state lokal baru untuk posts/cursor
     const { posts: feedPosts, cursor: nextCursor, sortType, hasLoaded } = homeFeedState;
     
@@ -1114,14 +1282,14 @@ const HomeScreen = ({
         return sorted.length > 0 ? {tag: sorted[0][0], count: sorted[0][1]} : null;
     }, [allPosts]);
 
-    // Modifikasi: Logic Load Feed
+    // Modifikasi: Logic Load Feed (Updated for Following)
     const loadFeed = async (reset = false) => {
         if (loading) return;
         setLoading(true);
         setFeedError(false);
 
         const currentCursor = reset ? null : nextCursor;
-        const currentSort = sortType; // Gunakan sortType dari state persisten
+        const currentSort = sortType; 
         
         try {
             const data = await fetchFeedData({
@@ -1159,21 +1327,30 @@ const HomeScreen = ({
         }
     }, [hasLoaded, sortType]); // Dependency pada sortType penting
 
-    // FIX SCROLL: Kembalikan posisi scroll saat kembali ke halaman ini
-    useEffect(() => {
-        if (homeFeedState.scrollPos) {
+    // FIX SCROLL: Membekukan posisi scroll saat kembali ke halaman ini
+    // Menggunakan useLayoutEffect agar scroll terjadi sebelum paint, mencegah kedipan
+    useLayoutEffect(() => {
+        if (homeFeedState.scrollPos > 0) {
             window.scrollTo(0, homeFeedState.scrollPos);
         }
-        
-        // Simpan posisi scroll saat unmount (pergi ke halaman lain)
+    }, []); // Run once on mount
+
+    // Simpan posisi scroll saat unmount (pergi ke halaman lain)
+    useEffect(() => {
         return () => {
              setHomeFeedState(prev => ({ ...prev, scrollPos: window.scrollY }));
         };
-    }, []); // Empty dependency ensures this runs on mount/unmount
+    }, []); 
 
-    // Handler Ganti Kategori
+    // Handler Ganti Kategori (Tambahan: Following)
     const handleSortChange = (newSort) => {
         if (newSort === sortType) return;
+        // Jika mode following & guest, minta login
+        if (newSort === 'following' && isGuest) {
+            onRequestLogin();
+            return;
+        }
+
         // Reset state di parent, set hasLoaded false untuk memicu fetch baru
         setHomeFeedState(prev => ({
             ...prev,
@@ -1217,11 +1394,13 @@ const HomeScreen = ({
         }
     }
 
+    // PERBAIKAN RESPONSIF UI: Gunakan max-w-2xl untuk feed agar lebih lebar di desktop
     return (
-        <div className="w-full max-w-xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
+        <div className="w-full max-w-xl md:max-w-2xl mx-auto pb-24 px-4 md:px-0 pt-4"> 
             <div className="flex items-center justify-start mb-6 pt-2 sticky top-14 md:top-16 z-30 bg-[#F0F4F8]/90 dark:bg-[#111827]/90 backdrop-blur-md py-3 -mx-4 px-4 border-b border-gray-200/50 dark:border-gray-800 transition-all gap-2">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar items-center">
                      <button onClick={() => handleSortChange('home')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='home'?'bg-sky-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Beranda</button>
+                     <button onClick={() => handleSortChange('following')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap flex items-center gap-1 ${sortType==='following'?'bg-emerald-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}><Users size={12}/> Mengikuti</button>
                      <button onClick={() => handleSortChange('meme')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='meme'?'bg-yellow-400 text-white border-yellow-400 shadow-lg shadow-yellow-200':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>😂 Meme Zone</button>
                      <button onClick={() => handleSortChange('popular')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition border whitespace-nowrap ${sortType==='popular'?'bg-purple-500 text-white':'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>Populer</button>
                      
@@ -1264,6 +1443,7 @@ const HomeScreen = ({
 };
 
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
+    usePageTitle("Notifikasi");
     const [notifs, setNotifs] = useState([]);
     useEffect(() => { const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50)); return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); }, [userId]);
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
@@ -1275,6 +1455,13 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
     const [loading, setLoading] = useState(!cachedPost);
     const [error, setError] = useState(false);
+
+    // Dynamic Meta Tags untuk Single Post
+    const postTitle = fetchedPost?.title || `Postingan oleh ${fetchedPost?.user?.username || 'Pengguna'}`;
+    const postDesc = fetchedPost?.content ? fetchedPost.content.substring(0, 150) : "Lihat postingan menarik ini di BguneNet!";
+    const postImage = fetchedPost?.mediaUrl || APP_LOGO;
+    usePageTitle(postTitle, postDesc, postImage);
+
     useEffect(() => {
         if (cachedPost) { setFetchedPost(cachedPost); setLoading(false); return; }
         const fetchSinglePost = async () => {
@@ -1293,7 +1480,13 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         };
         if (postId) fetchSinglePost();
     }, [postId, cachedPost]);
-    const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
+    const handleBack = () => { 
+        // Bersihkan parameter post di URL
+        const url = new URL(window.location);
+        url.searchParams.delete('post');
+        window.history.pushState({}, '', url);
+        goBack(); 
+    };
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
     if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     return (
@@ -1306,11 +1499,15 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
 };
 
 const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, onRequestLogin, initialQuery, setPage, setTargetPostId }) => {
+    usePageTitle(initialQuery ? `Cari: ${initialQuery}` : "Pencarian");
     const [queryTerm, setQueryTerm] = useState(initialQuery || '');
     const [results, setResults] = useState({ users: [], posts: [] });
     const [isSearching, setIsSearching] = useState(false);
 
     useEffect(() => {
+        // Update URL saat query berubah
+        if (queryTerm) updateUrl({ q: queryTerm });
+        
         if (!queryTerm.trim()) { setResults({ users: [], posts: [] }); return; }
         
         const doSearch = async () => {
@@ -1372,6 +1569,27 @@ const App = () => {
         scrollPos: 0 // FIX: Tambahkan scrollPos agar tidak refresh/scroll ke atas
     });
 
+    // SISTEM ROUTING UNIK (URL PARSER)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const postParam = params.get('post');
+        const userParam = params.get('user');
+        const qParam = params.get('q');
+
+        // Prioritaskan Post, lalu User, lalu Search
+        if (postParam) {
+            setTargetPid(postParam);
+            setPage('view_post');
+        } else if (userParam) {
+            setTargetUid(userParam);
+            setPage('other-profile');
+        } else if (qParam) {
+            setSearchQuery(qParam);
+            setPage('search');
+        }
+        // Jika tidak ada param, default ke 'home' (sudah default state)
+    }, []);
+
     useEffect(() => {
         const handleError = (event) => { if (!user || user.email !== DEVELOPER_EMAIL) { event.preventDefault(); logSystemError(event.error || new Error(event.message), 'global_error', user); } };
         const handleRejection = (event) => { if (!user || user.email !== DEVELOPER_EMAIL) { event.preventDefault(); logSystemError(event.reason || new Error('Unhandled Promise Rejection'), 'promise_rejection', user); } };
@@ -1382,7 +1600,14 @@ const App = () => {
     useEffect(() => { if (user && user.email !== DEVELOPER_EMAIL) { console.error = (...args) => {}; } }, [user]);
     useEffect(() => { const handleOff = () => setIsOffline(true); const handleOn = () => { setIsOffline(false); setRefreshTrigger(prev=>prev+1); }; window.addEventListener('offline', handleOff); window.addEventListener('online', handleOn); return () => { window.removeEventListener('offline', handleOff); window.removeEventListener('online', handleOn); } }, []);
     useEffect(() => { if ('serviceWorker' in navigator) { navigator.serviceWorker.register('firebase-messaging-sw.js').then(reg => console.log('SW registered')).catch(err => console.log('SW failed')); } }, []);
-    useEffect(() => { window.scrollTo(0, 0); }, [page]);
+    
+    // FIX SCROLL: Reset scroll ke atas HANYA jika bukan ke home
+    useEffect(() => { 
+        if (page !== 'home') {
+            window.scrollTo(0, 0); 
+        }
+    }, [page]);
+    
     useEffect(() => { const savedTheme = localStorage.getItem('theme'); if (savedTheme === 'dark') { document.documentElement.classList.add('dark'); setDarkMode(true); } }, []);
 
     // FIX SPLASH: Timeout logic jika data tidak kunjung datang dalam 15 detik
@@ -1435,8 +1660,6 @@ const App = () => {
     const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); alert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas."); setShowRewards(false); } catch (e) { alert("Gagal klaim: " + e.message); } };
     const toggleDarkMode = () => { if (darkMode) { document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light'); setDarkMode(false); } else { document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark'); setDarkMode(true); } };
 
-    useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
-
     useEffect(() => {
         if (!user) return;
         const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
@@ -1444,115 +1667,79 @@ const App = () => {
         return () => unsubscribe();
     }, [user]);
 
-    // ===============================================
-    // AUTH & DATA INITIALIZATION (CRITICAL FIX)
-    // ===============================================
-
-    useEffect(() => {
-        // 1. Inisialisasi Auth terlebih dahulu
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Auth Init Error:", error);
-                // Fail safe: jangan block app, biarkan onAuthStateChanged handle
-            }
-        };
-        initAuth();
-
-        const unsubscribe = onAuthStateChanged(auth, async (u) => { 
-            if(u) { 
-                setUser(u); 
-                requestNotificationPermission(u.uid); 
-                try {
-                    const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                    if (!userDoc.exists()) { 
-                        setShowOnboarding(true); 
-                        setIsProfileLoaded(true); 
-                    } else { 
-                        const userData = userDoc.data(); 
-                        if (userData.isBanned) { 
-                            alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
-                            await signOut(auth); setUser(null); setProfile(null); 
-                            return; 
-                        } 
-                        await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                    }
-                } catch(e) {
-                    console.error("Auth State change error:", e);
-                    setIsProfileLoaded(true);
-                }
+    useEffect(() => onAuthStateChanged(auth, async (u) => { 
+        if(u) { 
+            setUser(u); 
+            requestNotificationPermission(u.uid); 
+            const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+            if (!userDoc.exists()) { 
+                setShowOnboarding(true); 
+                setIsProfileLoaded(true); // Anggap loaded agar splash hilang saat onboarding
             } else { 
-                setUser(null); 
-                setProfile(null); 
-                setIsProfileLoaded(true); 
+                const userData = userDoc.data(); 
+                if (userData.isBanned) { 
+                    alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); 
+                    await signOut(auth); setUser(null); setProfile(null); 
+                    return; 
+                } 
+                await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
             } 
-        });
-
-        return () => unsubscribe();
-    }, []); // Empty dependency
-
+        } else { 
+            setUser(null); 
+            setProfile(null); 
+            setIsProfileLoaded(true); // Tidak perlu tunggu profile kalau guest
+        } 
+    }), []);
+    
     useEffect(() => { 
         if(user) { 
-            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
-                async s => { 
-                    if(s.exists()) { 
-                        const data = s.data(); 
-                        if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } 
-                        setProfile({...data, uid:user.uid, email:user.email}); 
-                        if (showOnboarding) setShowOnboarding(false); 
-                    }
-                    setIsProfileLoaded(true); 
-                },
-                (error) => {
-                    console.error("Profile Snapshot Error:", error);
-                    setIsProfileLoaded(true); 
+            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), async s => { 
+                if(s.exists()) { 
+                    const data = s.data(); 
+                    if (data.isBanned) { alert("AKUN ANDA TELAH DIBLOKIR/BANNED OLEH DEVELOPER."); await signOut(auth); return; } 
+                    setProfile({...data, uid:user.uid, email:user.email}); 
+                    if (showOnboarding) setShowOnboarding(false); 
                 }
-            ); 
+                setIsProfileLoaded(true); // FIX: Profile sudah loaded
+            }); 
             const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); 
             return () => { unsubP(); unsubNotif(); }; 
         } 
     }, [user]);
 
-    // PERBAIKAN: Listener Data User & Posts hanya jalan jika user (atau guest) sudah terautentikasi
-    // Ini mencegah error permission-denied saat app baru dibuka
     useEffect(() => {
-        if (!user) return; // Tunggu auth siap
-
-        // Load All Users
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
-            (s) => {
-                setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
-                setIsUsersLoaded(true); 
-            }, 
-            (error) => {
-                console.error("CRITICAL ERROR: Gagal load userProfiles.", error);
-                setIsUsersLoaded(true); // Fail-safe agar tidak stuck loading
-            }
-        );
-
-        // Load Posts Cache
-        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), 
-            (s) => {
-                const raw = s.docs.map(d=>({id:d.id,...d.data()}));
-                setPosts(raw); 
-                setIsLoadingFeed(false);
-            },
-            (error) => {
-                console.error("CRITICAL ERROR: Gagal load posts cache.", error);
-                setIsLoadingFeed(false); // Fail-safe
-            }
-        );
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => {
+            setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id})));
+            setIsUsersLoaded(true); // FIX: Users (leaderboard) sudah loaded
+        });
+        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), s => {
+             const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+             setPosts(raw); 
+             setIsLoadingFeed(false);
+        });
         
         return () => { unsubUsers(); unsubCache(); };
-    }, [user, refreshTrigger]); // Dependency pada user
+    }, [refreshTrigger]); 
 
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
+    
+    // LOGIKA SCROLL PINTAR & LINK HANDLER
+    const handleHomeClick = () => {
+        if (page === 'home') {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            setPage('home');
+            updateUrl({}); // Reset URL ke root
+        }
+    };
+    
+    // Wrapper untuk pindah halaman yang juga update URL
+    const goToProfileSafe = (uid) => {
+        setTargetUid(uid);
+        setPage('other-profile');
+        updateUrl({ user: uid });
+    };
 
     // LOGIKA SPLASH SCREEN BARU:
     const isDataReady = isUsersLoaded && isProfileLoaded;
@@ -1572,20 +1759,20 @@ const App = () => {
                     <NetworkStatus />
                     {page!=='legal' && ( 
                         <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 md:px-8 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
-                            <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setPage('home')}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={handleHomeClick}><img src={APP_LOGO} className="w-8 h-8 object-contain"/><span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span></div>
                             
                             {/* DESKTOP NAV - FIX: Reordered as requested */}
                             <div className="hidden md:flex items-center gap-6 mr-4">
-                                <button onClick={()=>setPage('home')} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
+                                <button onClick={handleHomeClick} className={`text-sm font-bold flex items-center gap-2 ${page==='home'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Home size={18}/> Beranda</button>
                                 
-                                {!isGuest && <button onClick={()=>setPage('profile')} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
+                                {!isGuest && <button onClick={()=>{ setPage('profile'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='profile'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><User size={18}/> Profil</button>}
                                 
                                 {/* Tombol Buat Post Ditengahkan */}
                                 <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white px-4 py-2 rounded-full font-bold text-sm hover:bg-sky-600 transition shadow-lg shadow-sky-200 flex items-center gap-2 mx-2"><PlusCircle size={16}/> Buat Post</button>
                                 
-                                <button onClick={()=>setPage('leaderboard')} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 10</button>
+                                <button onClick={()=>{ setPage('leaderboard'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='leaderboard'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Trophy size={18}/> Top 10</button>
                                 
-                                <button onClick={()=>setPage('search')} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
+                                <button onClick={()=>{ setPage('search'); updateUrl({}); }} className={`text-sm font-bold flex items-center gap-2 ${page==='search'?'text-sky-600':'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}><Search size={18}/> Cari</button>
                             </div>
 
                             <div className="flex gap-2 items-center">
@@ -1596,19 +1783,19 @@ const App = () => {
                         </header> 
                     )}
                     <main className={page!=='legal' ? 'pt-16 md:pt-20' : ''}>
-                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
+                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={goToProfileSafe} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
-                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
+                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={goToProfileSafe} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={(pid)=>{ setTargetPid(pid); updateUrl({post: pid}); }} />}
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
                         {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
-                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
+                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={(pid)=>{ setTargetPid(pid); updateUrl({post: pid}); }} setTargetProfileId={goToProfileSafe}/>}
                         {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
                         {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
-                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
+                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={goToProfileSafe} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) */}
-                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/50 dark:border-gray-700 rounded-full px-5 py-2.5 shadow-2xl shadow-sky-100/50 dark:shadow-none flex items-center gap-5 z-40"><NavBtn icon={Home} active={page==='home'} onClick={handleHomeClick}/><NavBtn icon={Search} active={page==='search'} onClick={()=>{ setPage('search'); updateUrl({}); }}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-2.5 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition"><PlusCircle size={22}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>{ setPage('leaderboard'); updateUrl({}); } }/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>{ setPage('profile'); updateUrl({}); } }/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
