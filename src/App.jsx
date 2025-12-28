@@ -32,7 +32,8 @@ import {
     query, 
     where, 
     orderBy,
-    writeBatch
+    writeBatch,
+    getDocs // FIX: Added getDocs import
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -1685,7 +1686,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                     <div className="relative mt-2"><LinkIcon size={16} className="absolute left-3 top-3.5 text-gray-400"/><input value={form.url} onChange={e=>setForm({...form, url:e.target.value, files:[]})} placeholder="Atau tempel Link Video (YouTube/TikTok/IG)..." className="w-full pl-10 py-3 bg-gray-50 dark:bg-gray-700 dark:text-white rounded-xl text-xs outline-none"/></div>
                     
                     <button disabled={loading || (!form.content && form.files.length === 0 && !form.url)} className="w-full py-3.5 bg-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 hover:bg-sky-600 transform active:scale-[0.98] transition disabled:opacity-50 text-sm mt-4">{loading ? 'Memproses...' : 'Posting'}</button>
-                </div>
+                </form>
             </div>
         </div>
     );
