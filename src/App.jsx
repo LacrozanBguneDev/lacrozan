@@ -132,7 +132,7 @@ try {
     auth = getAuth(app);
     db = getFirestore(app);
     googleProvider = new GoogleAuthProvider();
-    
+
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
         try {
             messaging = getMessaging(app);
@@ -395,7 +395,7 @@ const Sidebar = ({ isOpen, onClose, setPage, user, profile, isGuest, onAuth }) =
                          <button onClick={()=>{setPage('leaderboard'); onClose();}} className="w-full flex items-center gap-3 p-3 hover:bg-sky-50 dark:hover:bg-gray-800 rounded-xl transition text-gray-700 dark:text-gray-200 font-bold text-sm">
                             <Trophy size={18} className="text-yellow-500"/> Papan Peringkat
                         </button>
-                        
+
                         <div className="h-px bg-gray-100 dark:bg-gray-800 my-2"></div>
 
                         {menuItems.map(item => (
@@ -631,10 +631,10 @@ const SkeletonPost = () => (
 // PERBAIKAN 1 & 2: Anti-XSS & Layout
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
-    
+
     // SECURITY FIX: Escape HTML tags untuk mencegah XSS
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    
+
     // Convert links with XSS protection (Block javascript:)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
         // Cek protokol berbahaya
@@ -651,11 +651,11 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                .replace(/\*(.*?)\*/g, '<em>$1</em>')
                .replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
-    
+
     // Hashtags
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
-    
+
     // FIX: Font size diperkecil (text-[13px] / text-sm) dan leading relaxed agar compact tapi terbaca
     return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
 };
@@ -804,7 +804,7 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
     // FIX: Leaderboard Logic - Top 10 Only (Tingkat Dewa) & User Rank Message
     const sortedUsers = useMemo(() => { return [...allUsers].sort((a, b) => (b.reputation || 0) - (a.reputation || 0)); }, [allUsers]);
     const top10 = sortedUsers.slice(0, 10);
-    
+
     // Cari ranking user saat ini di list FULL (sebelum di slice)
     const myRankIndex = currentUser ? sortedUsers.findIndex(u => u.uid === currentUser.uid) : -1;
     const isMeInTop10 = myRankIndex !== -1 && myRankIndex < 10;
@@ -957,7 +957,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const isVideo = post.mediaType === 'video' || ((post.mediaUrl && /\.(mp4|webm)$/i.test(post.mediaUrl)) && !embed);
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
     const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
-    
+
     // Gunakan real embed jika bukan video internal dari API
     const displayEmbed = isVideo ? null : embed;
 
@@ -979,8 +979,19 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         <p className="text-xs text-gray-600 dark:text-gray-300 leading-snug">{c.text}</p>
                     </div>
                     <div className="flex items-center gap-2 opacity-50 hover:opacity-100 transition">
-                         {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}
-                         {(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/></button>}
+                         {!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/>
+                         <button
+  onClick={() => handleDeleteComment(c.id)}
+  className="text-gray-400 hover:text-red-500"
+>
+  <>
+    {isMeDeveloper && currentUserId !== c.userId
+      ? <ShieldAlert size={12} />
+      : <Trash size={12} />
+    }
+  </>
+</button>
+
                     </div>
                 </div>
                 {replies.length > 0 && ( <div className="mt-1"><div className="space-y-1">{visibleReplies.map(reply => ( <CommentItem key={reply.id} c={reply} isReply={true} /> ))}</div>{replies.length > 2 && !showAllReplies && ( <button onClick={() => setShowAllReplies(true)} className="ml-6 text-[10px] font-bold text-gray-400 hover:text-sky-500 flex items-center mt-1">Lihat {replies.length - 2} balasan lainnya...</button> )}</div> )}
@@ -993,7 +1004,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     return (
         <div className="bg-white dark:bg-gray-800 rounded-none md:rounded-xl p-0 md:p-4 mb-2 md:mb-4 shadow-sm border-b md:border border-gray-100 dark:border-gray-700 relative overflow-hidden group transition flex flex-col">
             {post.isShort && <div className="absolute top-3 right-3 bg-black/80 text-white text-[9px] font-bold px-2 py-0.5 rounded-full backdrop-blur-md z-10 flex items-center"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</div>}
-            
+
             <div className="flex items-center justify-between px-4 pt-3 md:px-0 md:pt-0 mb-3">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => goToProfile(post.userId)}>
                      {/* Modern Avatar with Clean Border */}
@@ -1021,19 +1032,19 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                         {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-1 text-[15px] line-clamp-1">{post.title}</h3>}
                         <div className="text-sm text-gray-700 dark:text-gray-300 mb-2 leading-relaxed flex-1">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-500 font-bold text-xs ml-1 hover:text-sky-500 inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'selengkapnya'}</button>}</div>
                     </div>
-                    
+
                     <div onDoubleClick={handleDoubleTap} className="relative mt-2">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                          {isAudio && <div className="px-4 md:px-0"><AudioPlayer src={post.mediaUrl || embed.url} /></div>}
-                         
+
                          {/* Full Bleed Media for Mobile */}
                          {isVideo && <video src={post.mediaUrl} controls className="w-full max-h-[500px] bg-black md:rounded-lg outline-none"/>}
-                         
+
                          {displayEmbed?.type === 'youtube' && <div className="aspect-video w-full md:rounded-lg overflow-hidden"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0" allowFullScreen></iframe></div>}
                          {displayEmbed?.type === 'instagram' && ( <div className="aspect-square w-full md:rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
                          {displayEmbed?.type === 'tiktok' && ( <div className="aspect-[9/16] w-full md:rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-black"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0"></iframe></div>)}
                          {displayEmbed?.type === 'link' && <a href={displayEmbed.displayUrl} target="_blank" rel="noopener noreferrer" className="block mx-4 md:mx-0 p-3 text-center bg-gray-50 dark:bg-gray-900 text-sky-600 font-bold text-xs hover:underline rounded-lg border border-gray-200 dark:border-gray-700">Buka Tautan <ExternalLink size={12} className="inline ml-1"/></a>}
-                         
+
                          {!isAudio && !isVideo && !displayEmbed && mediaList.length > 0 && ( 
                              <div className="md:rounded-lg overflow-hidden">
                                 <MediaGrid mediaUrls={mediaList} onImageClick={(idx) => {setLightboxIndex(idx); setLightboxOpen(true);}} /> 
@@ -1042,7 +1053,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     </div>
                 </div>
             )}
-            
+
             <div className="flex items-center gap-6 px-4 py-3 md:px-0 md:py-3 mt-1">
                 <button onClick={handleLike} className={`flex items-center gap-1.5 text-sm transition ${liked ? 'text-rose-500 font-bold' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400'}`}><Heart size={20} fill={liked ? 'currentColor' : 'none'} className={liked ? 'scale-110' : ''}/> {likeCount > 0 && likeCount}</button>
                 <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-sky-600 transition"><MessageSquare size={20}/> {post.commentsCount > 0 && post.commentsCount}</button>
@@ -1137,7 +1148,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     // FIX CRASH: Gunakan Safe Navigation Operator (?.) dan Default Value
     // Masalah utama sebelumnya adalah mengakses profileData.username saat profileData masih null.
-    
+
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData?.username || ''); // FIX: Tambah ?. dan default ''
     const [file, setFile] = useState(null); 
@@ -1146,7 +1157,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const [activeTab, setActiveTab] = useState('posts'); 
     const [mood, setMood] = useState(profileData?.mood || ''); // FIX: Tambah ?.
     const [isEditingMood, setIsEditingMood] = useState(false);
-    
+
     const [localPosts, setLocalPosts] = useState([]);
     const [loadingLocal, setLoadingLocal] = useState(true);
 
@@ -1158,7 +1169,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     useEffect(() => {
         setLoadingLocal(true);
         setLocalPosts([]); // Reset posts dulu biar gak blank putih lama (biar muncul skeleton)
-        
+
         const fetchUserPosts = async () => {
             try {
                 const data = await fetchFeedData({
@@ -1166,12 +1177,12 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                     userId: profileData?.uid, // FIX: Safe access
                     limit: 20
                 });
-                
+
                 const enrichedPosts = data.posts.map(p => ({
                     ...p,
                     user: profileData
                 }));
-                
+
                 setLocalPosts(enrichedPosts);
             } catch (e) {
                 console.error("Profile Fetch Error:", e);
@@ -1280,7 +1291,7 @@ const HomeScreen = ({
 }) => {
     // Kita gunakan state dari parent (App), tidak membuat state lokal baru untuk posts/cursor
     const { posts: feedPosts, cursor: nextCursor, sortType, hasLoaded } = homeFeedState;
-    
+
     const [loading, setLoading] = useState(false);
     const [feedError, setFeedError] = useState(false);
     const bottomRef = useRef(null);
@@ -1301,7 +1312,7 @@ const HomeScreen = ({
 
         const currentCursor = reset ? null : nextCursor;
         const currentSort = sortType; // Gunakan sortType dari state persisten
-        
+
         try {
             const data = await fetchFeedData({
                 mode: currentSort, 
@@ -1321,7 +1332,7 @@ const HomeScreen = ({
                 cursor: data.nextCursor,
                 hasLoaded: true
             }));
-            
+
         } catch (e) {
             console.error("Feed load error:", e);
             setFeedError(true);
@@ -1343,7 +1354,7 @@ const HomeScreen = ({
         if (homeFeedState.scrollPos) {
             window.scrollTo(0, homeFeedState.scrollPos);
         }
-        
+
         // Simpan posisi scroll saat unmount (pergi ke halaman lain)
         return () => {
              setHomeFeedState(prev => ({ ...prev, scrollPos: window.scrollY }));
@@ -1487,7 +1498,7 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
 
     useEffect(() => {
         if (!queryTerm.trim()) { setResults({ users: [], posts: [] }); return; }
-        
+
         const doSearch = async () => {
             setIsSearching(true);
             const lower = queryTerm.toLowerCase();
@@ -1587,17 +1598,17 @@ const App = () => {
         const checkAutoReset = async () => {
             // Hanya developer yang memicu ini agar tidak spam DB
             if (!user || user.email !== DEVELOPER_EMAIL) return; 
-            
+
             const now = new Date();
             const isThursday = now.getDay() === 4; // 0=Min, 4=Kamis
             const isTime = now.getHours() >= 11; // 11:00
-            
+
             if (isThursday && isTime) {
                 // Cek apakah sudah reset hari ini (logika sederhana via console/log)
                 const logRef = doc(db, getPublicCollection('systemLogs'), 'last_weekly_reset');
                 const logSnap = await getDoc(logRef);
                 const lastReset = logSnap.exists() ? logSnap.data().timestamp.toDate() : new Date(0);
-                
+
                 // Jika reset terakhir bukan hari ini
                 if (lastReset.getDate() !== now.getDate()) {
                      console.log("TRIGGERING WEEKLY RESET...");
@@ -1660,7 +1671,7 @@ const App = () => {
             setIsProfileLoaded(true); // Tidak perlu tunggu profile kalau guest
         } 
     }), []);
-    
+
     useEffect(() => { 
         if(user) { 
             const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
@@ -1707,7 +1718,7 @@ const App = () => {
                 setIsLoadingFeed(false);
             }
         );
-        
+
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
 
@@ -1716,7 +1727,7 @@ const App = () => {
 
     // LOGIKA SPLASH SCREEN BARU:
     const isDataReady = isUsersLoaded && isProfileLoaded;
-    
+
     if (isDataTimeout) return <ErrorBoundary><DataTimeoutPage /></ErrorBoundary>;
     if (!isDataReady) return <ErrorBoundary><SplashScreen /></ErrorBoundary>;
 
@@ -1730,7 +1741,7 @@ const App = () => {
                 <style>{`.dark body { background-color: #111827; color: white; }`}</style>
                 <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
                     <NetworkStatus />
-                    
+
                     {/* CUSTOM ALERT COMPONENT */}
                     {alertConfig.show && <ModernAlert message={alertConfig.message} onClose={() => setAlertConfig(prev => ({ ...prev, show: false }))} />}
 
@@ -1757,7 +1768,7 @@ const App = () => {
                                     <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600 hidden md:block">{APP_NAME}</span>
                                 </div>
                             </div>
-                            
+
                             <div className="flex gap-2 items-center">
                                 {/* Only Notif & Simple Actions on Top Right */}
                                 {isGuest ? ( 
@@ -1783,20 +1794,20 @@ const App = () => {
                         {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
                         {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
                     </main>
-                    
+
                     {/* BOTTOM NAV (MOBILE ONLY) - Tetap Dipertahankan Sesuai Instruksi */}
                     {page!=='legal' && ( <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-gray-100 dark:border-gray-800 px-6 py-3 flex items-center justify-between z-40 pb-safe">
                         <NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/>
                         <NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/>
-                        
+
                         <button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-gradient-to-tr from-sky-500 to-purple-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition -mt-6 border-4 border-[#F0F4F8] dark:border-gray-900">
                             <PlusCircle size={24}/>
                         </button>
-                        
+
                         <NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>
                         {isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}
                     </nav> )}
-                    
+
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}\n                    {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}\n                    {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}\n                    <PWAInstallPrompt />\n                </div>\n            </div>\n        </ErrorBoundary>\n    );\n};\n\nconst NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 rounded-full transition duration-300 ${active ? 'text-sky-600 bg-sky-50 dark:bg-sky-900 dark:text-sky-300' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
 
 export default App;
