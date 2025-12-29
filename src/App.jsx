@@ -461,7 +461,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.1 (UI Fix)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (UI Enhancements)</p>
                 </div>
             </div>
         </>
@@ -664,24 +664,29 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
 
 const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
     const [friends, setFriends] = useState([]);
+    const [loading, setLoading] = useState(true); // PERBAIKAN: Indikator loading
+
     useEffect(() => {
         const load = async () => {
-            const myProfile = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
-            if (myProfile.exists()) {
-                const data = myProfile.data();
-                const myFollowers = data.followers || [];
-                const myFollowing = data.following || [];
-                const friendIds = myFollowing.filter(id => myFollowers.includes(id)).slice(0, 20);
-                
-                if (friendIds.length > 0) {
-                     const friendProfiles = [];
-                     for (const id of friendIds) {
-                         const snap = await getDoc(doc(db, getPublicCollection('userProfiles'), id));
-                         if (snap.exists()) friendProfiles.push({ id: snap.id, ...snap.data() });
-                     }
-                     setFriends(friendProfiles);
+            setLoading(true);
+            try {
+                const myProfile = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
+                if (myProfile.exists()) {
+                    const data = myProfile.data();
+                    const myFollowers = data.followers || [];
+                    const myFollowing = data.following || [];
+                    const friendIds = myFollowing.filter(id => myFollowers.includes(id)).slice(0, 20);
+                    
+                    if (friendIds.length > 0) {
+                        const friendProfiles = [];
+                        for (const id of friendIds) {
+                            const snap = await getDoc(doc(db, getPublicCollection('userProfiles'), id));
+                            if (snap.exists()) friendProfiles.push({ id: snap.id, ...snap.data() });
+                        }
+                        setFriends(friendProfiles);
+                    }
                 }
-            }
+            } catch(e) { console.error(e); } finally { setLoading(false); }
         };
         load();
     }, [currentUser]);
@@ -694,14 +699,25 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
                      <button onClick={onClose}><X/></button>
                  </div>
                  <div className="flex-1 overflow-y-auto p-2">
-                     {friends.length === 0 ? <p className="text-center text-gray-400 mt-10">Belum ada teman mutual.</p> : 
+                     {loading ? ( // TAMPILKAN LOADING
+                         <div className="flex flex-col items-center justify-center h-40 gap-2 text-gray-400">
+                             <Loader2 className="animate-spin text-sky-500" size={32} />
+                             <p className="text-xs">Memuat daftar teman...</p>
+                         </div>
+                     ) : friends.length === 0 ? (
+                         <div className="text-center mt-10 p-6">
+                             <UserX size={48} className="mx-auto text-gray-200 mb-2"/>
+                             <p className="text-gray-500 font-bold">Belum ada teman mutual.</p>
+                             <p className="text-xs text-gray-400 mt-1">Saling follow user lain untuk memulai chat!</p>
+                         </div>
+                     ) : (
                       friends.map(f => (
-                          <div key={f.id} onClick={() => { onSelect(f.id, f); onClose(); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl cursor-pointer">
+                          <div key={f.id} onClick={() => { onSelect(f.id, f); onClose(); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl cursor-pointer transition">
                               <Avatar src={f.photoURL} className="w-12 h-12 rounded-full"/>
                               <div><h4 className="font-bold dark:text-white">{f.username}</h4><p className="text-xs text-gray-400">Tap untuk chat</p></div>
                           </div>
                       ))
-                     }
+                     )}
                  </div>
              </div>
         </div>
@@ -717,8 +733,11 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     const [replyTo, setReplyTo] = useState(null);
     const bottomRef = useRef(null);
     const typingTimeout = useRef(null);
+    const [selectedMsg, setSelectedMsg] = useState(null); // PERBAIKAN: Context menu logic
+    const [showEmoji, setShowEmoji] = useState(false); // PERBAIKAN: Emoji state
 
     const recipientId = recipient?.uid || recipientProfile?.uid;
+    const commonEmojis = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🙏", "👋", "🤔", "🎉", "🤣", "🥺"];
 
     useEffect(() => {
         if (!recipientId) return;
@@ -764,10 +783,10 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     };
 
     const sendMessage = async (e) => {
-        e.preventDefault();
+        if(e) e.preventDefault();
         if (!text.trim()) return;
         const msgText = text.trim();
-        setText(''); setReplyTo(null);
+        setText(''); setReplyTo(null); setShowEmoji(false);
         
         try {
             const msgData = {
@@ -793,29 +812,64 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         } catch (e) { console.error("Send failed", e); showAlert("Gagal kirim pesan", "error"); }
     };
 
-    const handleDeleteMessage = async (msgId) => {
-        try { await deleteDoc(doc(db, getPublicCollection('chats'), chatId, 'messages'), msgId); }
+    const handleLongPressMsg = (msg) => {
+        setSelectedMsg(msg);
+    };
+
+    const handleActionReply = () => {
+        if(!selectedMsg) return;
+        setReplyTo(selectedMsg);
+        setSelectedMsg(null);
+    };
+
+    const handleActionCopy = () => {
+        if(!selectedMsg) return;
+        navigator.clipboard.writeText(selectedMsg.text);
+        setSelectedMsg(null);
+        showAlert("Teks disalin", "success");
+    };
+
+    const handleActionDelete = async () => {
+        if(!selectedMsg) return;
+        try { await deleteDoc(doc(db, getPublicCollection('chats'), chatId, 'messages'), selectedMsg.id); }
         catch (e) {}
+        setSelectedMsg(null);
     };
 
     return (
         <div className="flex flex-col h-full bg-[#EFE7DD] dark:bg-gray-900 absolute inset-0">
-            {/* Header Room Fixed */}
-            <div className="px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between shadow-sm z-20">
-                <div className="flex items-center gap-3">
-                    <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button>
-                    <div className="flex items-center gap-3">
-                        <Avatar src={recipientProfile?.photoURL} className="w-10 h-10 rounded-full"/>
-                        <div>
-                            <h3 className="font-bold text-base dark:text-white line-clamp-1">{recipientProfile?.username || 'Memuat...'}</h3>
-                            <p className="text-xs text-gray-500">
-                                {isUserOnline(recipientProfile?.lastSeen) ? 'Online' : 'Offline'}
-                            </p>
-                        </div>
+            {/* Header Room Fixed - ATAU Context Menu Banner jika selectedMsg ada */}
+            {selectedMsg ? (
+                <div className="px-4 py-3 bg-sky-600 text-white flex items-center justify-between shadow-md z-30 animate-in slide-in-from-top duration-200">
+                    <div className="flex items-center gap-4">
+                         <button onClick={() => setSelectedMsg(null)}><X size={20}/></button>
+                         <span className="font-bold text-sm">1 Pesan Dipilih</span>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <button onClick={handleActionReply} className="flex flex-col items-center"><Reply size={20}/><span className="text-[10px]">Balas</span></button>
+                        <button onClick={handleActionCopy} className="flex flex-col items-center"><Copy size={20}/><span className="text-[10px]">Salin</span></button>
+                        {selectedMsg.senderId === currentUser.uid && (
+                            <button onClick={handleActionDelete} className="flex flex-col items-center"><Trash2 size={20}/><span className="text-[10px]">Hapus</span></button>
+                        )}
                     </div>
                 </div>
-                <button className="p-2"><MoreHorizontal size={24} className="text-gray-500"/></button>
-            </div>
+            ) : (
+                <div className="px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between shadow-sm z-20">
+                    <div className="flex items-center gap-3">
+                        <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button>
+                        <div className="flex items-center gap-3">
+                            <Avatar src={recipientProfile?.photoURL} className="w-10 h-10 rounded-full"/>
+                            <div>
+                                <h3 className="font-bold text-base dark:text-white line-clamp-1">{recipientProfile?.username || 'Memuat...'}</h3>
+                                <p className="text-xs text-gray-500">
+                                    {isUserOnline(recipientProfile?.lastSeen) ? 'Online' : 'Offline'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <button className="p-2"><MoreHorizontal size={24} className="text-gray-500"/></button>
+                </div>
+            )}
 
             {/* Message Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[url('https://c.termai.cc/i200/BGchat.png')] bg-repeat bg-contain opacity-100 dark:opacity-80">
@@ -829,8 +883,8 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                             <MessageBubble 
                                 msg={msg} 
                                 isMe={isMe} 
-                                onReply={() => setReplyTo(msg)}
-                                onDelete={() => handleDeleteMessage(msg.id)}
+                                isSelected={selectedMsg && selectedMsg.id === msg.id}
+                                onLongPress={() => handleLongPressMsg(msg)}
                             />
                         </React.Fragment>
                     );
@@ -849,8 +903,19 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                         <button onClick={() => setReplyTo(null)}><X size={16}/></button>
                     </div>
                 )}
+                {/* EMOJI PICKER SIMPLE */}
+                {showEmoji && (
+                    <div className="flex gap-2 p-2 overflow-x-auto bg-gray-50 dark:bg-gray-700 mb-2 rounded-xl no-scrollbar">
+                        {commonEmojis.map(emoji => (
+                            <button key={emoji} onClick={() => setText(prev => prev + emoji)} className="text-2xl hover:bg-gray-200 dark:hover:bg-gray-600 p-2 rounded-lg transition">{emoji}</button>
+                        ))}
+                    </div>
+                )}
                 <form onSubmit={sendMessage} className="flex items-end gap-2 p-2">
-                    <button type="button" className="p-3 text-gray-400 hover:text-sky-500"><PlusCircle size={24}/></button>
+                    {/* PERBAIKAN: Ganti tombol + jadi Emoji Button */}
+                    <button type="button" onClick={() => setShowEmoji(!showEmoji)} className={`p-3 transition ${showEmoji ? 'text-sky-500 bg-sky-50 rounded-full' : 'text-gray-400 hover:text-sky-500'}`}>
+                        <Smile size={24}/>
+                    </button>
                     <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-2xl px-4 py-2 flex items-center">
                         <textarea 
                             value={text} 
@@ -860,6 +925,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                             className="w-full bg-transparent outline-none text-base dark:text-white resize-none max-h-32 py-1.5"
                             style={{ minHeight: '24px' }}
                             onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
+                            onClick={() => setShowEmoji(false)} // Tutup emoji pas ngetik
                         />
                     </div>
                     <button type="submit" disabled={!text.trim()} className="p-3 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 transition disabled:opacity-50"><Send size={20}/></button>
@@ -869,30 +935,26 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     );
 };
 
-const MessageBubble = ({ msg, isMe, onReply, onDelete }) => {
-    const [showMenu, setShowMenu] = useState(false);
+const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
     const timerRef = useRef(null);
 
-    const handleStart = () => { timerRef.current = setTimeout(() => setShowMenu(true), 600); };
+    const handleStart = () => { timerRef.current = setTimeout(onLongPress, 600); };
     const handleEnd = () => { clearTimeout(timerRef.current); };
     
     const touchStart = useRef(0);
     const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; handleStart(); };
     const handleTouchEnd = (e) => {
         handleEnd();
-        const diff = e.changedTouches[0].clientX - touchStart.current;
-        if (diff > 80) onReply();
+        // Prevent accidental swipe triggers
     };
-
-    const handleCopy = () => { navigator.clipboard.writeText(msg.text); setShowMenu(false); };
 
     return (
         <div 
-            className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative mb-1`}
+            className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative mb-1 ${isSelected ? 'opacity-70 bg-sky-50 dark:bg-sky-900/20 py-1 -mx-4 px-4' : ''}`}
             onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
             onMouseDown={handleStart} onMouseUp={handleEnd} onMouseLeave={handleEnd}
         >
-            <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
+            <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm cursor-pointer ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
                 {msg.replyTo && (
                     <div className={`mb-1 p-1.5 rounded-lg border-l-4 bg-black/10 text-[11px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
                         <span className="font-bold opacity-90">{msg.replyTo.senderName}</span>
@@ -904,16 +966,6 @@ const MessageBubble = ({ msg, isMe, onReply, onDelete }) => {
                     <span>{new Date(msg.timestamp?.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                     {isMe && (msg.isRead ? <CheckCircle size={12} className="text-white"/> : <Check size={12}/>)}
                 </div>
-
-                {/* Context Menu Overlay */}
-                {showMenu && (
-                    <div className="absolute top-full z-20 mt-1 bg-white dark:bg-gray-800 shadow-xl rounded-lg p-1 flex gap-1 animate-in fade-in zoom-in-95 min-w-[140px]">
-                        <button onClick={onReply} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Reply size={16}/> Reply</button>
-                        <button onClick={handleCopy} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Copy size={16}/> Copy</button>
-                        {isMe && <button onClick={onDelete} className="flex-1 p-2 hover:bg-red-50 text-red-500 rounded flex flex-col items-center gap-1 text-[10px]"><Trash2 size={16}/> Hapus</button>}
-                        <button onClick={() => setShowMenu(false)} className="absolute -top-2 -right-2 bg-gray-500 text-white rounded-full p-1"><X size={12}/></button>
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -1293,7 +1345,38 @@ const LegalPage = ({ onBack }) => {
         <div className="min-h-screen bg-white dark:bg-gray-900 pb-24 pt-20 px-6 max-w-2xl mx-auto animate-in fade-in">
             <button onClick={onBack} className="fixed top-6 left-6 z-50 bg-white/80 dark:bg-black/50 backdrop-blur-md p-2 rounded-full shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition"><ArrowLeft/></button>
             <div className="text-center mb-10"><Scale className="w-12 h-12 mx-auto text-sky-600 mb-4"/><h1 className="text-3xl font-black text-gray-800 dark:text-white mb-2">Pusat Kebijakan</h1><p className="text-gray-500 dark:text-gray-400">Transparansi untuk kepercayaan Anda.</p></div>
-            <div className="space-y-8"><section><h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Code size={18} className="text-sky-500"/> Tentang Pembuat</h2><div className="bg-sky-50 dark:bg-sky-900/20 p-5 rounded-2xl border border-sky-100 dark:border-sky-800 flex items-center gap-4"><img src="https://c.termai.cc/i6/EAb.jpg" alt="Pembuat" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"/><div><h3 className="font-bold text-gray-900 dark:text-white">M. Irham Andika Putra</h3><p className="text-sm text-gray-600 dark:text-gray-300">Siswa SMP Negeri 3 Mentok</p><p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Umur 14 Tahun</p></div></div></section><section><h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Lock size={18} className="text-sky-500"/> Kebijakan Privasi</h2><div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700"><p className="mb-3">Di {APP_NAME}, privasi Anda adalah prioritas kami. Kami mengumpulkan data minimal yang diperlukan untuk fungsionalitas aplikasi.</p><ul className="list-disc pl-5 space-y-1 mb-3"><li><strong>Data Akun:</strong> Nama, Email, Foto Profil (via Google Login).</li><li><strong>Konten:</strong> Postingan, Komentar, dan Pesan yang Anda buat.</li><li><strong>Aktivitas:</strong> Log interaksi seperti Like dan Follow untuk personalisasi.</li></ul></div></section><section><h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Ketentuan Layanan</h2><div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700"><p className="mb-3">Dengan menggunakan aplikasi ini, Anda setuju untuk:</p><ul className="list-disc pl-5 space-y-1"><li>Tidak memposting konten ilegal, pornografi, atau ujaran kebencian.</li><li>Saling menghormati antar pengguna.</li><li>Tidak melakukan spam atau aktivitas bot.</li></ul></div></section></div>
+            <div className="space-y-8">
+                {/* INFO PEMBUAT */}
+                <section><h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Code size={18} className="text-sky-500"/> Tentang Pembuat</h2><div className="bg-sky-50 dark:bg-sky-900/20 p-5 rounded-2xl border border-sky-100 dark:border-sky-800 flex items-center gap-4"><img src="https://c.termai.cc/i6/EAb.jpg" alt="Pembuat" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"/><div><h3 className="font-bold text-gray-900 dark:text-white">M. Irham Andika Putra</h3><p className="text-sm text-gray-600 dark:text-gray-300">Siswa SMP Negeri 3 Mentok</p><p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Umur 14 Tahun (Dibuat 2025)</p></div></div></section>
+                
+                {/* KEBIJAKAN PRIVASI DIPERLENGKAP */}
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Lock size={18} className="text-sky-500"/> Kebijakan Privasi (Update 2025)</h2>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
+                        <p className="mb-3">Di {APP_NAME}, kami menghargai privasi Anda. Berikut adalah detail data yang kami proses:</p>
+                        <ul className="list-disc pl-5 space-y-2 mb-3">
+                            <li><strong>Identitas:</strong> Kami menggunakan Google Login untuk autentikasi yang aman. Kami hanya menyimpan Nama, Email, dan Foto Profil publik Anda.</li>
+                            <li><strong>Konten Pengguna:</strong> Postingan, Komentar, dan Pesan Chat disimpan secara aman di server kami. Anda memiliki hak penuh untuk menghapus konten Anda kapan saja.</li>
+                            <li><strong>Keamanan:</strong> Pesan chat bersifat pribadi namun tidak terenkripsi end-to-end (E2EE) saat ini. Kami memantau aktivitas mencurigakan demi keamanan komunitas.</li>
+                            <li><strong>Cookies & Cache:</strong> Aplikasi menggunakan penyimpanan lokal browser untuk performa yang lebih cepat.</li>
+                        </ul>
+                    </div>
+                </section>
+                
+                {/* KETENTUAN LAYANAN */}
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Ketentuan Layanan</h2>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
+                        <p className="mb-3">Dengan menggunakan aplikasi {APP_NAME} (Edisi 2025), Anda setuju untuk:</p>
+                        <ul className="list-disc pl-5 space-y-2">
+                            <li>Tidak memposting konten ilegal, pornografi, judi, atau ujaran kebencian (SARA).</li>
+                            <li>Saling menghormati antar pengguna. Bullying dan pelecehan tidak ditoleransi.</li>
+                            <li>Tidak melakukan spam, scam, atau penggunaan bot otomatis.</li>
+                            <li>Kami berhak memblokir akun yang melanggar aturan tanpa peringatan.</li>
+                        </ul>
+                    </div>
+                </section>
+            </div>
         </div>
     );
 };
@@ -1505,12 +1588,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div>
                         <div className="flex items-center gap-1">
                             <h4 className="font-bold text-sm text-gray-900 dark:text-white cursor-pointer hover:underline" onClick={() => goToProfile(post.userId)}>{post.user?.username || 'User'}</h4>
-                            {/* RELATIONSHIP BADGE */}
-                            {!isOwner && (
-                                isFriend ? <div className="w-2 h-2 rounded-full bg-emerald-500" title="Berteman"/> : 
-                                isFollowing ? <div className="w-2 h-2 rounded-full bg-sky-500" title="Mengikuti"/> : 
-                                <div className="w-2 h-2 rounded-full bg-gray-300" title="Belum Mengikuti"/>
-                            )}
                             <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1522,8 +1599,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 
                 <div className="flex gap-1">
                     {!isOwner && post.userId !== currentUserId && ( 
-                         <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`p-2 rounded-full transition ${isFollowing ? 'text-sky-500 bg-sky-50' : 'text-gray-400 hover:bg-gray-100'}`}>
-                             {isFriend ? <UserCheck size={16}/> : <UserPlus size={16}/>}
+                         // PERBAIKAN 1: Indikator Follow sebagai Tombol Berwarna, bukan titik
+                         <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`p-2 rounded-full transition ${isFriend ? 'text-emerald-500 bg-emerald-50' : isFollowing ? 'text-sky-500 bg-sky-50' : 'text-gray-400 hover:bg-gray-100'}`}>
+                             {isFriend ? <UserCheck size={16}/> : isFollowing ? <UserCheck size={16}/> : <UserPlus size={16}/>}
                          </button> 
                     )}
                     {(isOwner || isMeDeveloper) && !isGuest && ( 
