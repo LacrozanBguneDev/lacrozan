@@ -33,7 +33,7 @@ import {
     where, 
     orderBy,
     writeBatch,
-    getDocs // FIX: Added getDocs import
+    getDocs 
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -51,7 +51,7 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
     Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
-    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy
+    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus
 } from 'lucide-react';
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
@@ -406,13 +406,18 @@ const isUserOnline = (lastSeen) => {
 // ==========================================
 
 // --- NEW COMPONENT: MODERN SIDEBAR ---
-const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriendsClick }) => {
+const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriendsClick, setShowAuthModal }) => {
     const sidebarRef = useRef(null);
     useEffect(() => {
         const handleClickOutside = (event) => { if (sidebarRef.current && !sidebarRef.current.contains(event.target)) onClose(); };
         if (isOpen) document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [isOpen, onClose]);
+
+    const handleGuestAction = () => {
+        onClose();
+        if (setShowAuthModal) setShowAuthModal(true);
+    };
 
     return (
         <>
@@ -432,7 +437,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                     {user ? (
                         <button onClick={onLogout} className="w-full py-2 bg-rose-50 text-rose-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-rose-100 transition"><LogOut size={14}/> Keluar</button>
                     ) : (
-                        <button onClick={() => { onClose(); setPage('login'); }} className="w-full py-2 bg-sky-500 text-white rounded-lg text-xs font-bold hover:bg-sky-600 transition">Masuk Sekarang</button>
+                        <button onClick={handleGuestAction} className="w-full py-2 bg-sky-500 text-white rounded-lg text-xs font-bold hover:bg-sky-600 transition">Masuk / Keluar Tamu</button>
                     )}
                 </div>
 
@@ -456,7 +461,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.0 (Canvas Build)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.1 (UI Fix)</p>
                 </div>
             </div>
         </>
@@ -470,7 +475,7 @@ const SidebarItem = ({ icon: Icon, label, onClick }) => (
 );
 
 // ==========================================
-// BAGIAN: SISTEM CHAT REALTIME (BARU)
+// BAGIAN: SISTEM CHAT REALTIME (DIPERBAIKI)
 // ==========================================
 
 const ChatSystem = ({ currentUser, onBack }) => {
@@ -480,7 +485,6 @@ const ChatSystem = ({ currentUser, onBack }) => {
     const [activeRecipient, setActiveRecipient] = useState(null);
     const [chats, setChats] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [onlineUsers, setOnlineUsers] = useState({});
 
     // Fetch Chat List
     useEffect(() => {
@@ -537,7 +541,7 @@ const ChatSystem = ({ currentUser, onBack }) => {
     };
 
     return (
-        <div className="fixed inset-0 bg-white dark:bg-gray-900 z-[60] flex flex-col pt-16 md:pt-20">
+        <div className="fixed inset-0 bg-white dark:bg-gray-900 z-[60] flex flex-col h-full w-full">
             {view === 'list' ? (
                 <ChatList 
                     currentUser={currentUser} 
@@ -566,42 +570,20 @@ const ChatSystem = ({ currentUser, onBack }) => {
 };
 
 const ChatList = ({ currentUser, chats, loading, onSelectChat, onNewChat, onDeleteChat, onBack }) => {
-    const [friends, setFriends] = useState([]);
     const [showNewChat, setShowNewChat] = useState(false);
 
-    useEffect(() => {
-        // Fetch friends for "New Chat" list
-        const fetchFriends = async () => {
-             const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
-             if (userDoc.exists()) {
-                 const data = userDoc.data();
-                 const friendIds = (data.following || []).filter(id => (data.followers || []).includes(id));
-                 if (friendIds.length > 0) {
-                     // Query friends data (batch logic or simple fetches)
-                     const q = query(collection(db, getPublicCollection('userProfiles')), where('uid', 'in', friendIds.slice(0, 10))); // Limit 10 for simplicity
-                     const snap = await getDocs(query(collection(db, getPublicCollection('userProfiles')), where('uid', 'in', friendIds.slice(0,10))));
-                     // Note: getDocs needed import, but let's use onSnapshot for simplicity elsewhere or assume friends list is passed.
-                     // Using fallback: fetch individually if needed, but for now show "Following" list
-                 }
-             }
-        };
-    }, []);
-
-    // Helper to get other user ID
-    const getOtherId = (chat) => chat.participants.find(id => id !== currentUser.uid);
-
     return (
-        <div className="flex flex-col h-full bg-white dark:bg-gray-900">
-            {/* Header */}
-            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+        <div className="flex flex-col h-full bg-white dark:bg-gray-900 relative">
+            {/* Header Chat List */}
+            <div className="px-4 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 sticky top-0 z-10 shadow-sm">
                 <div className="flex items-center gap-3">
-                    <button onClick={onBack}><ArrowLeft/></button>
+                    <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition"><ArrowLeft/></button>
                     <h1 className="text-xl font-bold dark:text-white">Pesan</h1>
                 </div>
                 <button onClick={() => setShowNewChat(true)} className="p-2 bg-sky-50 text-sky-600 rounded-full hover:bg-sky-100 transition"><Edit size={20}/></button>
             </div>
 
-            {/* Chat List */}
+            {/* Chat List Items */}
             <div className="flex-1 overflow-y-auto">
                 {loading ? <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto text-sky-500"/></div> : 
                  chats.length === 0 ? (
@@ -648,7 +630,7 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
     const handleStart = () => { longPressTimer.current = setTimeout(onLongPress, 800); };
     const handleEnd = () => { clearTimeout(longPressTimer.current); };
 
-    if (!profile) return <div className="p-4 animate-pulse flex gap-3"><div className="w-12 h-12 bg-gray-200 rounded-full"/><div className="flex-1 bg-gray-100 h-10 rounded-xl"/></div>;
+    if (!profile) return <div className="p-4 animate-pulse flex gap-3"><div className="w-14 h-14 bg-gray-200 rounded-full"/><div className="flex-1 bg-gray-100 h-10 rounded-xl"/></div>;
 
     const lastMsg = chat.lastMessage || {};
     const isMe = lastMsg.senderId === currentUserId;
@@ -658,20 +640,20 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
         <div 
             onClick={onClick}
             onTouchStart={handleStart} onTouchEnd={handleEnd} onMouseDown={handleStart} onMouseUp={handleEnd} onMouseLeave={handleEnd}
-            className={`p-4 flex items-center gap-3 cursor-pointer transition hover:bg-gray-50 dark:hover:bg-gray-800 ${isUnread ? 'bg-sky-50/50 dark:bg-sky-900/10' : ''}`}
+            className={`p-4 flex items-center gap-4 cursor-pointer transition hover:bg-gray-50 dark:hover:bg-gray-800 ${isUnread ? 'bg-sky-50/40 dark:bg-sky-900/10' : ''}`}
         >
             <div className="relative">
-                <Avatar src={profile.photoURL} className="w-12 h-12 rounded-full object-cover"/>
-                {isUserOnline(profile.lastSeen) && <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></div>}
+                <Avatar src={profile.photoURL} className="w-14 h-14 rounded-full object-cover border border-gray-100 dark:border-gray-700"/>
+                {isUserOnline(profile.lastSeen) && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full"></div>}
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline mb-1">
-                    <h3 className="font-bold text-gray-900 dark:text-white truncate">{profile.username}</h3>
+                    <h3 className={`text-base truncate ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-800 dark:text-gray-200'}`}>{profile.username}</h3>
                     <span className={`text-[10px] font-medium ${isUnread ? 'text-sky-500' : 'text-gray-400'}`}>{formatTimeAgo(chat.updatedAt).relative}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                    {isMe && (lastMsg.isRead ? <CheckCircle size={12} className="text-sky-500"/> : <Check size={12} className="text-gray-400"/>)}
-                    <p className={`text-sm truncate ${isUnread ? 'font-bold text-gray-800 dark:text-white' : 'text-gray-500'}`}>
+                    {isMe && (lastMsg.isRead ? <CheckCircle size={14} className="text-sky-500"/> : <Check size={14} className="text-gray-400"/>)}
+                    <p className={`text-sm truncate leading-snug ${isUnread ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500'}`}>
                         {chat.typing?.[otherId] ? <span className="text-sky-500 italic">Sedang mengetik...</span> : (lastMsg.text || 'Mulai percakapan')}
                     </p>
                 </div>
@@ -683,18 +665,15 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
 const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
     const [friends, setFriends] = useState([]);
     useEffect(() => {
-        // Simple logic: Load following that follows back
         const load = async () => {
             const myProfile = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
             if (myProfile.exists()) {
                 const data = myProfile.data();
                 const myFollowers = data.followers || [];
                 const myFollowing = data.following || [];
-                const friendIds = myFollowing.filter(id => myFollowers.includes(id)).slice(0, 20); // Limit 20
+                const friendIds = myFollowing.filter(id => myFollowers.includes(id)).slice(0, 20);
                 
                 if (friendIds.length > 0) {
-                     // Note: Normally use `where('uid', 'in', ...)` but Firestore limits 'in' to 10.
-                     // Fetch manually for reliability here
                      const friendProfiles = [];
                      for (const id of friendIds) {
                          const snap = await getDoc(doc(db, getPublicCollection('userProfiles'), id));
@@ -718,7 +697,7 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
                      {friends.length === 0 ? <p className="text-center text-gray-400 mt-10">Belum ada teman mutual.</p> : 
                       friends.map(f => (
                           <div key={f.id} onClick={() => { onSelect(f.id, f); onClose(); }} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl cursor-pointer">
-                              <Avatar src={f.photoURL} className="w-10 h-10 rounded-full"/>
+                              <Avatar src={f.photoURL} className="w-12 h-12 rounded-full"/>
                               <div><h4 className="font-bold dark:text-white">{f.username}</h4><p className="text-xs text-gray-400">Tap untuk chat</p></div>
                           </div>
                       ))
@@ -741,7 +720,6 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
 
     const recipientId = recipient?.uid || recipientProfile?.uid;
 
-    // Load Recipient Profile Realtime
     useEffect(() => {
         if (!recipientId) return;
         const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), recipientId), (doc) => {
@@ -750,7 +728,6 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         return () => unsub();
     }, [recipientId]);
 
-    // Load Messages & Update Read Status
     useEffect(() => {
         if (!chatId) return;
         const q = query(collection(db, getPublicCollection('chats'), chatId, 'messages'), orderBy('timestamp', 'asc'));
@@ -758,10 +735,8 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setMessages(msgs);
             
-            // Mark unread messages as read
             const unreadIds = msgs.filter(m => m.senderId !== currentUser.uid && !m.isRead).map(m => m.id);
             if (unreadIds.length > 0) {
-                // Batch update read status logic would be here, but for simplicity:
                 unreadIds.forEach(id => {
                     updateDoc(doc(db, getPublicCollection('chats'), chatId, 'messages'), id, { isRead: true });
                 });
@@ -771,12 +746,10 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         return () => unsub();
     }, [chatId]);
 
-    // Auto scroll bottom
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Typing Indicator
     const handleTyping = (e) => {
         setText(e.target.value);
         if (!isTyping) {
@@ -805,19 +778,16 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                 replyTo: replyTo ? { id: replyTo.id, text: replyTo.text, senderName: replyTo.senderId === currentUser.uid ? 'Anda' : recipientProfile.username } : null
             };
             
-            // Add Message
             await addDoc(collection(db, getPublicCollection('chats'), chatId, 'messages'), msgData);
             
-            // Update Chat Metadata
             await updateDoc(doc(db, getPublicCollection('chats'), chatId), {
                 lastMessage: { text: msgText, senderId: currentUser.uid, timestamp: serverTimestamp(), isRead: false },
                 updatedAt: serverTimestamp(),
                 [`typing.${currentUser.uid}`]: false
             });
             
-            // Send Notification if offline (simplified check)
             if (!isUserOnline(recipientProfile?.lastSeen)) {
-                // sendNotification(...) function already exists
+                sendNotification(recipientId, 'chat', `mengirim pesan: ${msgText}`, {uid: currentUser.uid, username: currentUser.displayName || 'Teman', photoURL: currentUser.photoURL});
             }
             
         } catch (e) { console.error("Send failed", e); showAlert("Gagal kirim pesan", "error"); }
@@ -829,33 +799,33 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-[#EFE7DD] dark:bg-gray-900 bg-opacity-30">
-            {/* Header Room */}
-            <div className="px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between shadow-sm z-10">
+        <div className="flex flex-col h-full bg-[#EFE7DD] dark:bg-gray-900 absolute inset-0">
+            {/* Header Room Fixed */}
+            <div className="px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between shadow-sm z-20">
                 <div className="flex items-center gap-3">
-                    <button onClick={onBack}><ArrowLeft/></button>
-                    <div className="flex items-center gap-2">
+                    <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button>
+                    <div className="flex items-center gap-3">
                         <Avatar src={recipientProfile?.photoURL} className="w-10 h-10 rounded-full"/>
                         <div>
-                            <h3 className="font-bold text-sm dark:text-white line-clamp-1">{recipientProfile?.username || 'Memuat...'}</h3>
+                            <h3 className="font-bold text-base dark:text-white line-clamp-1">{recipientProfile?.username || 'Memuat...'}</h3>
                             <p className="text-xs text-gray-500">
                                 {isUserOnline(recipientProfile?.lastSeen) ? 'Online' : 'Offline'}
                             </p>
                         </div>
                     </div>
                 </div>
-                <button className="p-2"><MoreHorizontal size={20} className="text-gray-500"/></button>
+                <button className="p-2"><MoreHorizontal size={24} className="text-gray-500"/></button>
             </div>
 
             {/* Message Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[url('https://c.termai.cc/i200/BGchat.png')] bg-repeat bg-contain opacity-100 dark:opacity-80">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[url('https://c.termai.cc/i200/BGchat.png')] bg-repeat bg-contain opacity-100 dark:opacity-80">
                 {messages.map((msg, idx) => {
                     const isMe = msg.senderId === currentUser.uid;
-                    const showDate = idx === 0 || (msg.timestamp?.toMillis() - messages[idx-1].timestamp?.toMillis() > 3600000); // 1 hour gap
+                    const showDate = idx === 0 || (msg.timestamp?.toMillis() - messages[idx-1].timestamp?.toMillis() > 3600000);
                     
                     return (
                         <React.Fragment key={msg.id}>
-                            {showDate && <div className="text-center my-4"><span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] px-3 py-1 rounded-full">{formatTimeAgo(msg.timestamp).full}</span></div>}
+                            {showDate && <div className="text-center my-4"><span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] px-3 py-1 rounded-full font-bold shadow-sm">{formatTimeAgo(msg.timestamp).full}</span></div>}
                             <MessageBubble 
                                 msg={msg} 
                                 isMe={isMe} 
@@ -869,7 +839,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             </div>
 
             {/* Input Area */}
-            <div className="bg-white dark:bg-gray-800 p-2 border-t border-gray-100 dark:border-gray-700">
+            <div className="bg-white dark:bg-gray-800 p-2 border-t border-gray-100 dark:border-gray-700 z-20 pb-safe">
                 {replyTo && (
                     <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-l-4 border-sky-500 mb-2 mx-2">
                         <div className="text-xs">
@@ -880,19 +850,19 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                     </div>
                 )}
                 <form onSubmit={sendMessage} className="flex items-end gap-2 p-2">
-                    <button type="button" className="p-2 text-gray-400 hover:text-sky-500"><PlusCircle/></button>
+                    <button type="button" className="p-3 text-gray-400 hover:text-sky-500"><PlusCircle size={24}/></button>
                     <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-2xl px-4 py-2 flex items-center">
                         <textarea 
                             value={text} 
                             onChange={handleTyping} 
                             placeholder="Ketik pesan..." 
                             rows="1"
-                            className="w-full bg-transparent outline-none text-sm dark:text-white resize-none max-h-24 py-1"
+                            className="w-full bg-transparent outline-none text-base dark:text-white resize-none max-h-32 py-1.5"
                             style={{ minHeight: '24px' }}
                             onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
                         />
                     </div>
-                    <button type="submit" disabled={!text.trim()} className="p-3 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 transition disabled:opacity-50"><Send size={18}/></button>
+                    <button type="submit" disabled={!text.trim()} className="p-3 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 transition disabled:opacity-50"><Send size={20}/></button>
                 </form>
             </div>
         </div>
@@ -900,22 +870,14 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
 };
 
 const MessageBubble = ({ msg, isMe, onReply, onDelete }) => {
-    // Basic Long Press Logic
     const [showMenu, setShowMenu] = useState(false);
     const timerRef = useRef(null);
 
     const handleStart = () => { timerRef.current = setTimeout(() => setShowMenu(true), 600); };
     const handleEnd = () => { clearTimeout(timerRef.current); };
     
-    // Basic Swipe Logic Simulation (Simplified)
     const touchStart = useRef(0);
     const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; handleStart(); };
-    const handleTouchMove = (e) => {
-        const diff = e.touches[0].clientX - touchStart.current;
-        if (diff > 50) { // Swiped Right
-            // Trigger reply visual feedback could go here
-        }
-    };
     const handleTouchEnd = (e) => {
         handleEnd();
         const diff = e.changedTouches[0].clientX - touchStart.current;
@@ -926,30 +888,30 @@ const MessageBubble = ({ msg, isMe, onReply, onDelete }) => {
 
     return (
         <div 
-            className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative`}
-            onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+            className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative mb-1`}
+            onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
             onMouseDown={handleStart} onMouseUp={handleEnd} onMouseLeave={handleEnd}
         >
-            <div className={`relative max-w-[75%] px-3 py-2 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
+            <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
                 {msg.replyTo && (
-                    <div className={`mb-1 p-1 rounded border-l-2 bg-black/10 text-[10px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
-                        <span className="font-bold opacity-80">{msg.replyTo.senderName}</span>
-                        <p className="truncate opacity-70">{msg.replyTo.text}</p>
+                    <div className={`mb-1 p-1.5 rounded-lg border-l-4 bg-black/10 text-[11px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
+                        <span className="font-bold opacity-90">{msg.replyTo.senderName}</span>
+                        <p className="truncate opacity-80">{msg.replyTo.text}</p>
                     </div>
                 )}
                 <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                <div className={`flex items-center justify-end gap-1 mt-1 text-[9px] ${isMe ? 'text-sky-100' : 'text-gray-400'}`}>
+                <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${isMe ? 'text-sky-100' : 'text-gray-400'}`}>
                     <span>{new Date(msg.timestamp?.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                    {isMe && (msg.isRead ? <CheckCircle size={10} className="text-white"/> : <Check size={10}/>)}
+                    {isMe && (msg.isRead ? <CheckCircle size={12} className="text-white"/> : <Check size={12}/>)}
                 </div>
 
                 {/* Context Menu Overlay */}
                 {showMenu && (
-                    <div className="absolute top-full z-20 mt-1 bg-white dark:bg-gray-800 shadow-xl rounded-lg p-1 flex gap-1 animate-in fade-in zoom-in-95 min-w-[120px]">
-                        <button onClick={onReply} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Reply size={14}/> Reply</button>
-                        <button onClick={handleCopy} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Copy size={14}/> Copy</button>
-                        {isMe && <button onClick={onDelete} className="flex-1 p-2 hover:bg-red-50 text-red-500 rounded flex flex-col items-center gap-1 text-[10px]"><Trash2 size={14}/> Hapus</button>}
-                        <button onClick={() => setShowMenu(false)} className="absolute -top-2 -right-2 bg-gray-500 text-white rounded-full p-0.5"><X size={10}/></button>
+                    <div className="absolute top-full z-20 mt-1 bg-white dark:bg-gray-800 shadow-xl rounded-lg p-1 flex gap-1 animate-in fade-in zoom-in-95 min-w-[140px]">
+                        <button onClick={onReply} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Reply size={16}/> Reply</button>
+                        <button onClick={handleCopy} className="flex-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300 flex flex-col items-center gap-1 text-[10px]"><Copy size={16}/> Copy</button>
+                        {isMe && <button onClick={onDelete} className="flex-1 p-2 hover:bg-red-50 text-red-500 rounded flex flex-col items-center gap-1 text-[10px]"><Trash2 size={16}/> Hapus</button>}
+                        <button onClick={() => setShowMenu(false)} className="absolute -top-2 -right-2 bg-gray-500 text-white rounded-full p-1"><X size={12}/></button>
                     </div>
                 )}
             </div>
@@ -1417,7 +1379,7 @@ const MediaGrid = ({ mediaUrls, onImageClick }) => {
     return ( <div className={`mb-4 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-xl overflow-hidden`}>{mediaUrls.slice(0, 9).map((url, i) => ( <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}><img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />{i === 8 && count > 9 && ( <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">+{count - 9}</div> )}</div> ))}</div> );
 };
 
-const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick }) => {
+const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, onUpdate }) => {
     const { showConfirm, showAlert } = useCustomAlert();
     const [liked, setLiked] = useState(false);
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -1454,10 +1416,17 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const handleLike = async () => {
         if (isGuest) { onRequestLogin(); return; }
         const newLiked = !liked; setLiked(newLiked); setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
+        
+        // Optimistic UI Update in Parent
+        if(onUpdate) {
+            onUpdate(post.id, { 
+                likes: newLiked ? [...(post.likes||[]), currentUserId] : (post.likes||[]).filter(id => id !== currentUserId) 
+            });
+        }
+
         const ref = doc(db, getPublicCollection('posts'), post.id);
         const authorRef = doc(db, getPublicCollection('userProfiles'), post.userId);
         try {
-            // FIX: HARDCORE MODE - Like cuma +1 Poin (sebelumnya +2)
             if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(1) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
             else { await updateDoc(ref, { likes: arrayRemove(currentUserId) }); }
         } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
@@ -1472,6 +1441,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             const commentData = { postId: post.id, userId: currentUserId, text: newComment, username: profile.username || 'User', timestamp: serverTimestamp(), parentId: replyTo ? replyTo.id : null, replyToUsername: replyTo ? replyTo.username : null };
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
+            
+            // Optimistic update
+            if(onUpdate) { onUpdate(post.id, { commentsCount: (post.commentsCount || 0) + 1 }); }
+
             // FIX: HARDCORE MODE - Komen cuma +1 Poin (sebelumnya +5)
             if (post.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(1) }); if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
             if (replyTo && replyTo.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(1) }); sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
@@ -1482,10 +1455,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const handleDelete = async () => {
         const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini? Reputasi yang didapat akan DITARIK KEMBALI.";
         const ok = await showConfirm(confirmMsg);
-        if (ok) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); await showAlert(`Postingan dihapus.`, 'success'); } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } } 
+        if (ok) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); await showAlert(`Postingan dihapus.`, 'success'); if(onUpdate) onUpdate(post.id, null); /* NULL means deleted */ } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } } 
     };
-    const handleDeleteComment = async (commentId) => { const ok = await showConfirm("Hapus komentar?"); if(ok) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); } };
-    const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); };
+    const handleDeleteComment = async (commentId) => { const ok = await showConfirm("Hapus komentar?"); if(ok) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); if(onUpdate) onUpdate(post.id, { commentsCount: Math.max(0, (post.commentsCount||0)-1) }); } };
+    const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); if(onUpdate) onUpdate(post.id, { title: editedTitle, content: editedContent }); };
     const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); await showAlert('Link Disalin! Orang lain bisa membukanya langsung.', 'success'); } catch (e) { await showAlert('Gagal menyalin link', 'error'); } };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
@@ -1519,8 +1492,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
     // UI REDESIGN: Modern Feed Style (Facebook/Threads)
+    // REMOVED HOVER EFFECT: Removed "hover:bg-gray-50/50" from main div
     return (
-        <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors hover:bg-gray-50/50 dark:hover:bg-gray-900/50">
+        <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors">
             {post.isShort && <div className="mb-2"><span className="bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center w-fit"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</span></div>}
             
             <div className="flex justify-between items-start mb-3">
@@ -1531,7 +1505,13 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div>
                         <div className="flex items-center gap-1">
                             <h4 className="font-bold text-sm text-gray-900 dark:text-white cursor-pointer hover:underline" onClick={() => goToProfile(post.userId)}>{post.user?.username || 'User'}</h4>
-                            <span className="text-gray-400 text-xs">• {formatTimeAgo(post.timestamp).relative}</span>
+                            {/* RELATIONSHIP BADGE */}
+                            {!isOwner && (
+                                isFriend ? <div className="w-2 h-2 rounded-full bg-emerald-500" title="Berteman"/> : 
+                                isFollowing ? <div className="w-2 h-2 rounded-full bg-sky-500" title="Mengikuti"/> : 
+                                <div className="w-2 h-2 rounded-full bg-gray-300" title="Belum Mengikuti"/>
+                            )}
+                            <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
                         </div>
                         <div className="flex items-center gap-2">
                              {isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}
@@ -1799,7 +1779,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 // ==========================================
 
 const HomeScreen = ({ 
-    currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, homeFeedState, setHomeFeedState
+    currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, homeFeedState, setHomeFeedState, handlePostUpdate
 }) => {
     const { posts: feedPosts, cursor: nextCursor, sortType, hasLoaded } = homeFeedState;
     const [loading, setLoading] = useState(false);
@@ -1863,7 +1843,7 @@ const HomeScreen = ({
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-2 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-4"><CheckCircle size={14}/> Postingan Baru Disematkan</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick}/>
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick} onUpdate={handlePostUpdate} />
                         </div>
                     ))}
                 </div>
@@ -1988,6 +1968,27 @@ const MainAppContent = () => {
     const [isDataTimeout, setIsDataTimeout] = useState(false);
 
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
+    const lastNotifTimeRef = useRef(0); // Debounce notif
+
+    // FIX: REALTIME UI STATE UPDATE
+    const handlePostUpdate = (postId, newData) => {
+        if (!newData) {
+            // Case: Delete Post
+            setHomeFeedState(prev => ({
+                ...prev,
+                posts: prev.posts.filter(p => p.id !== postId)
+            }));
+            setPosts(prev => prev.filter(p => p.id !== postId));
+        } else {
+            // Case: Update Post (Like/Comment)
+            setHomeFeedState(prev => ({
+                ...prev,
+                posts: prev.posts.map(p => p.id === postId ? { ...p, ...newData } : p)
+            }));
+            // Update cache posts too just in case
+            setPosts(prev => prev.map(p => p.id === postId ? { ...p, ...newData } : p));
+        }
+    };
 
     useEffect(() => {
         const handleError = (event) => { if (!user || user.email !== DEVELOPER_EMAIL) { event.preventDefault(); logSystemError(event.error || new Error(event.message), 'global_error', user); } };
@@ -2039,7 +2040,23 @@ const MainAppContent = () => {
     useEffect(() => {
         if (!user) return;
         const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
-        const unsubscribe = onSnapshot(q, (snapshot) => { setNotifCount(snapshot.size); snapshot.docChanges().forEach((change) => { if (change.type === "added") { const data = change.doc.data(); const now = Date.now(); const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0; if (now - notifTime < 10000) { if (Notification.permission === "granted") { new Notification(APP_NAME, { body: `${data.fromUsername} ${data.message}`, icon: APP_LOGO, tag: 'bgune-notif' }); } } } }); });
+        const unsubscribe = onSnapshot(q, (snapshot) => { 
+            setNotifCount(snapshot.size); 
+            snapshot.docChanges().forEach((change) => { 
+                if (change.type === "added") { 
+                    const data = change.doc.data(); 
+                    const now = Date.now(); 
+                    const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0; 
+                    // Spam Protection: Debounce 2 seconds
+                    if (now - notifTime < 10000 && now - lastNotifTimeRef.current > 2000) { 
+                        lastNotifTimeRef.current = now;
+                        if (Notification.permission === "granted") { 
+                            new Notification(APP_NAME, { body: `${data.fromUsername} ${data.message}`, icon: APP_LOGO, tag: 'bgune-notif' }); 
+                        } 
+                    } 
+                } 
+            }); 
+        });
         return () => unsubscribe();
     }, [user]);
 
@@ -2100,6 +2117,7 @@ const MainAppContent = () => {
                         setPage={setPage} 
                         user={profile} 
                         onLogout={handleLogout} 
+                        setShowAuthModal={setShowAuthModal}
                         handleFriendsClick={() => {
                             setHomeFeedState(prev => ({ ...prev, sortType: 'friends', posts: [], cursor: null, hasLoaded: false }));
                             setPage('home');
@@ -2121,8 +2139,8 @@ const MainAppContent = () => {
                                 <NavBtnDesktop icon={Home} active={page==='home'} onClick={()=>setPage('home')} label="Beranda" />
                                 <NavBtnDesktop icon={Search} active={page==='search'} onClick={()=>setPage('search')} label="Cari" />
                                 <NavBtnDesktop icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')} label="Top" />
-                                <button onClick={() => isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-2.5 rounded-full hover:bg-sky-600 transition shadow-md shadow-sky-200">
-                                    <PlusCircle size={22} />
+                                <button onClick={() => isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-white border-2 border-sky-500 text-sky-500 p-2 rounded-full hover:bg-sky-50 transition">
+                                    <Plus size={20} strokeWidth={3} />
                                 </button>
                                 <NavBtnDesktop icon={User} active={page==='profile'} onClick={()=> isGuest ? setShowAuthModal(true) : setPage('profile')} label="Saya" />
                             </div>
@@ -2143,7 +2161,7 @@ const MainAppContent = () => {
                     )}
 
                     <main className={page!=='legal' ? 'pt-16 md:pt-20' : ''}>
-                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState}/><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
+                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                         {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
@@ -2151,12 +2169,12 @@ const MainAppContent = () => {
                         {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
                         {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
                         {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
-                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}}/>}
+                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />}
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON DESKTOP */}
-                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3 rounded-full shadow-lg shadow-sky-300 hover:scale-110 transition -mt-6 border-4 border-[#F0F4F8] dark:border-gray-900"><PlusCircle size={24}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
