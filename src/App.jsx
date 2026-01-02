@@ -180,7 +180,7 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = REACT_APP_DEV_EMAIL; // Updated to match Rules
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; // Updated to match Rules
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
