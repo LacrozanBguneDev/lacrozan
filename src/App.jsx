@@ -1019,8 +1019,8 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     );
 };
 
-// FIX: Helper khusus untuk render link chat yang aman
-const renderChatText = (text) => {
+// FIX: Helper khusus untuk render link chat yang aman & Warna PUTIH di bubble sender
+const renderChatText = (text, isMe) => {
     if(!text) return "";
     // Regex URL sederhana
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -1029,7 +1029,10 @@ const renderChatText = (text) => {
     return parts.map((part, i) => {
         if (part.match(urlRegex)) {
             return (
-                <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
+                <a key={i} href={part} target="_blank" rel="noopener noreferrer" 
+                   // FIX: Warna putih jika isMe=true, biru jika pesan teman. Tambahkan break-all.
+                   className={`${isMe ? 'text-white' : 'text-blue-500 dark:text-blue-400'} underline hover:opacity-80 break-all`} 
+                   onClick={(e) => e.stopPropagation()}>
                     {part}
                 </a>
             );
@@ -1061,9 +1064,9 @@ const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
                         <p className="truncate opacity-80">{msg.replyTo.text}</p>
                     </div>
                 )}
-                {/* FIX: Render text dengan link clickable */}
-                <p className="leading-relaxed whitespace-pre-wrap word-break-all">
-                    {renderChatText(msg.text)}
+                {/* FIX: Render text dengan link clickable & break-words untuk overflow */}
+                <p className="leading-relaxed whitespace-pre-wrap break-all">
+                    {renderChatText(msg.text, isMe)}
                 </p>
                 <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${isMe ? 'text-sky-100' : 'text-gray-400'}`}>
                     <span>{msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '...'}</span>
@@ -1292,6 +1295,44 @@ const AudioPlayer = ({ src }) => {
     );
 };
 
+// FIX: New Video Player Component with Loading Indicator (Request #4)
+const ModernVideoPlayer = ({ src }) => {
+    const [buffering, setBuffering] = useState(true); // Start true to show load initially
+    const videoRef = useRef(null);
+
+    return (
+        <div className="relative rounded-xl overflow-hidden bg-slate-900 border border-sky-900/50 shadow-lg shadow-sky-900/20 group">
+            {/* Modern Blue Header Tag */}
+            <div className="absolute top-4 left-4 z-10 bg-sky-600/90 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold flex items-center gap-1 shadow-lg">
+                 <Film size={12} className="text-white" />
+                 <span>HD VIDEO</span>
+            </div>
+            
+            {/* Loading/Buffering Overlay */}
+            {buffering && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+                    <div className="flex flex-col items-center gap-2 animate-in zoom-in duration-300">
+                         <Loader2 size={40} className="text-sky-500 animate-spin drop-shadow-lg" />
+                         <span className="text-xs font-bold text-white shadow-black drop-shadow-md">Memuat Video...</span>
+                    </div>
+                </div>
+            )}
+            
+            <video
+                ref={videoRef}
+                src={src}
+                controls
+                controlsList="nodownload"
+                className="w-full h-auto max-h-[80vh] object-contain bg-black"
+                onWaiting={() => setBuffering(true)}
+                onPlaying={() => setBuffering(false)}
+                onLoadedData={() => setBuffering(false)}
+                onLoadStart={() => setBuffering(true)}
+            />
+        </div>
+    );
+};
+
 // FIX: Splash Screen Update (Background Image & Blur)
 const SplashScreen = () => (
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[url('https://c.termai.cc/i120/womQPBg.jpg')] bg-cover bg-center">
@@ -1345,16 +1386,17 @@ const SkeletonPost = () => (
     </div>
 );
 
-// PERBAIKAN 1 & 2: Anti-XSS & Layout
+// PERBAIKAN 1 & 3: Anti-XSS (Security Wise) & Layout
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
     // SECURITY FIX: Escape HTML tags untuk mencegah XSS
+    // Ini adalah langkah "BIJAK" pertama: membersihkan tag HTML mentah
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     
     // Convert links with XSS protection (Block javascript:)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        // Cek protokol berbahaya
+        // Cek protokol berbahaya - LANGKAH BIJAK KEDUA
         if (/^(javascript|vbscript|data):/i.test(url)) return `${label} (Link Diblokir)`;
         return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
     });
@@ -1525,7 +1567,14 @@ const OnboardingScreen = ({ onComplete, user }) => {
                 <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
                 <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
-                <form onSubmit={handleSubmit} className="space-y-4"><div className="text-left"><label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label><input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-sky-500 outline-none"/></div><button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button></form>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="text-left">
+                        <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
+                        {/* FIX: Input text warna kuning (permintaan user) */}
+                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-500 focus:ring-2 focus:ring-sky-500 outline-none placeholder-gray-300"/>
+                    </div>
+                    <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button>
+                </form>
             </div>
         </div>
     );
@@ -1835,21 +1884,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                          {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
                          
                          {/* FIX: Video UI Upgrade (Vidstack Style - Dark Theme, Rounded) */}
-                         {isVideo && (
-                             <div className="relative rounded-xl overflow-hidden bg-black group shadow-lg ring-1 ring-white/10">
-                                 <div className="absolute top-4 left-4 z-10 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold flex items-center gap-1">
-                                     <Film size={12} className="text-red-500" />
-                                     <span>VIDEO</span>
-                                 </div>
-                                 <video 
-                                    src={post.mediaUrl} 
-                                    controls 
-                                    controlsList="nodownload"
-                                    className="w-full h-auto max-h-[80vh] object-contain"
-                                    style={{backgroundColor: '#000'}}
-                                 />
-                             </div>
-                         )}
+                         {isVideo && <ModernVideoPlayer src={post.mediaUrl} />}
                          
                          {displayEmbed?.type === 'youtube' && <div className="aspect-video rounded-lg overflow-hidden"><iframe src={displayEmbed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                          {displayEmbed?.type === 'instagram' && ( <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
