@@ -53,7 +53,7 @@ import {
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
     Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
     WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical,
-    VolumeX, Maximize2, SkipBack, SkipForward
+    Maximize2, VolumeX 
 } from 'lucide-react';
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
@@ -338,7 +338,6 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
-// PERBAIKAN 4: Format Tanggal Ringkas (Sesuai Permintaan)
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     try {
@@ -347,27 +346,16 @@ const formatTimeAgo = (timestamp) => {
         const seconds = Math.floor((now - date) / 1000);
         const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         
-        // Logika Ringkas: Jangan pernah return tanggal lengkap untuk 'relative'
+        // FIX: Format Waktu Relatif (Hari/Jam/Menit) sesuai permintaan
+        if (seconds > 86400) {
+            const days = Math.floor(seconds / 86400);
+            return { relative: `${days} hari`, full: fullDate };
+        }
         if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
-        
         const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return { relative: `${minutes}m`, full: fullDate }; // Menit
-        
+        if (minutes < 60) return { relative: `${minutes} menit`, full: fullDate };
         const hours = Math.floor(minutes / 60);
-        if (hours < 24) return { relative: `${hours}j`, full: fullDate }; // Jam
-        
-        const days = Math.floor(hours / 24);
-        if (days < 7) return { relative: `${days}h`, full: fullDate }; // Hari
-        
-        const weeks = Math.floor(days / 7);
-        if (weeks < 4) return { relative: `${weeks}mg`, full: fullDate }; // Minggu
-        
-        const months = Math.floor(days / 30);
-        if (months < 12) return { relative: `${months}bln`, full: fullDate }; // Bulan
-        
-        const years = Math.floor(days / 365);
-        return { relative: `${years}thn`, full: fullDate }; // Tahun
-        
+        return { relative: `${hours} jam`, full: fullDate };
     } catch (e) { return { relative: 'Baru saja', full: '' }; }
 };
 
@@ -468,7 +456,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.3 (Vidstack Style & Fixes)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (UI Enhancements)</p>
                 </div>
             </div>
         </>
@@ -1223,155 +1211,179 @@ const Lightbox = ({ images, initialIndex, onClose }) => {
     );
 };
 
-// PERBAIKAN 2: KOMPONEN PLAYER MODERN (Vidstack Style Custom)
-// Ini membuat tampilan video/audio jadi keren tanpa library berat
-const ModernMediaPlayer = ({ src, type }) => {
-    const videoRef = useRef(null);
+// FIX: Komponen Baru ModernAudioPlayer (Vidstack Style)
+const ModernAudioPlayer = ({ src }) => {
+    const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [volume, setVolume] = useState(1);
-    const [isMuted, setIsMuted] = useState(false);
-    const [showControls, setShowControls] = useState(true);
-    const controlsTimeoutRef = useRef(null);
+    const [duration, setDuration] = useState(0);
 
-    const togglePlay = (e) => {
-        e?.stopPropagation();
-        if (videoRef.current) {
-            if (isPlaying) videoRef.current.pause();
-            else videoRef.current.play();
-            setIsPlaying(!isPlaying);
-        }
+    const togglePlay = (e) => { 
+        e.stopPropagation(); 
+        if (!audioRef.current) return;
+        if (isPlaying) audioRef.current.pause(); 
+        else audioRef.current.play(); 
+        setIsPlaying(!isPlaying); 
     };
 
     const handleTimeUpdate = () => {
-        if(videoRef.current) {
-            const prog = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-            setProgress(prog);
-        }
+        if (!audioRef.current) return;
+        const current = audioRef.current.currentTime;
+        const total = audioRef.current.duration;
+        setDuration(total);
+        setProgress((current / total) * 100);
     };
 
-    const toggleMute = (e) => {
-        e?.stopPropagation();
-        if(videoRef.current) {
-            videoRef.current.muted = !isMuted;
-            setIsMuted(!isMuted);
-        }
-    };
-
-    const handleSeek = (e) => {
-        e?.stopPropagation();
-        const progressBar = e.currentTarget;
-        const rect = progressBar.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const clickedValue = (x / rect.width);
-        if(videoRef.current) {
-            videoRef.current.currentTime = clickedValue * videoRef.current.duration;
-        }
-    };
-
-    const toggleFullscreen = (e) => {
-        e?.stopPropagation();
-        if(videoRef.current) {
-            if (videoRef.current.requestFullscreen) videoRef.current.requestFullscreen();
-            else if (videoRef.current.webkitRequestFullscreen) videoRef.current.webkitRequestFullscreen();
-        }
-    };
-
-    const handleMouseMove = () => {
-        setShowControls(true);
-        clearTimeout(controlsTimeoutRef.current);
-        controlsTimeoutRef.current = setTimeout(() => {
-            if(isPlaying) setShowControls(false);
-        }, 2000);
+    const formatTime = (time) => {
+        if (!time) return "0:00";
+        const min = Math.floor(time / 60);
+        const sec = Math.floor(time % 60);
+        return `${min}:${sec < 10 ? '0' + sec : sec}`;
     };
 
     return (
-        <div 
-            className={`relative rounded-xl overflow-hidden group bg-black shadow-lg ${type === 'audio' ? 'h-24' : 'aspect-video'}`}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={() => isPlaying && setShowControls(false)}
-            onClick={(e) => { if(type !== 'audio') togglePlay(e); }}
-        >
-            {type === 'video' ? (
-                <video 
-                    ref={videoRef} 
-                    src={src} 
-                    className="w-full h-full object-contain" 
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={() => setIsPlaying(false)}
-                    loop
-                    playsInline
-                />
-            ) : (
-                <div className="w-full h-full flex items-center px-4 bg-gradient-to-r from-gray-900 to-gray-800">
-                    <audio ref={videoRef} src={src} onTimeUpdate={handleTimeUpdate} onEnded={() => setIsPlaying(false)}/>
-                    <div className="w-12 h-12 rounded-full bg-sky-500/20 flex items-center justify-center mr-4 animate-pulse">
-                        <Music className="text-sky-500" size={24}/>
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-white font-bold text-sm mb-1">Audio Clip</p>
-                        <div className="h-1 bg-gray-700 rounded-full overflow-hidden w-full relative group cursor-pointer" onClick={handleSeek}>
-                             <div className="h-full bg-sky-500 absolute top-0 left-0 transition-all duration-100" style={{width: `${progress}%`}}></div>
-                        </div>
+        <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl p-3 flex items-center gap-3 mb-4 shadow-sm border border-gray-200 dark:border-gray-700 relative overflow-hidden group">
+            {/* Background Blur Effect */}
+            <div className="absolute inset-0 bg-gradient-to-r from-sky-500/5 to-purple-500/5 opacity-50"></div>
+            
+            <button onClick={togglePlay} className="relative z-10 w-10 h-10 bg-white dark:bg-gray-700 text-sky-600 dark:text-sky-400 rounded-full flex items-center justify-center shadow-md hover:scale-105 transition active:scale-95">
+                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-1"/>}
+            </button>
+            
+            <div className="flex-1 relative z-10">
+                <div className="flex justify-between text-[10px] font-bold text-gray-500 dark:text-gray-400 mb-1">
+                    <span className="flex items-center gap-1"><Music size={10}/> Audio Clip</span>
+                    <span>{formatTime(audioRef.current?.currentTime)} / {formatTime(duration)}</span>
+                </div>
+                {/* Progress Bar */}
+                <div className="w-full h-1.5 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden cursor-pointer" onClick={(e) => {
+                    const rect = e.target.getBoundingClientRect();
+                    const percent = (e.clientX - rect.left) / rect.width;
+                    if(audioRef.current) audioRef.current.currentTime = percent * duration;
+                }}>
+                    <div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-100 ease-linear" style={{width: `${progress}%`}}></div>
+                </div>
+            </div>
+            
+            <audio ref={audioRef} src={src} onTimeUpdate={handleTimeUpdate} onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} className="hidden"/>
+        </div>
+    );
+};
+
+// FIX: Komponen Baru ModernVideoPlayer (Vidstack Style)
+const ModernVideoPlayer = ({ src }) => {
+    const videoRef = useRef(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [isMuted, setIsMuted] = useState(false);
+    const [showControls, setShowControls] = useState(true);
+    const controlTimeout = useRef(null);
+
+    const togglePlay = (e) => {
+        e.stopPropagation();
+        if(!videoRef.current) return;
+        if(isPlaying) videoRef.current.pause();
+        else videoRef.current.play();
+        setIsPlaying(!isPlaying);
+    };
+
+    const handleTimeUpdate = () => {
+        if(!videoRef.current) return;
+        const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
+        setProgress(progress);
+    };
+
+    const toggleMute = (e) => {
+        e.stopPropagation();
+        if(!videoRef.current) return;
+        videoRef.current.muted = !isMuted;
+        setIsMuted(!isMuted);
+    };
+
+    const handleMouseEnter = () => {
+        setShowControls(true);
+        clearTimeout(controlTimeout.current);
+    };
+
+    const handleMouseLeave = () => {
+        if(isPlaying) {
+            controlTimeout.current = setTimeout(() => setShowControls(false), 2000);
+        }
+    };
+
+    return (
+        <div className="relative w-full rounded-2xl overflow-hidden bg-black group shadow-lg" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} onClick={togglePlay}>
+            <video 
+                ref={videoRef} 
+                src={src} 
+                className="w-full h-auto max-h-[500px] object-contain"
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={() => setIsPlaying(false)}
+                loop
+                playsInline
+            />
+            
+            {/* Center Play Button Overlay */}
+            {!isPlaying && (
+                <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/20 backdrop-blur-[1px]">
+                    <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/30 text-white animate-in zoom-in duration-200 shadow-xl">
+                        <Play size={28} fill="white" className="ml-1"/>
                     </div>
                 </div>
             )}
 
-            {/* OVERLAY CONTROLS (Vidstack Style) */}
-            <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-4 transition-opacity duration-300 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}>
-                {/* Center Play Button (Video Only) */}
-                {type === 'video' && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        {!isPlaying && <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center animate-in zoom-in"><Play size={32} fill="white" className="text-white ml-1"/></div>}
-                    </div>
-                )}
-
-                {/* Bottom Bar */}
-                <div className="flex flex-col gap-2 z-10" onClick={(e) => e.stopPropagation()}>
-                    {/* Progress Bar */}
-                    {type === 'video' && (
-                        <div className="h-1.5 bg-white/30 rounded-full cursor-pointer overflow-hidden relative group" onClick={handleSeek}>
-                            <div className="h-full bg-sky-500 absolute top-0 left-0 transition-all duration-100" style={{width: `${progress}%`}}></div>
-                            <div className="absolute h-3 w-3 bg-white rounded-full top-1/2 -translate-y-1/2 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity" style={{left: `${progress}%`}}></div>
-                        </div>
-                    )}
+            {/* Controls Bar (Vidstack Style) */}
+            <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 z-20 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+                <div className="flex items-center gap-3">
+                    <button onClick={togglePlay} className="text-white hover:text-sky-400 transition">
+                        {isPlaying ? <Pause size={20} fill="white"/> : <Play size={20} fill="white"/>}
+                    </button>
                     
-                    {/* Controls Row */}
-                    <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center gap-4">
-                            <button onClick={togglePlay} className="text-white hover:text-sky-400 transition">
-                                {isPlaying ? <Pause size={24} fill="white" /> : <Play size={24} fill="white" />}
-                            </button>
-                            <button onClick={toggleMute} className="text-white hover:text-sky-400 transition">
-                                {isMuted ? <VolumeX size={20}/> : <Volume2 size={20}/>}
-                            </button>
+                    {/* Progress Slider */}
+                    <div className="flex-1 h-1 bg-white/30 rounded-full overflow-hidden cursor-pointer group/slider relative" onClick={(e) => {
+                         e.stopPropagation();
+                         const rect = e.currentTarget.getBoundingClientRect();
+                         const p = (e.clientX - rect.left) / rect.width;
+                         if(videoRef.current) videoRef.current.currentTime = p * videoRef.current.duration;
+                    }}>
+                        <div className="h-full bg-sky-500 relative" style={{width: `${progress}%`}}>
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-sm scale-0 group-hover/slider:scale-100 transition-transform"></div>
                         </div>
-                        {type === 'video' && (
-                            <button onClick={toggleFullscreen} className="text-white hover:text-sky-400 transition">
-                                <Maximize2 size={20}/>
-                            </button>
-                        )}
                     </div>
+
+                    <button onClick={toggleMute} className="text-white hover:text-sky-400 transition">
+                        {isMuted ? <VolumeX size={18}/> : <Volume2 size={18}/>}
+                    </button>
+                    
+                    <button onClick={(e) => { e.stopPropagation(); if(videoRef.current) videoRef.current.requestFullscreen(); }} className="text-white hover:text-sky-400 transition">
+                         <Maximize2 size={18}/>
+                    </button>
                 </div>
             </div>
         </div>
     );
 };
 
-// PERBAIKAN 3: SPLASH SCREEN DENGAN BACKGROUND TRANSPARAN
+const AudioPlayer = ({ src }) => {
+    // Legacy Wrapper to support old props but use new design
+    return <ModernAudioPlayer src={src} />;
+};
+
+// FIX: Splash Screen dengan Background Image Baru & Transparent Blur
 const SplashScreen = () => (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden">
-        {/* Background Image Overlay */}
-        <div className="absolute inset-0 z-[-1]">
-             <img src="https://c.termai.cc/i120/womQPBg.jpg" className="w-full h-full object-cover opacity-20 dark:opacity-10 filter blur-sm scale-110" alt="Background"/>
-             <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-[2px]"></div>
+    <div className="fixed inset-0 bg-cover bg-center z-[100] flex flex-col items-center justify-center relative" style={{backgroundImage: "url('https://c.termai.cc/i120/womQPBg.jpg')"}}>
+        <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/80 backdrop-blur-sm"></div>
+        <div className="relative z-10 flex flex-col items-center animate-in zoom-in duration-500">
+            <div className="relative mb-8 animate-bounce-slow">
+                <img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/>
+                <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-30 rounded-full animate-pulse"></div>
+            </div>
+            <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-2 tracking-widest drop-shadow-sm">{APP_NAME}</h1>
+            <div className="w-48 h-1.5 bg-gray-200/50 dark:bg-gray-700/50 rounded-full overflow-hidden mb-4 backdrop-blur-md">
+                <div className="h-full bg-sky-500 animate-progress-indeterminate"></div>
+            </div>
+            <p className="text-gray-600 dark:text-gray-300 text-xs font-bold animate-pulse">Menghubungkan ke dunia...</p>
         </div>
-        
-        <div className="relative mb-8 animate-bounce-slow"><img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/><div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div></div>
-        <h1 className="text-3xl font-black text-sky-600 mb-2 tracking-widest relative z-10 drop-shadow-sm">{APP_NAME}</h1>
-        <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4 relative z-10"><div className="h-full bg-sky-500 animate-progress-indeterminate"></div></div>
-        <p className="text-gray-400 text-xs font-medium animate-pulse relative z-10">Menghubungkan ke server...</p>
-        <p className="text-gray-300 text-[10px] mt-2 relative z-10">Sinkronisasi Profile & Papan Peringkat...</p>
     </div>
 );
 
@@ -1824,7 +1836,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
     // UI REDESIGN: Modern Feed Style (Facebook/Threads)
-    // REMOVED HOVER EFFECT: Removed "hover:bg-gray-50/50" from main div
     return (
         <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors">
             {post.isShort && <div className="mb-2"><span className="bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center w-fit"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</span></div>}
@@ -1877,9 +1888,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     <div onDoubleClick={handleDoubleTap} className="relative mt-2 rounded-xl overflow-hidden">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
                          
-                         {/* FIX: MENGGUNAKAN MODERN PLAYER (Vidstack Style) */}
-                         {isAudio && <ModernMediaPlayer src={post.mediaUrl || embed.url} type="audio" />}
-                         {isVideo && <ModernMediaPlayer src={post.mediaUrl} type="video" />}
+                         {/* FIX: Gunakan Modern Player Component */}
+                         {isAudio && <ModernAudioPlayer src={post.mediaUrl || embed.url} />}
+                         
+                         {/* FIX VIDEO: Render ModernVideoPlayer */}
+                         {isVideo && <ModernVideoPlayer src={post.mediaUrl} />}
                          
                          {displayEmbed?.type === 'youtube' && <div className="aspect-video rounded-lg overflow-hidden"><iframe src={displayEmbed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                          {displayEmbed?.type === 'instagram' && ( <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
@@ -1922,12 +1935,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// FIX: Tambahkan parameter `userPhoto` agar tersimpan saat posting
-const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
+// FIX: Tambahkan Prop userPhoto agar bisa disimpan saat posting
+const CreatePost = ({ setPage, userId, username, onSuccess, userPhoto }) => {
     const { showAlert } = useCustomAlert();
     const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
-    const [loadingText, setLoadingText] = useState(""); // UI: Fun Loading Text
+    const [loadingText, setLoadingText] = useState(""); 
 
     // Fun loading text logic
     const funTexts = ["Menghubungi satelit...", "Memasak postingan...", "Mengirim sinyal ke Mars...", "Sabar ya, lagi loading...", "Menyusun pixel...", "Mengupload kenangan...", "Hampir siap..."];
@@ -1958,9 +1971,10 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
             let mediaUrls = []; let mediaType = 'text';
             if (form.files.length > 0) { const firstFile = form.files[0]; if (firstFile.type.startsWith('image')) { mediaType = 'image'; setProg(10); for (let i = 0; i < form.files.length; i++) { const base64 = await compressImageToBase64(form.files[i]); mediaUrls.push(base64); setProg(10 + ((i + 1) / form.files.length) * 80); } } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) { const uploadedUrl = await uploadToFaaAPI(firstFile, setProg); mediaUrls.push(uploadedUrl); mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio'; setProg(100); } } else if (form.url) { mediaType = 'link'; mediaUrls.push(form.url); }
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
-            // FIX: Sertakan photoURL agar tidak rusak di UI
+            
+            // FIX: Sertakan photoURL di user object agar saat postingan baru muncul, foto profil tidak blank
             const ref = await addDoc(collection(db, getPublicCollection('posts')), { userId, title: form.title, content: form.content, mediaUrls: mediaUrls, mediaUrl: mediaUrls[0] || '', mediaType: mediaType, timestamp: serverTimestamp(), likes: [], commentsCount: 0, category: category, user: {username, uid: userId, photoURL: userPhoto || ''} });
-            // FIX: HARDCORE MODE - Buat Post cuma +2 Poin (sebelumnya +10)
+            
             await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(2), lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
             await showAlert("Postingan berhasil diterbitkan!", 'success');
@@ -2507,19 +2521,15 @@ const MainAppContent = () => {
     if (isOffline && !posts.length) return <ErrorBoundary><OfflinePage onRetry={()=>setRefreshTrigger(prev=>prev+1)}/></ErrorBoundary>;
 
     const isMeDeveloper = user && user.email === DEVELOPER_EMAIL; const targetUser = users.find(u => u.uid === targetUid); const isGuest = !user; 
+    
+    // FIX: Tentukan halaman mana saja yang menyembunyikan Navbar
+    const isNavbarHidden = ['legal', 'chat', 'create', 'notifications'].includes(page);
 
     return (
         <ErrorBoundary>
             <div>
                 <style>{`.dark body { background-color: #111827; color: white; }`}</style>
-                <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300 relative`}>
-                    
-                    {/* GLOBAL BACKGROUND OVERLAY (Fix Background Blend) */}
-                    <div className="fixed inset-0 z-0 pointer-events-none">
-                        <img src="https://c.termai.cc/i120/womQPBg.jpg" className="w-full h-full object-cover opacity-10 dark:opacity-5 mix-blend-overlay" alt="Background Texture" />
-                        <div className="absolute inset-0 bg-gradient-to-b from-white/80 to-transparent dark:from-black/80 dark:to-transparent"></div>
-                    </div>
-
+                <div className={`min-h-screen bg-[#F0F4F8] dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-300`}>
                     <NetworkStatus />
                     
                     {/* --- MODERN SIDEBAR --- */}
@@ -2537,7 +2547,8 @@ const MainAppContent = () => {
                         }}
                     />
 
-                    {page!=='legal' && ( 
+                    {/* FIX: Navbar disembunyikan jika halaman chat/create/legal/notifications */}
+                    {!isNavbarHidden && ( 
                         <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
                             {/* Left: Hamburger & Logo */}
                             <div className="flex items-center gap-4">
@@ -2575,7 +2586,8 @@ const MainAppContent = () => {
                         </header> 
                     )}
 
-                    <main className={page!=='legal' ? 'pt-16 md:pt-20 relative z-10' : 'relative z-10'}>
+                    <main className={!isNavbarHidden ? 'pt-16 md:pt-20' : ''}>
+                        {/* FIX: Pass userPhoto ke CreatePost */}
                         {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} userPhoto={profile?.photoURL} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                         {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
@@ -2588,8 +2600,8 @@ const MainAppContent = () => {
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
                     </main>
                     
-                    {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON DESKTOP */}
-                    {page!=='legal' && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON DESKTOP & HIDDEN PAGES */}
+                    {!isNavbarHidden && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
