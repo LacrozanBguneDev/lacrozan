@@ -1212,36 +1212,82 @@ const Lightbox = ({ images, initialIndex, onClose }) => {
 };
 
 // FIX: Audio Player UI Update (Vidstack-like style)
+// REVISI: Tampilan Glassy Modern dengan Animasi Bar Visualizer
 const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
+    const [duration, setDuration] = useState(0);
 
-    const togglePlay = () => { if (audioRef.current) { if (isPlaying) audioRef.current.pause(); else audioRef.current.play(); setIsPlaying(!isPlaying); } };
+    const togglePlay = () => { 
+        if (audioRef.current) { 
+            if (isPlaying) audioRef.current.pause(); 
+            else audioRef.current.play(); 
+            setIsPlaying(!isPlaying); 
+        } 
+    };
+
+    const formatTime = (time) => {
+        if(isNaN(time)) return "0:00";
+        const min = Math.floor(time / 60);
+        const sec = Math.floor(time % 60);
+        return `${min}:${sec < 10 ? '0'+sec : sec}`;
+    }
     
     return (
-        <div className="group bg-black/90 rounded-2xl p-4 flex items-center gap-4 mb-4 shadow-lg border border-white/10 overflow-hidden relative">
-             <div className="absolute inset-0 bg-gradient-to-r from-sky-900/20 to-purple-900/20 opacity-50"></div>
-             <button onClick={togglePlay} className="relative z-10 w-12 h-12 bg-white rounded-full flex items-center justify-center text-black shadow-xl hover:scale-105 transition">
-                {isPlaying ? <Pause size={20} fill="black"/> : <Play size={20} fill="black" className="ml-1"/>}
+        <div className="group bg-zinc-900 rounded-xl p-3 flex items-center gap-3 mb-4 shadow-xl border border-zinc-800 overflow-hidden relative w-full max-w-md mx-auto">
+             {/* Background Decoration */}
+             <div className="absolute -right-10 -top-10 w-32 h-32 bg-sky-500/20 blur-3xl rounded-full pointer-events-none"></div>
+             
+             {/* Play Button */}
+             <button onClick={togglePlay} className="relative z-10 w-10 h-10 bg-gradient-to-br from-sky-500 to-blue-600 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-105 transition-transform shrink-0">
+                {isPlaying ? <Pause size={18} fill="white"/> : <Play size={18} fill="white" className="ml-1"/>}
              </button>
-             <div className="flex-1 relative z-10">
-                 <div className="flex items-center gap-2 mb-2">
-                     <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1"><Music size={12} className="text-sky-400"/> AUDIO PREVIEW</span>
+
+             {/* Content */}
+             <div className="flex-1 relative z-10 min-w-0">
+                 <div className="flex items-center justify-between mb-1.5">
+                     <span className="text-[10px] font-black text-sky-400 tracking-wider flex items-center gap-1.5">
+                        <Music size={10} /> AUDIO
+                     </span>
+                     <span className="text-[10px] font-mono text-zinc-400">
+                        {formatTime(audioRef.current?.currentTime)} / {formatTime(duration)}
+                     </span>
                  </div>
-                 <div className="h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
-                     <div className="h-full bg-sky-500 transition-all duration-300" style={{width: `${progress}%`}}></div>
+                 
+                 {/* Progress Bar */}
+                 <div className="relative h-1.5 w-full bg-zinc-700/50 rounded-full overflow-hidden cursor-pointer group-hover:h-2 transition-all" 
+                      onClick={(e) => {
+                          const bounds = e.currentTarget.getBoundingClientRect();
+                          const x = e.clientX - bounds.left;
+                          const pct = x / bounds.width;
+                          if(audioRef.current) audioRef.current.currentTime = pct * duration;
+                      }}>
+                     <div className="absolute h-full bg-gradient-to-r from-sky-400 to-blue-500 rounded-full" style={{width: `${progress}%`}}></div>
                  </div>
-                 <audio 
-                    ref={audioRef} 
-                    src={src} 
-                    className="hidden" 
-                    onTimeUpdate={(e) => setProgress((e.target.currentTime / e.target.duration) * 100)}
-                    onEnded={() => {setIsPlaying(false); setProgress(0);}} 
-                    onPause={() => setIsPlaying(false)} 
-                    onPlay={() => setIsPlaying(true)}
-                 />
              </div>
+
+             {/* Visualizer Bars (Fake Animation) */}
+             <div className="flex gap-0.5 items-end h-8 shrink-0 opacity-50">
+                {[...Array(5)].map((_,i) => (
+                    <div key={i} className={`w-1 bg-sky-500 rounded-t-sm transition-all duration-300 ${isPlaying ? 'animate-music-bar' : 'h-2'}`} style={{animationDelay: `${i*0.1}s`}}></div>
+                ))}
+             </div>
+
+             <audio 
+                ref={audioRef} 
+                src={src} 
+                className="hidden" 
+                onTimeUpdate={(e) => setProgress((e.target.currentTime / e.target.duration) * 100)}
+                onLoadedMetadata={(e) => setDuration(e.target.duration)}
+                onEnded={() => {setIsPlaying(false); setProgress(0);}} 
+                onPause={() => setIsPlaying(false)} 
+                onPlay={() => setIsPlaying(true)}
+             />
+             <style>{`
+                @keyframes music-bar { 0%, 100% { height: 20%; } 50% { height: 80%; } }
+                .animate-music-bar { animation: music-bar 0.8s ease-in-out infinite; }
+             `}</style>
         </div>
     );
 };
@@ -1393,12 +1439,31 @@ const DeveloperDashboard = ({ onClose }) => {
         }
     }, []);
 
+    // FIX: ERUDA TOGGLE LOGIC LEBIH ROBUST
     const toggleEruda = () => {
-        if (window.eruda) { window.eruda.destroy(); return; }
+        if (window.eruda) { 
+            window.eruda.destroy(); 
+            // Pastikan benar-benar dihapus dari window
+            delete window.eruda;
+            showAlert("Eruda Console Nonaktif", 'info');
+            return; 
+        }
+        
+        // Cek jika script sudah ada
+        const existingScript = document.querySelector('script[src="//cdn.jsdelivr.net/npm/eruda"]');
+        if (existingScript) {
+             existingScript.remove();
+        }
+
         const script = document.createElement('script');
         script.src = "//cdn.jsdelivr.net/npm/eruda";
         document.body.appendChild(script);
-        script.onload = () => { window.eruda.init(); showAlert("Eruda Console Aktif", 'success'); };
+        script.onload = () => { 
+            if(window.eruda) {
+                window.eruda.init(); 
+                showAlert("Eruda Console Aktif", 'success'); 
+            }
+        };
     };
 
     const handleBroadcast = async () => { if(!broadcastMsg.trim()) return; const ok = await showConfirm("Kirim pengumuman ke SEMUA user?"); if(!ok) return; setSendingBC(true); try { const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); }); const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), { toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp() })); await Promise.all(promises); await showAlert("Pengumuman berhasil dikirim!", 'success'); setBroadcastMsg(''); } catch(e) { await showAlert("Gagal kirim broadcast: " + e.message, 'error'); } finally { setSendingBC(false); } };
@@ -1715,7 +1780,6 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
     // UI REDESIGN: Modern Feed Style (Facebook/Threads)
-    // REMOVED HOVER EFFECT: Removed "hover:bg-gray-50/50" from main div
     return (
         <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors">
             {post.isShort && <div className="mb-2"><span className="bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center w-fit"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</span></div>}
@@ -1772,10 +1836,15 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                          
                          {/* FIX: Video UI Upgrade (Vidstack Style - Dark Theme, Rounded) */}
                          {isVideo && (
-                             <div className="relative rounded-xl overflow-hidden bg-black group">
+                             <div className="relative rounded-xl overflow-hidden bg-black group shadow-lg ring-1 ring-white/10">
+                                 <div className="absolute top-4 left-4 z-10 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-white text-[10px] font-bold flex items-center gap-1">
+                                     <Film size={12} className="text-red-500" />
+                                     <span>VIDEO</span>
+                                 </div>
                                  <video 
                                     src={post.mediaUrl} 
                                     controls 
+                                    controlsList="nodownload"
                                     className="w-full h-auto max-h-[80vh] object-contain"
                                     style={{backgroundColor: '#000'}}
                                  />
@@ -1929,10 +1998,6 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
         </div>
     );
 };
-
-// ... (ProfileScreen, NotificationScreen, SinglePostView, SearchScreen tetap sama, logic dipertahankan 100%) ...
-// Untuk menghemat ruang, saya asumsikan komponen tersebut tidak berubah logic-nya,
-// hanya adaptasi style di PostItem yang sudah di-update di atas.
 
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     // FIX CRASH: Gunakan Safe Navigation Operator (?.) dan Default Value
@@ -2122,7 +2187,7 @@ const HomeScreen = ({
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-2 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-4"><CheckCircle size={14}/> Postingan Baru Disematkan</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={onHashtagClick} onUpdate={handlePostUpdate} />
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
                         </div>
                     ))}
                 </div>
@@ -2134,17 +2199,134 @@ const HomeScreen = ({
     );
 };
 
-// ... (NotificationScreen, SinglePostView, SearchScreen sama) ...
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
-    // FIX: Hanya ambil notifikasi BUKAN tipe 'chat' di layar ini, karena chat dipisah
+    
+    // FETCH
     useEffect(() => { 
         const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), where('type', '!=', 'chat'), orderBy('type'), orderBy('timestamp','desc'), limit(50)); 
         return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); 
     }, [userId]);
     
-    const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
-    return <div className="max-w-md md:max-w-xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
+    // GROUPING LOGIC
+    const groupedNotifs = useMemo(() => {
+        const groups = [];
+        const processed = new Set();
+        
+        // Sort raw first to ensure chronological grouping
+        const rawSorted = [...notifs].sort((a,b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+
+        rawSorted.forEach(n => {
+            if (processed.has(n.id)) return;
+
+            // Only group likes
+            if (n.type === 'like' && n.postId) {
+                const samePostLikes = rawSorted.filter(
+                    other => other.type === 'like' && other.postId === n.postId && !processed.has(other.id)
+                );
+                
+                if (samePostLikes.length > 1) {
+                    groups.push({
+                        isGroup: true,
+                        id: `group_${n.postId}_${Date.now()}`,
+                        type: 'like',
+                        postId: n.postId,
+                        items: samePostLikes,
+                        latest: samePostLikes[0],
+                        count: samePostLikes.length,
+                        timestamp: samePostLikes[0].timestamp
+                    });
+                    samePostLikes.forEach(x => processed.add(x.id));
+                } else {
+                    groups.push(n);
+                    processed.add(n.id);
+                }
+            } else {
+                groups.push(n);
+                processed.add(n.id);
+            }
+        });
+        return groups;
+    }, [notifs]);
+
+    const handleClick = async (n) => { 
+        if (n.isGroup) {
+            // Mark all in group as read
+            const batch = writeBatch(db);
+            n.items.forEach(item => {
+                batch.update(doc(db, getPublicCollection('notifications'), item.id), { isRead: true });
+            });
+            await batch.commit();
+            setTargetPostId(n.postId); setPage('view_post');
+        } else {
+            await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); 
+            if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } 
+            else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); }
+        }
+    };
+
+    return (
+        <div className="max-w-md md:max-w-xl mx-auto p-4 pb-24 pt-20">
+            {/* Header with Back Button */}
+            <div className="flex items-center gap-4 mb-6 sticky top-16 bg-[#F0F4F8] dark:bg-gray-900 z-10 py-2">
+                <button onClick={() => setPage('home')} className="p-2 bg-white dark:bg-gray-800 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm transition">
+                    <ArrowLeft size={20} className="text-gray-700 dark:text-gray-200"/>
+                </button>
+                <h1 className="text-xl font-black text-gray-800 dark:text-white">Notifikasi</h1>
+            </div>
+
+            {groupedNotifs.length===0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                    <Bell size={48} className="mb-4 opacity-20"/>
+                    <p className="text-sm font-bold">Semua bersih!</p>
+                    <p className="text-xs">Tidak ada notifikasi baru.</p>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {groupedNotifs.map(n => {
+                        // Render Group
+                        if (n.isGroup) {
+                            return (
+                                <div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition border-l-4 border-rose-500">
+                                    <div className="relative">
+                                        <div className="w-12 h-12 flex -space-x-4 overflow-hidden">
+                                            {n.items.slice(0, 3).map((item, i) => (
+                                                <img key={i} src={item.fromPhoto||APP_LOGO} className="w-8 h-8 rounded-full object-cover border-2 border-white dark:border-gray-800"/>
+                                            ))}
+                                        </div>
+                                        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-rose-500 border-2 border-white flex items-center justify-center text-white text-[10px] font-bold">
+                                            <Heart size={10} fill="white"/>
+                                        </div>
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-sm dark:text-gray-200">
+                                            <span className="font-bold">{n.latest.fromUsername}</span> dan <span className="font-bold">{n.count - 1} lainnya</span>
+                                        </p>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400">menyukai postingan Anda.</p>
+                                    </div>
+                                </div>
+                            );
+                        }
+                        // Render Single
+                        return (
+                            <div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition">
+                                <div className="relative">
+                                    <img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/>
+                                    <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>
+                                        {n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
 };
 
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
