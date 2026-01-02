@@ -1,16 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
 
 // ==========================================
-// SECURITY NOTICE (CYBER SECURITY AUDIT)
-// ==========================================
-// Status: SECURED & PATCHED (COMPLIANT WITH FIRESTORE RULES)
-// Patches Applied:
-// 1. Enhanced XSS Protection
-// 2. Collection Names Aligned with Rules (public_users, public_posts, etc.)
-// 3. Reputation/Point Client-Side Updates DISABLED (Blocked by Rules for security)
-// ==========================================
-
-// ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
 // ==========================================
 
@@ -180,7 +170,7 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; // Updated to match Rules
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
@@ -204,9 +194,6 @@ const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
 const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-// UPDATE: Menggunakan nama koleksi sesuai Rules (public_users, public_posts, dll)
-// NOTE: Prefix 'artifacts/...' tetap digunakan agar jalan di Canvas Preview.
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
 // Initialize Firebase with Error Handling
@@ -288,8 +275,7 @@ const requestNotificationPermission = async (userId) => {
         if (permission === 'granted') {
             const token = await getToken(messaging, { vapidKey: VAPID_KEY });
             if (token) {
-                // UPDATE: userProfiles -> public_users
-                const userRef = doc(db, getPublicCollection('public_users'), userId);
+                const userRef = doc(db, getPublicCollection('userProfiles'), userId);
                 await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
             }
         }
@@ -344,8 +330,7 @@ const uploadToFaaAPI = async (file, onProgress) => {
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
     if (!toUserId || !fromUser || toUserId === fromUser.uid || !db) return; 
     try {
-        // UPDATE: notifications -> public_notifications
-        await addDoc(collection(db, getPublicCollection('public_notifications')), {
+        await addDoc(collection(db, getPublicCollection('notifications')), {
             toUserId: toUserId, fromUserId: fromUser.uid, fromUsername: fromUser.username, fromPhoto: fromUser.photoURL || '',
             type: type, message: message, postId: postId, isRead: false, timestamp: serverTimestamp()
         });
@@ -471,7 +456,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.3 (Rules Patch)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (UI Enhancements)</p>
                 </div>
             </div>
         </>
@@ -507,8 +492,8 @@ const ChatSystem = ({ currentUser, onBack }) => {
     useEffect(() => {
         if (!currentUser) return;
         setLoading(true);
-        // UPDATE: chats -> public_chats
-        const q = query(collection(db, getPublicCollection('public_chats')), where('participants', 'array-contains', currentUser.uid));
+        // Query chats where user is participant
+        const q = query(collection(db, getPublicCollection('chats')), where('participants', 'array-contains', currentUser.uid));
         const unsub = onSnapshot(q, (snapshot) => {
             const chatList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             // Sort by updated time locally
@@ -532,8 +517,7 @@ const ChatSystem = ({ currentUser, onBack }) => {
         } else {
             // Create New Chat Document
             try {
-                // UPDATE: chats -> public_chats
-                const newChatRef = await addDoc(collection(db, getPublicCollection('public_chats')), {
+                const newChatRef = await addDoc(collection(db, getPublicCollection('chats')), {
                     participants: [currentUser.uid, recipientId],
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
@@ -553,8 +537,7 @@ const ChatSystem = ({ currentUser, onBack }) => {
         const ok = await showConfirm("Hapus riwayat chat ini? Pesan akan hilang permanen.");
         if (!ok) return;
         try {
-            // UPDATE: chats -> public_chats
-            await deleteDoc(doc(db, getPublicCollection('public_chats'), chatId));
+            await deleteDoc(doc(db, getPublicCollection('chats'), chatId));
             showAlert("Chat dihapus", "success");
         } catch (e) { showAlert("Gagal hapus chat", "error"); }
     };
@@ -640,8 +623,7 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
     const longPressTimer = useRef(null);
 
     useEffect(() => {
-        // UPDATE: userProfiles -> public_users
-        const unsub = onSnapshot(doc(db, getPublicCollection('public_users'), otherId), doc => {
+        const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), otherId), doc => {
             if (doc.exists()) setProfile(doc.data());
         });
         return () => unsub();
@@ -660,19 +642,19 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
         <div 
             onClick={onClick}
             onTouchStart={handleStart} onTouchEnd={handleEnd} onMouseDown={handleStart} onMouseUp={handleEnd} onMouseLeave={handleEnd}
-            className={`p-4 flex items-center gap-4 cursor-pointer transition hover:bg-gray-50 dark:hover:bg-gray-800 min-w-0 ${isUnread ? 'bg-sky-50/40 dark:bg-sky-900/10' : ''}`}
+            className={`p-4 flex items-center gap-4 cursor-pointer transition hover:bg-gray-50 dark:hover:bg-gray-800 ${isUnread ? 'bg-sky-50/40 dark:bg-sky-900/10' : ''}`}
         >
-            <div className="relative shrink-0">
+            <div className="relative">
                 <Avatar src={profile.photoURL} className="w-14 h-14 rounded-full object-cover border border-gray-100 dark:border-gray-700"/>
                 {isUserOnline(profile.lastSeen) && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full"></div>}
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline mb-1">
                     <h3 className={`text-base truncate ${isUnread ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-800 dark:text-gray-200'}`}>{profile.username}</h3>
-                    <span className={`text-[10px] font-medium shrink-0 ml-2 ${isUnread ? 'text-sky-500' : 'text-gray-400'}`}>{formatTimeAgo(chat.updatedAt).relative}</span>
+                    <span className={`text-[10px] font-medium ${isUnread ? 'text-sky-500' : 'text-gray-400'}`}>{formatTimeAgo(chat.updatedAt).relative}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                    {isMe && (lastMsg.isRead ? <CheckCircle size={14} className="text-sky-500 shrink-0"/> : <Check size={14} className="text-gray-400 shrink-0"/>)}
+                    {isMe && (lastMsg.isRead ? <CheckCircle size={14} className="text-sky-500"/> : <Check size={14} className="text-gray-400"/>)}
                     <p className={`text-sm truncate leading-snug ${isUnread ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500'}`}>
                         {chat.typing?.[otherId] ? <span className="text-sky-500 italic">Sedang mengetik...</span> : (lastMsg.text || 'Mulai percakapan')}
                     </p>
@@ -690,8 +672,7 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
         const load = async () => {
             setLoading(true);
             try {
-                // UPDATE: userProfiles -> public_users
-                const myProfile = await getDoc(doc(db, getPublicCollection('public_users'), currentUser.uid));
+                const myProfile = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
                 if (myProfile.exists()) {
                     const data = myProfile.data();
                     const myFollowers = data.followers || [];
@@ -701,8 +682,7 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
                     if (friendIds.length > 0) {
                         const friendProfiles = [];
                         for (const id of friendIds) {
-                            // UPDATE: userProfiles -> public_users
-                            const snap = await getDoc(doc(db, getPublicCollection('public_users'), id));
+                            const snap = await getDoc(doc(db, getPublicCollection('userProfiles'), id));
                             if (snap.exists()) friendProfiles.push({ id: snap.id, ...snap.data() });
                         }
                         setFriends(friendProfiles);
@@ -768,8 +748,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     // Fetch Recipient Profile
     useEffect(() => {
         if (!recipientId) return;
-        // UPDATE: userProfiles -> public_users
-        const unsub = onSnapshot(doc(db, getPublicCollection('public_users'), recipientId), (doc) => {
+        const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), recipientId), (doc) => {
             if (doc.exists()) setRecipientProfile({ uid: doc.id, ...doc.data() });
         });
         return () => unsub();
@@ -785,9 +764,8 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                 sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
                 
                 // Cari pesan lama yg SUDAH dibaca
-                // UPDATE: chats -> public_chats
                 const q = query(
-                    collection(db, getPublicCollection('public_chats'), chatId, 'messages'),
+                    collection(db, getPublicCollection('chats'), chatId, 'messages'),
                     where('timestamp', '<', sevenDaysAgo),
                     where('isRead', '==', true),
                     limit(50) // Batch limit
@@ -810,8 +788,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         if (!chatId) return;
         
         // FIX: Path error - Gunakan collection() dengan path lengkap
-        // UPDATE: chats -> public_chats
-        const messagesRef = collection(db, getPublicCollection('public_chats'), chatId, 'messages');
+        const messagesRef = collection(db, getPublicCollection('chats'), chatId, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(messagesLimit));
 
         const unsub = onSnapshot(q, (snapshot) => {
@@ -823,11 +800,11 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             if (unreadIds.length > 0) {
                 unreadIds.forEach(id => {
                     // FIX: Path error - Gunakan doc() dengan 8 segmen (col, id, col, id...)
-                    const msgDocRef = doc(db, getPublicCollection('public_chats'), chatId, 'messages', id);
+                    const msgDocRef = doc(db, getPublicCollection('chats'), chatId, 'messages', id);
                     updateDoc(msgDocRef, { isRead: true }).catch(err => console.error("Read mark fail:", err));
                 });
                 // Update parent chat doc
-                updateDoc(doc(db, getPublicCollection('public_chats'), chatId), { [`lastMessage.isRead`]: true }).catch(()=>{});
+                updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`lastMessage.isRead`]: true }).catch(()=>{});
             }
         });
         return () => unsub();
@@ -850,12 +827,12 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         setText(e.target.value);
         if (!isTyping) {
             setIsTyping(true);
-            updateDoc(doc(db, getPublicCollection('public_chats'), chatId), { [`typing.${currentUser.uid}`]: true }).catch(()=>{});
+            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: true }).catch(()=>{});
         }
         clearTimeout(typingTimeout.current);
         typingTimeout.current = setTimeout(() => {
             setIsTyping(false);
-            updateDoc(doc(db, getPublicCollection('public_chats'), chatId), { [`typing.${currentUser.uid}`]: false }).catch(()=>{});
+            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: false }).catch(()=>{});
         }, 2000);
     };
 
@@ -895,10 +872,9 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                 } : null
             };
             
-            // UPDATE: chats -> public_chats
-            await addDoc(collection(db, getPublicCollection('public_chats'), chatId, 'messages'), msgData);
+            await addDoc(collection(db, getPublicCollection('chats'), chatId, 'messages'), msgData);
             
-            await updateDoc(doc(db, getPublicCollection('public_chats'), chatId), {
+            await updateDoc(doc(db, getPublicCollection('chats'), chatId), {
                 lastMessage: { text: msgText, senderId: currentUser.uid, timestamp: serverTimestamp(), isRead: false },
                 updatedAt: serverTimestamp(),
                 [`typing.${currentUser.uid}`]: false
@@ -928,8 +904,8 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     const handleActionDelete = async () => {
         if(!selectedMsg) return;
         try { 
-            // FIX: Gunakan path 8 segmen yang benar & UPDATE to public_chats
-            await deleteDoc(doc(db, getPublicCollection('public_chats'), chatId, 'messages', selectedMsg.id)); 
+            // FIX: Gunakan path 8 segmen yang benar
+            await deleteDoc(doc(db, getPublicCollection('chats'), chatId, 'messages', selectedMsg.id)); 
             showAlert("Pesan dihapus", "success");
         }
         catch (e) { console.error(e); showAlert("Gagal menghapus pesan", "error"); }
@@ -1043,7 +1019,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     );
 };
 
-// FIX SECURITY & UI: Render link dengan atribut aman dan layout fix
+// FIX: Helper khusus untuk render link chat yang aman
 const renderChatText = (text) => {
     if(!text) return "";
     // Regex URL sederhana
@@ -1053,14 +1029,7 @@ const renderChatText = (text) => {
     return parts.map((part, i) => {
         if (part.match(urlRegex)) {
             return (
-                <a 
-                    key={i} 
-                    href={part} 
-                    target="_blank" 
-                    rel="noopener noreferrer" // SECURITY: Prevent Tabnabbing
-                    className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600 break-all" // UI: break-all forces long links to wrap
-                    onClick={(e) => e.stopPropagation()}
-                >
+                <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
                     {part}
                 </a>
             );
@@ -1085,15 +1054,15 @@ const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
             onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
             onMouseDown={handleStart} onMouseUp={handleEnd} onMouseLeave={handleEnd}
         >
-            <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm cursor-pointer overflow-hidden ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
+            <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm cursor-pointer ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
                 {msg.replyTo && (
                     <div className={`mb-1 p-2 rounded-lg border-l-4 bg-black/5 dark:bg-white/10 text-[11px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
                         <span className="font-bold opacity-90 block mb-0.5">{msg.replyTo.senderName}</span>
                         <p className="truncate opacity-80">{msg.replyTo.text}</p>
                     </div>
                 )}
-                {/* FIX UI: Use break-words instead of word-break-all for better text flow, links handle themselves */}
-                <p className="leading-relaxed whitespace-pre-wrap break-words">
+                {/* FIX: Render text dengan link clickable */}
+                <p className="leading-relaxed whitespace-pre-wrap word-break-all">
                     {renderChatText(msg.text)}
                 </p>
                 <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${isMe ? 'text-sky-100' : 'text-gray-400'}`}>
@@ -1376,25 +1345,23 @@ const SkeletonPost = () => (
     </div>
 );
 
-// SECURITY FIX: Enhanced XSS Protection (Strict Protocol Check)
+// PERBAIKAN 1 & 2: Anti-XSS & Layout
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
-    // SECURITY 1: Basic HTML Escaping
+    // SECURITY FIX: Escape HTML tags untuk mencegah XSS
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     
-    // SECURITY 2: Advanced XSS Filter for Markdown Links
+    // Convert links with XSS protection (Block javascript:)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        // Block javascript:, vbscript:, data:, file: protocols and hidden control characters
-        if (/^\s*(javascript|vbscript|data|file):/i.test(url)) return `${label} (Link Diblokir)`;
-        
-        // SECURITY 3: Add rel="noopener noreferrer" for all external links
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
+        // Cek protokol berbahaya
+        if (/^(javascript|vbscript|data):/i.test(url)) return `${label} (Link Diblokir)`;
+        return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
     });
 
     html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { 
         if (match.includes('href="')) return match; 
-        return `<a href="${match}" target="_blank" rel="noopener noreferrer" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; 
+        return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; 
     });
 
     // Formatting Markdown
@@ -1432,15 +1399,13 @@ const DeveloperDashboard = ({ onClose }) => {
             // FIX: Tambahkan error handling di sini juga
             try {
                 const usersSnap = await new Promise((resolve, reject) => { 
-                    // UPDATE: userProfiles -> public_users
-                    const unsub = onSnapshot(collection(db, getPublicCollection('public_users')), 
+                    const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), 
                     (snap) => { resolve(snap); unsub(); },
                     (err) => reject(err)
                     ); 
                 });
                 const postsSnap = await new Promise((resolve, reject) => { 
-                    // UPDATE: posts -> public_posts
-                    const unsub = onSnapshot(query(collection(db, getPublicCollection('public_posts')), limit(1000)), 
+                    const unsub = onSnapshot(query(collection(db, getPublicCollection('posts')), limit(1000)), 
                     (snap) => { resolve(snap); unsub(); },
                     (err) => reject(err)
                     ); 
@@ -1501,66 +1466,10 @@ const DeveloperDashboard = ({ onClose }) => {
         };
     };
 
-    const handleBroadcast = async () => { 
-        if(!broadcastMsg.trim()) return; 
-        const ok = await showConfirm("Kirim pengumuman ke SEMUA user?"); 
-        if(!ok) return; 
-        setSendingBC(true); 
-        try { 
-            const usersSnap = await new Promise(resolve => { 
-                // UPDATE: userProfiles -> public_users
-                const unsub = onSnapshot(collection(db, getPublicCollection('public_users')), s => { resolve(s); unsub(); }); 
-            }); 
-            // UPDATE: notifications -> public_notifications
-            const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('public_notifications')), { 
-                toUserId: docSnap.id, 
-                fromUserId: 'admin', 
-                fromUsername: 'Developer System', 
-                fromPhoto: APP_LOGO, 
-                type: 'system', 
-                message: `📢 PENGUMUMAN: ${broadcastMsg}`, 
-                isRead: false, 
-                timestamp: serverTimestamp() 
-            })); 
-            await Promise.all(promises); 
-            await showAlert("Pengumuman berhasil dikirim!", 'success'); 
-            setBroadcastMsg(''); 
-        } catch(e) { await showAlert("Gagal kirim broadcast: " + e.message, 'error'); } finally { setSendingBC(false); } 
-    };
-    
-    const handleBanUser = async (uid, currentStatus) => { 
-        const ok = await showConfirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?"); 
-        if(!ok) return; 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            await updateDoc(doc(db, getPublicCollection('public_users'), uid), { isBanned: !currentStatus }); 
-            setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); 
-            await showAlert(currentStatus ? "User di-unban." : "User berhasil di-ban.", 'success'); 
-        } catch(e) { await showAlert("Gagal: " + e.message, 'error'); } 
-    };
-    
-    const handleDeleteUser = async (uid) => { 
-        const ok = await showConfirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?"); 
-        if(!ok) return; 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            await deleteDoc(doc(db, getPublicCollection('public_users'), uid)); 
-            setAllUsersList(prev => prev.filter(u => u.id !== uid)); 
-            await showAlert("Data user dihapus.", 'success'); 
-        } catch(e) { await showAlert("Gagal hapus: " + e.message, 'error'); } 
-    };
-    
-    const handleUpdateReputation = async (uid, amount, isReset = false) => { 
-        const ok = await showConfirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`); 
-        if(!ok) return; 
-        try { 
-            const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; 
-            // UPDATE: userProfiles -> public_users
-            // NOTE: This works for Admin because "allow update, delete: if isAdmin();" in Rules.
-            await updateDoc(doc(db, getPublicCollection('public_users'), uid), updateData); 
-            await showAlert("Berhasil update poin.", 'success'); 
-        } catch(e) { await showAlert("Gagal update poin: " + e.message, 'error'); } 
-    };
+    const handleBroadcast = async () => { if(!broadcastMsg.trim()) return; const ok = await showConfirm("Kirim pengumuman ke SEMUA user?"); if(!ok) return; setSendingBC(true); try { const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); }); const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), { toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp() })); await Promise.all(promises); await showAlert("Pengumuman berhasil dikirim!", 'success'); setBroadcastMsg(''); } catch(e) { await showAlert("Gagal kirim broadcast: " + e.message, 'error'); } finally { setSendingBC(false); } };
+    const handleBanUser = async (uid, currentStatus) => { const ok = await showConfirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?"); if(!ok) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), { isBanned: !currentStatus }); setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); await showAlert(currentStatus ? "User di-unban." : "User berhasil di-ban.", 'success'); } catch(e) { await showAlert("Gagal: " + e.message, 'error'); } };
+    const handleDeleteUser = async (uid) => { const ok = await showConfirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?"); if(!ok) return; try { await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid)); setAllUsersList(prev => prev.filter(u => u.id !== uid)); await showAlert("Data user dihapus.", 'success'); } catch(e) { await showAlert("Gagal hapus: " + e.message, 'error'); } };
+    const handleUpdateReputation = async (uid, amount, isReset = false) => { const ok = await showConfirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`); if(!ok) return; try { const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); await showAlert("Berhasil update poin.", 'success'); } catch(e) { await showAlert("Gagal update poin: " + e.message, 'error'); } };
 
     const filteredUsers = allUsersList.filter(u => u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email?.toLowerCase().includes(userSearchTerm.toLowerCase()));
 
@@ -1609,28 +1518,7 @@ const OnboardingScreen = ({ onComplete, user }) => {
     const { showAlert } = useCustomAlert();
     const [username, setUsername] = useState('');
     const [loading, setLoading] = useState(false);
-    const handleSubmit = async (e) => { 
-        e.preventDefault(); 
-        if (!username.trim()) return await showAlert("Username wajib diisi!", 'error'); 
-        setLoading(true); 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            await setDoc(doc(db, getPublicCollection('public_users'), user.uid), { 
-                username: username.trim(), 
-                email: user.email, 
-                uid: user.uid, 
-                photoURL: user.photoURL || '', 
-                createdAt: serverTimestamp(), 
-                following: [], 
-                followers: [], 
-                savedPosts: [], 
-                lastSeen: serverTimestamp(), 
-                reputation: 0, 
-                lastPostTime: 0 
-            }); 
-            onComplete(); 
-        } catch (error) { await showAlert("Gagal menyimpan data: " + error.message, 'error'); } finally { setLoading(false); } 
-    };
+    const handleSubmit = async (e) => { e.preventDefault(); if (!username.trim()) return await showAlert("Username wajib diisi!", 'error'); setLoading(true); try { await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { username: username.trim(), email: user.email, uid: user.uid, photoURL: user.photoURL || '', createdAt: serverTimestamp(), following: [], followers: [], savedPosts: [], lastSeen: serverTimestamp(), reputation: 0, lastPostTime: 0 }); onComplete(); } catch (error) { await showAlert("Gagal menyimpan data: " + error.message, 'error'); } finally { setLoading(false); } };
     return (
         <div className="fixed inset-0 bg-white z-[80] flex flex-col items-center justify-center p-6 animate-in fade-in">
             <div className="w-full max-w-sm text-center">
@@ -1820,40 +1708,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             });
         }
 
-        // UPDATE: posts -> public_posts
-        const ref = doc(db, getPublicCollection('public_posts'), post.id);
-        // UPDATE: userProfiles -> public_users
-        const authorRef = doc(db, getPublicCollection('public_users'), post.userId);
-        
+        const ref = doc(db, getPublicCollection('posts'), post.id);
+        const authorRef = doc(db, getPublicCollection('userProfiles'), post.userId);
         try {
-            if (newLiked) { 
-                await updateDoc(ref, { likes: arrayUnion(currentUserId) }); 
-                if (post.userId !== currentUserId) { 
-                    // DISABLE BY RULES: User cannot update another user's reputation
-                    // await updateDoc(authorRef, { reputation: increment(1) }); 
-                    
-                    sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); 
-                } 
-            } else { 
-                await updateDoc(ref, { likes: arrayRemove(currentUserId) }); 
-            }
-        } catch (error) { 
-            console.error("Like failed:", error);
-            setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); 
-        }
+            if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(1) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
+            else { await updateDoc(ref, { likes: arrayRemove(currentUserId) }); }
+        } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
     };
 
     const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
-    const handleSave = async () => { 
-        if (isGuest) { onRequestLogin(); return; } 
-        const newSaved = !isSaved; setIsSaved(newSaved); 
-        // UPDATE: userProfiles -> public_users
-        const userRef = doc(db, getPublicCollection('public_users'), currentUserId); 
-        try { 
-            if (newSaved) { await updateDoc(userRef, { savedPosts: arrayUnion(post.id) }); } 
-            else { await updateDoc(userRef, { savedPosts: arrayRemove(post.id) }); } 
-        } catch (error) { setIsSaved(!newSaved); } 
-    };
+    const handleSave = async () => { if (isGuest) { onRequestLogin(); return; } const newSaved = !isSaved; setIsSaved(newSaved); const userRef = doc(db, getPublicCollection('userProfiles'), currentUserId); try { if (newSaved) { await updateDoc(userRef, { savedPosts: arrayUnion(post.id) }); } else { await updateDoc(userRef, { savedPosts: arrayRemove(post.id) }); } } catch (error) { setIsSaved(!newSaved); } };
 
     const handleComment = async (e) => {
         e.preventDefault(); if (isGuest) { onRequestLogin(); return; } if (!profile) return; if (!newComment.trim()) return;
@@ -1864,67 +1728,25 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         try {
             const commentData = { postId: post.id, userId: currentUserId, text: newComment, username: profile.username || 'User', timestamp: serverTimestamp(), parentId: replyTo ? replyTo.id : null, replyToUsername: replyTo ? replyTo.username : null };
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
-            
-            // UPDATE: posts -> public_posts
-            await updateDoc(doc(db, getPublicCollection('public_posts'), post.id), { commentsCount: increment(1) });
+            await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
             
             // Optimistic update
             if(onUpdate) { onUpdate(post.id, { commentsCount: (post.commentsCount || 0) + 1 }); }
 
             // FIX: HARDCORE MODE - Komen cuma +1 Poin (sebelumnya +5)
-            if (post.userId !== currentUserId) { 
-                // DISABLE BY RULES: User cannot update another user's reputation
-                // await updateDoc(doc(db, getPublicCollection('public_users'), post.userId), { reputation: increment(1) }); 
-                
-                if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); 
-            }
-            if (replyTo && replyTo.userId !== currentUserId) { 
-                // DISABLE BY RULES: User cannot update another user's reputation
-                // await updateDoc(doc(db, getPublicCollection('public_users'), replyTo.userId), { reputation: increment(1) }); 
-                
-                sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); 
-            }
+            if (post.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(1) }); if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
+            if (replyTo && replyTo.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(1) }); sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
             setNewComment(''); setReplyTo(null);
         } catch (error) { console.error(error); }
     };
 
     const handleDelete = async () => {
-        const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?";
+        const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini? Reputasi yang didapat akan DITARIK KEMBALI.";
         const ok = await showConfirm(confirmMsg);
-        if (ok) { 
-            try { 
-                // DISABLE BY RULES: Cannot decrement reputation directly
-                /*
-                const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); 
-                const userRef = doc(db, getPublicCollection('public_users'), post.userId); 
-                await updateDoc(userRef, { reputation: increment(-earnedReputation) }); 
-                */
-                
-                // UPDATE: posts -> public_posts
-                await deleteDoc(doc(db, getPublicCollection('public_posts'), post.id)); 
-                await showAlert(`Postingan dihapus.`, 'success'); 
-                if(onUpdate) onUpdate(post.id, null); /* NULL means deleted */ 
-            } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } 
-        } 
+        if (ok) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); await showAlert(`Postingan dihapus.`, 'success'); if(onUpdate) onUpdate(post.id, null); /* NULL means deleted */ } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } } 
     };
-    
-    const handleDeleteComment = async (commentId) => { 
-        const ok = await showConfirm("Hapus komentar?"); 
-        if(ok) { 
-            await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); 
-            // UPDATE: posts -> public_posts
-            await updateDoc(doc(db, getPublicCollection('public_posts'), post.id), { commentsCount: increment(-1) }); 
-            if(onUpdate) onUpdate(post.id, { commentsCount: Math.max(0, (post.commentsCount||0)-1) }); 
-        } 
-    };
-    
-    const handleUpdatePost = async () => { 
-        // UPDATE: posts -> public_posts
-        await updateDoc(doc(db, getPublicCollection('public_posts'), post.id), { title: editedTitle, content: editedContent }); 
-        setIsEditing(false); 
-        if(onUpdate) onUpdate(post.id, { title: editedTitle, content: editedContent }); 
-    };
-    
+    const handleDeleteComment = async (commentId) => { const ok = await showConfirm("Hapus komentar?"); if(ok) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); if(onUpdate) onUpdate(post.id, { commentsCount: Math.max(0, (post.commentsCount||0)-1) }); } };
+    const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); if(onUpdate) onUpdate(post.id, { title: editedTitle, content: editedContent }); };
     const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); await showAlert('Link Disalin! Orang lain bisa membukanya langsung.', 'success'); } catch (e) { await showAlert('Gagal menyalin link', 'error'); } };
 
     useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
@@ -2100,12 +1922,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
             return;
         }
 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            const userDoc = await getDoc(doc(db, getPublicCollection('public_users'), userId)); 
-            if (userDoc.exists()) { const userData = userDoc.data(); const lastPost = userData.lastPostTime || 0; const now = Date.now(); if (now - lastPost < 60000) { await showAlert("Tunggu 1 menit sebelum memposting lagi. (Anti-Spam)", 'error'); return; } } 
-        } catch(err) { console.error("Gagal cek cooldown", err); }
-        
+        try { const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), userId)); if (userDoc.exists()) { const userData = userDoc.data(); const lastPost = userData.lastPostTime || 0; const now = Date.now(); if (now - lastPost < 60000) { await showAlert("Tunggu 1 menit sebelum memposting lagi. (Anti-Spam)", 'error'); return; } } } catch(err) { console.error("Gagal cek cooldown", err); }
         setLoading(true); setProg(0); setLoadingText("Memulai...");
         try {
             let mediaUrls = []; let mediaType = 'text';
@@ -2113,8 +1930,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             
             // FIX: Sertakan photoURL dalam data user saat membuat post
-            // UPDATE: posts -> public_posts
-            const ref = await addDoc(collection(db, getPublicCollection('public_posts')), { 
+            const ref = await addDoc(collection(db, getPublicCollection('posts')), { 
                 userId, 
                 title: form.title, 
                 content: form.content, 
@@ -2129,18 +1945,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
             });
             
             // FIX: HARDCORE MODE - Buat Post cuma +2 Poin (sebelumnya +10)
-            // DISABLE BY RULES: User cannot update own reputation directly
-            /*
-            await updateDoc(doc(db, getPublicCollection('public_users'), userId), { 
-                reputation: increment(2), 
-                lastPostTime: Date.now() 
-            }); 
-            */
-            // But we can update lastPostTime? Rules forbid 'points' and 'reputation' changes. Other fields might be OK if isOwner.
-            // But strict rule says "allow update: if isOwner(userId) && request.resource.data.reputation == resource.data.reputation".
-            // So updating 'lastPostTime' is allowed if reputation is untouched.
-            await updateDoc(doc(db, getPublicCollection('public_users'), userId), { lastPostTime: Date.now() }); 
-
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(2), lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
             await showAlert("Postingan berhasil diterbitkan!", 'success');
         } catch(e){ await showAlert(e.message, 'error'); } finally { setLoading(false); }
@@ -2243,25 +2048,8 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const targetFollowing = profileData.following || [];
     const friendsCount = targetFollowing.filter(id => targetFollowers.includes(id)).length;
 
-    const save = async () => { 
-        setLoad(true); 
-        try { 
-            let url = profileData.photoURL; 
-            if (file) { url = await compressImageToBase64(file); } 
-            // UPDATE: userProfiles -> public_users
-            await updateDoc(doc(db, getPublicCollection('public_users'), profileData.uid), {photoURL:url, username:name}); 
-            setEdit(false); 
-        } catch(e){alert(e.message)} finally{setLoad(false)}; 
-    };
-    
-    const saveMood = async () => { 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            await updateDoc(doc(db, getPublicCollection('public_users'), profileData.uid), { mood: mood }); 
-            setIsEditingMood(false); 
-        } catch(e) { console.error(e); } 
-    };
-    
+    const save = async () => { setLoad(true); try { let url = profileData.photoURL; if (file) { url = await compressImageToBase64(file); } await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
+    const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const badge = getReputationBadge(profileData.reputation || 0, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
     const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
@@ -2416,8 +2204,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     
     // FETCH
     useEffect(() => { 
-        // UPDATE: notifications -> public_notifications
-        const q = query(collection(db, getPublicCollection('public_notifications')), where('toUserId','==',userId), where('type', '!=', 'chat'), orderBy('type'), orderBy('timestamp','desc'), limit(50)); 
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), where('type', '!=', 'chat'), orderBy('type'), orderBy('timestamp','desc'), limit(50)); 
         return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); 
     }, [userId]);
     
@@ -2467,14 +2254,12 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
             // Mark all in group as read
             const batch = writeBatch(db);
             n.items.forEach(item => {
-                // UPDATE: notifications -> public_notifications
-                batch.update(doc(db, getPublicCollection('public_notifications'), item.id), { isRead: true });
+                batch.update(doc(db, getPublicCollection('notifications'), item.id), { isRead: true });
             });
             await batch.commit();
             setTargetPostId(n.postId); setPage('view_post');
         } else {
-            // UPDATE: notifications -> public_notifications
-            await updateDoc(doc(db, getPublicCollection('public_notifications'), n.id), {isRead:true}); 
+            await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); 
             if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } 
             else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); }
         }
@@ -2554,13 +2339,11 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         const fetchSinglePost = async () => {
             setLoading(true);
             try {
-                // UPDATE: posts -> public_posts
-                const docRef = doc(db, getPublicCollection('public_posts'), postId);
+                const docRef = doc(db, getPublicCollection('posts'), postId);
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    // UPDATE: userProfiles -> public_users
-                    const userSnap = await getDoc(doc(db, getPublicCollection('public_users'), data.userId));
+                    const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
                     const completePost = { id: docSnap.id, ...data, user: userSnap.exists() ? userSnap.data() : { username: 'User' } };
                     setFetchedPost(completePost);
                 } else { setError(true); }
@@ -2718,19 +2501,7 @@ const MainAppContent = () => {
         if (diff >= oneDay) { setCanClaimReward(true); setNextRewardTime(''); } else { setCanClaimReward(false); const remaining = oneDay - diff; const hrs = Math.floor(remaining / (1000 * 60 * 60)); const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60)); setNextRewardTime(`${hrs} jam ${mins} menit`); }
     }, [profile, showRewards]);
 
-    const handleClaimReward = async () => { 
-        if (!canClaimReward || !user) return; 
-        try { 
-            // UPDATE: userProfiles -> public_users
-            // DISABLE BY RULES: Cannot increment reputation
-            // await updateDoc(doc(db, getPublicCollection('public_users'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); 
-            
-            await updateDoc(doc(db, getPublicCollection('public_users'), user.uid), { lastRewardClaim: serverTimestamp() });
-            await showAlert("Absen harian berhasil! (Poin dinonaktifkan sementara demi keamanan)", 'success'); 
-            setShowRewards(false); 
-        } catch (e) { await showAlert("Gagal klaim: " + e.message, 'error'); } 
-    };
-    
+    const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); await showAlert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas.", 'success'); setShowRewards(false); } catch (e) { await showAlert("Gagal klaim: " + e.message, 'error'); } };
     const handleLogout = async () => { const ok = await showConfirm("Yakin ingin keluar akun?"); if(ok) { await signOut(auth); setPage('home'); setSidebarOpen(false); } };
 
     useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
@@ -2738,9 +2509,8 @@ const MainAppContent = () => {
     // FIX: Listen Chat Unread Counts Specifically
     useEffect(() => {
         if (!user) return;
-        // UPDATE: chats -> public_chats
         const qChat = query(
-            collection(db, getPublicCollection('public_chats')), 
+            collection(db, getPublicCollection('chats')), 
             where('participants', 'array-contains', user.uid)
         );
         const unsubChat = onSnapshot(qChat, (snapshot) => {
@@ -2759,9 +2529,10 @@ const MainAppContent = () => {
     // FIX: Notifikasi Regular (Kecuali Chat)
     useEffect(() => {
         if (!user) return;
-        // UPDATE: notifications -> public_notifications
+        // Filter type != 'chat' tidak bisa langsung di Firestore karena limitasi compound query
+        // Jadi kita ambil notif belum dibaca, lalu filter di client
         const q = query(
-            collection(db, getPublicCollection('public_notifications')), 
+            collection(db, getPublicCollection('notifications')), 
             where('toUserId', '==', user.uid), 
             where('isRead', '==', false), 
             orderBy('timestamp', 'desc'), 
@@ -2797,13 +2568,12 @@ const MainAppContent = () => {
             setUser(u); 
             requestNotificationPermission(u.uid); 
             try {
-                // UPDATE: userProfiles -> public_users
-                const userDoc = await getDoc(doc(db, getPublicCollection('public_users'), u.uid)); 
+                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
                 if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
                 else { 
                     const userData = userDoc.data(); 
                     if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
-                    await updateDoc(doc(db, getPublicCollection('public_users'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 }
             } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
         } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
@@ -2811,8 +2581,7 @@ const MainAppContent = () => {
     
     useEffect(() => { 
         if(user) { 
-            // UPDATE: userProfiles -> public_users
-            const unsubP = onSnapshot(doc(db, getPublicCollection('public_users'), user.uid), 
+            const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
                 async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } setIsProfileLoaded(true); },
                 (error) => { console.error("Profile Snapshot Error:", error); setIsProfileLoaded(true); }
             ); 
@@ -2821,36 +2590,12 @@ const MainAppContent = () => {
     }, [user]);
 
     useEffect(() => {
-        // UPDATE: userProfiles -> public_users
-        const unsubUsers = onSnapshot(collection(db, getPublicCollection('public_users')), (s) => { setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))); setIsUsersLoaded(true); }, (error) => { console.error("CRITICAL ERROR: Gagal load userProfiles.", error); setIsUsersLoaded(true); });
-        // UPDATE: posts -> public_posts
-        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('public_posts')), orderBy('timestamp', 'desc'), limit(20)), (s) => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); setPosts(raw); setIsLoadingFeed(false); }, (error) => { console.error("CRITICAL ERROR: Gagal load posts cache.", error); setIsLoadingFeed(false); });
+        const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), (s) => { setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))); setIsUsersLoaded(true); }, (error) => { console.error("CRITICAL ERROR: Gagal load userProfiles.", error); setIsUsersLoaded(true); });
+        const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), (s) => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); setPosts(raw); setIsLoadingFeed(false); }, (error) => { console.error("CRITICAL ERROR: Gagal load posts cache.", error); setIsLoadingFeed(false); });
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
 
-    const handleFollow = async (uid, isFollowing) => { 
-        if (!user) { setShowAuthModal(true); return; } 
-        if (!profile) return; 
-        // UPDATE: userProfiles -> public_users
-        const meRef = doc(db, getPublicCollection('public_users'), profile.uid); 
-        const targetRef = doc(db, getPublicCollection('public_users'), uid); 
-        try { 
-            if(isFollowing) { 
-                await updateDoc(meRef, {following: arrayRemove(uid)}); 
-                await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); 
-            } else { 
-                await updateDoc(meRef, {following: arrayUnion(uid)}); 
-                await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); 
-                if (uid !== profile.uid) { 
-                    // DISABLE BY RULES: Cannot increment reputation
-                    // await updateDoc(targetRef, { reputation: increment(5) }); 
-                    
-                    sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); 
-                } 
-            } 
-        } catch (e) { console.error("Gagal update pertemanan", e); } 
-    };
-    
+    const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
     const isDataReady = isUsersLoaded && isProfileLoaded;
