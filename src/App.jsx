@@ -33,7 +33,8 @@ import {
     where, 
     orderBy,
     writeBatch,
-    getDocs 
+    getDocs,
+    startAfter 
 } from 'firebase/firestore';
 
 // IMPORT KHUSUS NOTIFIKASI
@@ -51,7 +52,7 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
     Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
-    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus
+    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical
 } from 'lucide-react';
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
@@ -195,9 +196,6 @@ const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// DEBUGGING: Cek path collection di console
-console.log("DEBUG: Firestore Path ->", getPublicCollection('userProfiles'));
-
 // Initialize Firebase with Error Handling
 let app, auth, db, googleProvider, messaging;
 try {
@@ -227,7 +225,7 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
         return { posts: [], nextCursor: null };
     }
     const params = new URLSearchParams();
-    params.append('mode', mode === 'friends' ? 'home' : mode); // Fallback: jika API blm support friends, pake home dulu
+    params.append('mode', mode === 'friends' ? 'home' : mode); 
     params.append('limit', limit);
     if (cursor) params.append('cursor', cursor);
     if (viewerId) params.append('viewerId', viewerId);
@@ -256,7 +254,6 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
 };
 
 const logSystemError = async (error, context = 'general', user = null) => {
-    // DEBUGGING: Tampilkan error sistem di console juga
     console.error(`[SystemLog:${context}]`, error);
     try {
         if (!db) return;
@@ -294,13 +291,15 @@ const compressImageToBase64 = (file) => {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_WIDTH = 600; 
+                // FIX 3: Hemat Bandwidth - Kompresi gambar lebih agresif
+                const MAX_WIDTH = 500; 
                 let width = img.width;
                 let height = img.height;
                 if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
                 canvas.width = width; canvas.height = height;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
+                // Kompresi JPEG kualitas 0.5 (cukup untuk web)
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                 resolve(dataUrl);
             };
@@ -326,17 +325,6 @@ const uploadToFaaAPI = async (file, onProgress) => {
         else if (data && data.url) { return data.url; } 
         else { throw new Error('Gagal mendapatkan URL dari server.'); }
     } catch (error) { onProgress(0); throw new Error('Gagal upload video/audio. Cek koneksi.'); }
-};
-
-const shuffleArray = (array) => {
-    const newArray = [...array]; 
-    let currentIndex = newArray.length, randomIndex;
-    while (currentIndex !== 0) {
-        randomIndex = Math.floor(Math.random() * currentIndex);
-        currentIndex--;
-        [newArray[currentIndex], newArray[randomIndex]] = [newArray[randomIndex], newArray[currentIndex]];
-    }
-    return newArray;
 };
 
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
@@ -405,8 +393,8 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & SIDEBAR
 // ==========================================
 
-// --- NEW COMPONENT: MODERN SIDEBAR ---
-const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriendsClick, setShowAuthModal }) => {
+// FIX: Tambahkan props chatUnreadCount untuk indikator merah di sidebar
+const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriendsClick, setShowAuthModal, chatUnreadCount }) => {
     const sidebarRef = useRef(null);
     useEffect(() => {
         const handleClickOutside = (event) => { if (sidebarRef.current && !sidebarRef.current.contains(event.target)) onClose(); };
@@ -449,7 +437,8 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                     <SidebarItem icon={Trophy} label="Papan Peringkat" onClick={() => { setPage('leaderboard'); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Sosial & Info</div>
-                    <SidebarItem icon={MessageCircle} label="Ruang Chat" onClick={() => { setPage('chat'); onClose(); }} />
+                    {/* FIX: Indikator Chat Belum Dibaca */}
+                    <SidebarItem icon={MessageCircle} label="Ruang Chat" onClick={() => { setPage('chat'); onClose(); }} badge={chatUnreadCount} />
                     <SidebarItem icon={Users} label="Teman Saya" onClick={() => { handleFriendsClick(); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Hukum & Bantuan</div>
@@ -468,14 +457,21 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
     );
 };
 
-const SidebarItem = ({ icon: Icon, label, onClick }) => (
-    <button onClick={onClick} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition-colors">
-        <Icon size={18} className="text-gray-400"/> {label}
+const SidebarItem = ({ icon: Icon, label, onClick, badge }) => (
+    <button onClick={onClick} className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition-colors">
+        <div className="flex items-center gap-3">
+            <Icon size={18} className="text-gray-400"/> {label}
+        </div>
+        {badge > 0 && (
+            <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                {badge > 99 ? '99+' : badge}
+            </span>
+        )}
     </button>
 );
 
 // ==========================================
-// BAGIAN: SISTEM CHAT REALTIME (DIPERBAIKI)
+// BAGIAN: SISTEM CHAT REALTIME (DIPERBAIKI TOTAL)
 // ==========================================
 
 const ChatSystem = ({ currentUser, onBack }) => {
@@ -664,7 +660,7 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
 
 const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
     const [friends, setFriends] = useState([]);
-    const [loading, setLoading] = useState(true); // PERBAIKAN: Indikator loading
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const load = async () => {
@@ -699,7 +695,7 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
                      <button onClick={onClose}><X/></button>
                  </div>
                  <div className="flex-1 overflow-y-auto p-2">
-                     {loading ? ( // TAMPILKAN LOADING
+                     {loading ? (
                          <div className="flex flex-col items-center justify-center h-40 gap-2 text-gray-400">
                              <Loader2 className="animate-spin text-sky-500" size={32} />
                              <p className="text-xs">Memuat daftar teman...</p>
@@ -732,13 +728,18 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     const [isTyping, setIsTyping] = useState(false);
     const [replyTo, setReplyTo] = useState(null);
     const bottomRef = useRef(null);
+    const topRef = useRef(null);
     const typingTimeout = useRef(null);
-    const [selectedMsg, setSelectedMsg] = useState(null); // PERBAIKAN: Context menu logic
-    const [showEmoji, setShowEmoji] = useState(false); // PERBAIKAN: Emoji state
+    const [selectedMsg, setSelectedMsg] = useState(null);
+    const [showEmoji, setShowEmoji] = useState(false);
+    const [messagesLimit, setMessagesLimit] = useState(15); // FIX: Lazy loading limit
+    const [loadingMore, setLoadingMore] = useState(false);
+    const lastSentTime = useRef(0);
 
     const recipientId = recipient?.uid || recipientProfile?.uid;
     const commonEmojis = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🙏", "👋", "🤔", "🎉", "🤣", "🥺"];
 
+    // Fetch Recipient Profile
     useEffect(() => {
         if (!recipientId) return;
         const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), recipientId), (doc) => {
@@ -747,44 +748,107 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         return () => unsub();
     }, [recipientId]);
 
+    // FIX: Auto-delete messages older than 7 days (cleanup task)
+    // Jalankan hanya sekali saat komponen mount
+    useEffect(() => {
+        const cleanupOldMessages = async () => {
+            if (!chatId) return;
+            try {
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                
+                // Cari pesan lama yg SUDAH dibaca
+                const q = query(
+                    collection(db, getPublicCollection('chats'), chatId, 'messages'),
+                    where('timestamp', '<', sevenDaysAgo),
+                    where('isRead', '==', true),
+                    limit(50) // Batch limit
+                );
+                
+                const snapshot = await getDocs(q);
+                if (!snapshot.empty) {
+                    const batch = writeBatch(db);
+                    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    console.log(`[Auto-Clean] Deleted ${snapshot.size} old messages.`);
+                }
+            } catch (e) { console.error("Auto-cleanup failed:", e); }
+        };
+        cleanupOldMessages();
+    }, [chatId]);
+
+    // Fetch Messages with Limit (Lazy Loading)
     useEffect(() => {
         if (!chatId) return;
-        const q = query(collection(db, getPublicCollection('chats'), chatId, 'messages'), orderBy('timestamp', 'asc'));
+        
+        // FIX: Path error - Gunakan collection() dengan path lengkap
+        const messagesRef = collection(db, getPublicCollection('chats'), chatId, 'messages');
+        const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(messagesLimit));
+
         const unsub = onSnapshot(q, (snapshot) => {
-            const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
             setMessages(msgs);
             
+            // Mark unread as read (logic tetap sama)
             const unreadIds = msgs.filter(m => m.senderId !== currentUser.uid && !m.isRead).map(m => m.id);
             if (unreadIds.length > 0) {
                 unreadIds.forEach(id => {
-                    updateDoc(doc(db, getPublicCollection('chats'), chatId, 'messages'), id, { isRead: true });
+                    // FIX: Path error - Gunakan doc() dengan 8 segmen (col, id, col, id...)
+                    const msgDocRef = doc(db, getPublicCollection('chats'), chatId, 'messages', id);
+                    updateDoc(msgDocRef, { isRead: true }).catch(err => console.error("Read mark fail:", err));
                 });
-                updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`lastMessage.isRead`]: true });
+                // Update parent chat doc
+                updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`lastMessage.isRead`]: true }).catch(()=>{});
             }
         });
         return () => unsub();
-    }, [chatId]);
+    }, [chatId, messagesLimit]); // Re-run when limit changes
 
+    // Scroll effect
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        if (messagesLimit === 15) { // Only scroll to bottom on initial load
+             bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [messages, messagesLimit]);
+
+    const handleLoadMore = () => {
+        setLoadingMore(true);
+        setMessagesLimit(prev => prev + 15);
+        setTimeout(() => setLoadingMore(false), 1000);
+    };
 
     const handleTyping = (e) => {
         setText(e.target.value);
         if (!isTyping) {
             setIsTyping(true);
-            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: true });
+            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: true }).catch(()=>{});
         }
         clearTimeout(typingTimeout.current);
         typingTimeout.current = setTimeout(() => {
             setIsTyping(false);
-            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: false });
+            updateDoc(doc(db, getPublicCollection('chats'), chatId), { [`typing.${currentUser.uid}`]: false }).catch(()=>{});
         }, 2000);
     };
 
     const sendMessage = async (e) => {
         if(e) e.preventDefault();
+        
+        // FIX: Anti-Spam (1 detik delay)
+        const now = Date.now();
+        if (now - lastSentTime.current < 1000) {
+             showAlert("Tunggu sebentar sebelum mengirim pesan lagi.", "error");
+             return;
+        }
+        lastSentTime.current = now;
+
         if (!text.trim()) return;
+        
+        // FIX: Character Limit (1000 chars)
+        if (text.length > 1000) {
+            showAlert("Pesan terlalu panjang (Maks 1000 karakter).", "error");
+            return;
+        }
+
         const msgText = text.trim();
         setText(''); setReplyTo(null); setShowEmoji(false);
         
@@ -794,7 +858,12 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                 senderId: currentUser.uid,
                 timestamp: serverTimestamp(),
                 isRead: false,
-                replyTo: replyTo ? { id: replyTo.id, text: replyTo.text, senderName: replyTo.senderId === currentUser.uid ? 'Anda' : recipientProfile.username } : null
+                // FIX: Reply structure agar UI bisa render dengan benar
+                replyTo: replyTo ? { 
+                    id: replyTo.id, 
+                    text: replyTo.text, 
+                    senderName: replyTo.senderId === currentUser.uid ? 'Anda' : recipientProfile.username 
+                } : null
             };
             
             await addDoc(collection(db, getPublicCollection('chats'), chatId, 'messages'), msgData);
@@ -806,14 +875,10 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             });
             
             if (!isUserOnline(recipientProfile?.lastSeen)) {
-                sendNotification(recipientId, 'chat', `mengirim pesan: ${msgText}`, {uid: currentUser.uid, username: currentUser.displayName || 'Teman', photoURL: currentUser.photoURL});
+                sendNotification(recipientId, 'chat', `mengirim pesan: ${msgText.substring(0, 30)}...`, {uid: currentUser.uid, username: currentUser.displayName || 'Teman', photoURL: currentUser.photoURL});
             }
             
         } catch (e) { console.error("Send failed", e); showAlert("Gagal kirim pesan", "error"); }
-    };
-
-    const handleLongPressMsg = (msg) => {
-        setSelectedMsg(msg);
     };
 
     const handleActionReply = () => {
@@ -829,16 +894,21 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
         showAlert("Teks disalin", "success");
     };
 
+    // FIX: Fitur Hapus Pesan yang sebelumnya error
     const handleActionDelete = async () => {
         if(!selectedMsg) return;
-        try { await deleteDoc(doc(db, getPublicCollection('chats'), chatId, 'messages'), selectedMsg.id); }
-        catch (e) {}
+        try { 
+            // FIX: Gunakan path 8 segmen yang benar
+            await deleteDoc(doc(db, getPublicCollection('chats'), chatId, 'messages', selectedMsg.id)); 
+            showAlert("Pesan dihapus", "success");
+        }
+        catch (e) { console.error(e); showAlert("Gagal menghapus pesan", "error"); }
         setSelectedMsg(null);
     };
 
     return (
         <div className="flex flex-col h-full bg-[#EFE7DD] dark:bg-gray-900 absolute inset-0">
-            {/* Header Room Fixed - ATAU Context Menu Banner jika selectedMsg ada */}
+            {/* Header Room / Context Menu */}
             {selectedMsg ? (
                 <div className="px-4 py-3 bg-sky-600 text-white flex items-center justify-between shadow-md z-30 animate-in slide-in-from-top duration-200">
                     <div className="flex items-center gap-4">
@@ -867,12 +937,20 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                             </div>
                         </div>
                     </div>
-                    <button className="p-2"><MoreHorizontal size={24} className="text-gray-500"/></button>
+                    <button className="p-2"><MoreVertical size={24} className="text-gray-500"/></button>
                 </div>
             )}
 
             {/* Message Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[url('https://c.termai.cc/i200/BGchat.png')] bg-repeat bg-contain opacity-100 dark:opacity-80">
+                {/* FIX: Tombol Load More / Tarik ke atas */}
+                <div className="flex justify-center py-2" ref={topRef}>
+                    <button onClick={handleLoadMore} className="text-xs text-gray-500 bg-white/80 dark:bg-gray-800/80 px-3 py-1 rounded-full shadow-sm hover:bg-white transition flex items-center gap-1">
+                        {loadingMore ? <Loader2 size={12} className="animate-spin"/> : <ArrowUp size={12}/>}
+                        {loadingMore ? 'Memuat...' : 'Tarik untuk pesan lama'}
+                    </button>
+                </div>
+
                 {messages.map((msg, idx) => {
                     const isMe = msg.senderId === currentUser.uid;
                     const showDate = idx === 0 || (msg.timestamp?.toMillis() - messages[idx-1].timestamp?.toMillis() > 3600000);
@@ -884,7 +962,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                                 msg={msg} 
                                 isMe={isMe} 
                                 isSelected={selectedMsg && selectedMsg.id === msg.id}
-                                onLongPress={() => handleLongPressMsg(msg)}
+                                onLongPress={() => setSelectedMsg(msg)} // Fix Long Press trigger
                             />
                         </React.Fragment>
                     );
@@ -895,10 +973,10 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             {/* Input Area */}
             <div className="bg-white dark:bg-gray-800 p-2 border-t border-gray-100 dark:border-gray-700 z-20 pb-safe">
                 {replyTo && (
-                    <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-l-4 border-sky-500 mb-2 mx-2">
+                    <div className="flex justify-between items-center bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-l-4 border-sky-500 mb-2 mx-2 animate-in slide-in-from-bottom-2">
                         <div className="text-xs">
                             <p className="font-bold text-sky-600">Membalas {replyTo.senderId === currentUser.uid ? 'Diri sendiri' : recipientProfile.username}</p>
-                            <p className="truncate text-gray-500 dark:text-gray-300">{replyTo.text}</p>
+                            <p className="truncate text-gray-500 dark:text-gray-300 max-w-[250px]">{replyTo.text}</p>
                         </div>
                         <button onClick={() => setReplyTo(null)}><X size={16}/></button>
                     </div>
@@ -912,7 +990,6 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                     </div>
                 )}
                 <form onSubmit={sendMessage} className="flex items-end gap-2 p-2">
-                    {/* PERBAIKAN: Ganti tombol + jadi Emoji Button */}
                     <button type="button" onClick={() => setShowEmoji(!showEmoji)} className={`p-3 transition ${showEmoji ? 'text-sky-500 bg-sky-50 rounded-full' : 'text-gray-400 hover:text-sky-500'}`}>
                         <Smile size={24}/>
                     </button>
@@ -922,10 +999,11 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
                             onChange={handleTyping} 
                             placeholder="Ketik pesan..." 
                             rows="1"
+                            maxLength={1000} // FIX: Limit karakter
                             className="w-full bg-transparent outline-none text-base dark:text-white resize-none max-h-32 py-1.5"
                             style={{ minHeight: '24px' }}
                             onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
-                            onClick={() => setShowEmoji(false)} // Tutup emoji pas ngetik
+                            onClick={() => setShowEmoji(false)}
                         />
                     </div>
                     <button type="submit" disabled={!text.trim()} className="p-3 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 transition disabled:opacity-50"><Send size={20}/></button>
@@ -933,6 +1011,25 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
             </div>
         </div>
     );
+};
+
+// FIX: Helper khusus untuk render link chat yang aman
+const renderChatText = (text) => {
+    if(!text) return "";
+    // Regex URL sederhana
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+    
+    return parts.map((part, i) => {
+        if (part.match(urlRegex)) {
+            return (
+                <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 dark:text-blue-400 underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
+                    {part}
+                </a>
+            );
+        }
+        return part;
+    });
 };
 
 const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
@@ -943,10 +1040,7 @@ const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
     
     const touchStart = useRef(0);
     const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; handleStart(); };
-    const handleTouchEnd = (e) => {
-        handleEnd();
-        // Prevent accidental swipe triggers
-    };
+    const handleTouchEnd = (e) => { handleEnd(); };
 
     return (
         <div 
@@ -956,14 +1050,17 @@ const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
         >
             <div className={`relative max-w-[80%] px-4 py-2.5 rounded-[1.2rem] text-[15px] shadow-sm cursor-pointer ${isMe ? 'bg-sky-500 text-white rounded-tr-none' : 'bg-white dark:bg-gray-700 dark:text-white rounded-tl-none border border-gray-100 dark:border-gray-600'}`}>
                 {msg.replyTo && (
-                    <div className={`mb-1 p-1.5 rounded-lg border-l-4 bg-black/10 text-[11px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
-                        <span className="font-bold opacity-90">{msg.replyTo.senderName}</span>
+                    <div className={`mb-1 p-2 rounded-lg border-l-4 bg-black/5 dark:bg-white/10 text-[11px] ${isMe ? 'border-white/50' : 'border-sky-500'}`}>
+                        <span className="font-bold opacity-90 block mb-0.5">{msg.replyTo.senderName}</span>
                         <p className="truncate opacity-80">{msg.replyTo.text}</p>
                     </div>
                 )}
-                <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                {/* FIX: Render text dengan link clickable */}
+                <p className="leading-relaxed whitespace-pre-wrap word-break-all">
+                    {renderChatText(msg.text)}
+                </p>
                 <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${isMe ? 'text-sky-100' : 'text-gray-400'}`}>
-                    <span>{new Date(msg.timestamp?.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    <span>{msg.timestamp ? new Date(msg.timestamp.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '...'}</span>
                     {isMe && (msg.isRead ? <CheckCircle size={12} className="text-white"/> : <Check size={12}/>)}
                 </div>
             </div>
@@ -1520,6 +1617,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
     const handleComment = async (e) => {
         e.preventDefault(); if (isGuest) { onRequestLogin(); return; } if (!profile) return; if (!newComment.trim()) return;
+        
+        // FIX: Limit komentar
+        if(newComment.length > 500) { showAlert("Komentar terlalu panjang.", "error"); return; }
+
         try {
             const commentData = { postId: post.id, userId: currentUserId, text: newComment, username: profile.username || 'User', timestamp: serverTimestamp(), parentId: replyTo ? replyTo.id : null, replyToUsername: replyTo ? replyTo.username : null };
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
@@ -1599,9 +1700,15 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 
                 <div className="flex gap-1">
                     {!isOwner && post.userId !== currentUserId && ( 
-                         // PERBAIKAN 1: Indikator Follow sebagai Tombol Berwarna, bukan titik
-                         <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`p-2 rounded-full transition ${isFriend ? 'text-emerald-500 bg-emerald-50' : isFollowing ? 'text-sky-500 bg-sky-50' : 'text-gray-400 hover:bg-gray-100'}`}>
-                             {isFriend ? <UserCheck size={16}/> : isFollowing ? <UserCheck size={16}/> : <UserPlus size={16}/>}
+                         // PERBAIKAN: Warna tombol follow sesuai status
+                         <button onClick={() => isGuest ? onRequestLogin() : handleFollow(post.userId, isFollowing)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1 ${
+                            isFriend 
+                                ? 'bg-emerald-500 text-white shadow-emerald-200' // Berteman (Hijau)
+                                : isFollowing 
+                                    ? 'bg-yellow-400 text-white shadow-yellow-200' // Mengikuti (Kuning)
+                                    : 'bg-sky-500 text-white shadow-sky-200' // Ikuti (Biru)
+                         }`}>
+                             {isFriend ? <><UserCheck size={14}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
                          </button> 
                     )}
                     {(isOwner || isMeDeveloper) && !isGuest && ( 
@@ -1688,6 +1795,13 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
     const handleFileChange = (e) => { const selectedFiles = Array.from(e.target.files); if (selectedFiles.length > 0) { const isAudio = selectedFiles[0].type.startsWith('audio'); const isVideo = selectedFiles[0].type.startsWith('video'); setForm({ ...form, files: selectedFiles, isShort: isVideo, isAudio: isAudio, url: '' }); } };
     const submit = async (e) => {
         e.preventDefault(); 
+        
+        // FIX: Limit karakter post
+        if(form.content.length > 2000) {
+            await showAlert("Konten terlalu panjang (maks 2000 karakter).", 'error');
+            return;
+        }
+
         try { const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), userId)); if (userDoc.exists()) { const userData = userDoc.data(); const lastPost = userData.lastPostTime || 0; const now = Date.now(); if (now - lastPost < 60000) { await showAlert("Tunggu 1 menit sebelum memposting lagi. (Anti-Spam)", 'error'); return; } } } catch(err) { console.error("Gagal cek cooldown", err); }
         setLoading(true); setProg(0); setLoadingText("Memulai...");
         try {
@@ -1729,7 +1843,7 @@ const CreatePost = ({ setPage, userId, username, onSuccess }) => {
                 
                 <form onSubmit={submit} className="space-y-4">
                     <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul (Opsional)" className="w-full p-3 bg-transparent border-b border-gray-200 dark:border-gray-700 dark:text-white font-bold text-lg outline-none focus:border-sky-500 transition placeholder-gray-400"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Apa yang Anda pikirkan?" rows="8" className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
+                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Apa yang Anda pikirkan?" rows="8" maxLength={2000} className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
                     
                     <div className="flex gap-2 text-xs mb-4"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 font-bold">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 italic font-serif">I</button><button type="button" onClick={insertLink} className="bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 px-3 py-1.5 rounded-full hover:bg-sky-100 flex items-center gap-1 font-bold"><LinkIcon size={12}/> Link</button></div>
                     
@@ -1826,7 +1940,20 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
                 <div className="px-8 mt-2 mb-4 w-full"><div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1"><span>{profileData.reputation || 0} XP</span><span>{rankProgress.next ? `${rankProgress.next} XP` : 'MAX'}</span></div><div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div></div><p className="text-[10px] text-center mt-1 text-sky-500 font-bold">{rankProgress.next ? `Butuh ${rankProgress.next - (profileData.reputation||0)} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}</p></div>
-                {!isSelf && !isGuest && ( <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${isFriend ? 'bg-emerald-500 text-white shadow-emerald-200' : isFollowing ? 'bg-gray-200 text-gray-600' : 'bg-sky-500 text-white shadow-sky-200'}`}>{isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}</button> )}
+                
+                {/* PERBAIKAN: Tombol Follow Profil dengan Warna */}
+                {!isSelf && !isGuest && ( 
+                    <button onClick={()=>handleFollow(profileData.uid, isFollowing)} className={`w-full mb-2 px-8 py-2.5 rounded-full font-bold text-sm shadow-lg transition flex items-center justify-center gap-2 ${
+                        isFriend 
+                            ? 'bg-emerald-500 text-white shadow-emerald-200' 
+                            : isFollowing 
+                                ? 'bg-yellow-400 text-white shadow-yellow-200' 
+                                : 'bg-sky-500 text-white shadow-sky-200'
+                    }`}>
+                        {isFriend ? <><UserCheck size={16}/> Berteman</> : isFollowing ? 'Mengikuti' : 'Ikuti'}
+                    </button> 
+                )}
+                
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
                 <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
@@ -1897,7 +2024,15 @@ const HomeScreen = ({
     const manualRefresh = () => { clearNewPost(); setHomeFeedState(prev => ({ ...prev, posts: [], cursor: null, hasLoaded: false, scrollPos: 0 })); };
 
     const finalPosts = [...feedPosts];
-    if (newPostId) { const newlyCreated = allPosts.find(p => p.id === newPostId); if (newlyCreated && !finalPosts.find(p => p.id === newPostId)) { finalPosts.unshift(newlyCreated); } }
+    // FIX: Profile Pin Bug - Ensure new post has profile attached for instant display
+    if (newPostId) { 
+        const newlyCreated = allPosts.find(p => p.id === newPostId); 
+        if (newlyCreated && !finalPosts.find(p => p.id === newPostId)) { 
+            // Attach current user profile if missing
+            const postWithProfile = { ...newlyCreated, user: newlyCreated.user || profile };
+            finalPosts.unshift(postWithProfile); 
+        } 
+    }
 
     return (
         <div className="w-full max-w-2xl mx-auto pb-24 px-0 md:px-0 pt-4"> 
@@ -1936,7 +2071,12 @@ const HomeScreen = ({
 // ... (NotificationScreen, SinglePostView, SearchScreen sama) ...
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
-    useEffect(() => { const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), orderBy('timestamp','desc'), limit(50)); return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); }, [userId]);
+    // FIX: Hanya ambil notifikasi BUKAN tipe 'chat' di layar ini, karena chat dipisah
+    useEffect(() => { 
+        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), where('type', '!=', 'chat'), orderBy('type'), orderBy('timestamp','desc'), limit(50)); 
+        return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); 
+    }, [userId]);
+    
     const handleClick = async (n) => { await updateDoc(doc(db, getPublicCollection('notifications'), n.id), {isRead:true}); if(n.type==='follow') { setTargetProfileId(n.fromUserId); setPage('other-profile'); } else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); } };
     return <div className="max-w-md md:max-w-xl mx-auto p-4 pb-24 pt-20"><h1 className="text-xl font-black text-gray-800 dark:text-white mb-6">Notifikasi</h1>{notifs.length===0?<div className="text-center py-20 text-gray-400">Tidak ada notifikasi baru.</div>:<div className="space-y-3">{notifs.map(n=><div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition"><div className="relative"><img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/><div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>{n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}</div></div><div className="flex-1"><p className="text-sm font-bold dark:text-gray-200">{n.fromUsername}</p><p className="text-xs text-gray-600 dark:text-gray-400">{n.message}</p></div></div>)}</div>}</div>;
 };
@@ -2045,6 +2185,9 @@ const MainAppContent = () => {
     const [isUsersLoaded, setIsUsersLoaded] = useState(false);
     const [isDataTimeout, setIsDataTimeout] = useState(false);
 
+    // FIX: State untuk Notifikasi Chat Terpisah
+    const [chatUnreadCount, setChatUnreadCount] = useState(0);
+
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
     const lastNotifTimeRef = useRef(0); // Debounce notif
 
@@ -2115,17 +2258,51 @@ const MainAppContent = () => {
 
     useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
 
+    // FIX: Listen Chat Unread Counts Specifically
     useEffect(() => {
         if (!user) return;
-        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId', '==', user.uid), where('isRead', '==', false), orderBy('timestamp', 'desc'), limit(1));
+        const qChat = query(
+            collection(db, getPublicCollection('chats')), 
+            where('participants', 'array-contains', user.uid)
+        );
+        const unsubChat = onSnapshot(qChat, (snapshot) => {
+            // Hitung chat yg punya pesan terakhir dari orang lain dan belum dibaca
+            const unread = snapshot.docs.filter(d => {
+                const data = d.data();
+                return data.lastMessage && 
+                       data.lastMessage.senderId !== user.uid && 
+                       data.lastMessage.isRead === false;
+            }).length;
+            setChatUnreadCount(unread);
+        });
+        return () => unsubChat();
+    }, [user]);
+
+    // FIX: Notifikasi Regular (Kecuali Chat)
+    useEffect(() => {
+        if (!user) return;
+        // Filter type != 'chat' tidak bisa langsung di Firestore karena limitasi compound query
+        // Jadi kita ambil notif belum dibaca, lalu filter di client
+        const q = query(
+            collection(db, getPublicCollection('notifications')), 
+            where('toUserId', '==', user.uid), 
+            where('isRead', '==', false), 
+            orderBy('timestamp', 'desc'), 
+            limit(20)
+        );
+        
         const unsubscribe = onSnapshot(q, (snapshot) => { 
-            setNotifCount(snapshot.size); 
+            // Filter hanya non-chat notifications
+            const regularNotifs = snapshot.docs.filter(d => d.data().type !== 'chat');
+            setNotifCount(regularNotifs.length); 
+            
             snapshot.docChanges().forEach((change) => { 
                 if (change.type === "added") { 
                     const data = change.doc.data(); 
+                    if (data.type === 'chat') return; // Skip chat notif popup here (handled elsewhere if needed)
+
                     const now = Date.now(); 
                     const notifTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0; 
-                    // Spam Protection: Debounce 2 seconds
                     if (now - notifTime < 10000 && now - lastNotifTimeRef.current > 2000) { 
                         lastNotifTimeRef.current = now;
                         if (Notification.permission === "granted") { 
@@ -2160,8 +2337,7 @@ const MainAppContent = () => {
                 async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } setIsProfileLoaded(true); },
                 (error) => { console.error("Profile Snapshot Error:", error); setIsProfileLoaded(true); }
             ); 
-            const unsubNotif = onSnapshot(query(collection(db, getPublicCollection('notifications')), where('toUserId','==',user.uid), where('isRead','==',false)), s=>setNotifCount(s.size)); 
-            return () => { unsubP(); unsubNotif(); }; 
+            return () => { unsubP(); }; 
         } 
     }, [user]);
 
@@ -2196,6 +2372,7 @@ const MainAppContent = () => {
                         user={profile} 
                         onLogout={handleLogout} 
                         setShowAuthModal={setShowAuthModal}
+                        chatUnreadCount={chatUnreadCount} // FIX: Pass prop
                         handleFriendsClick={() => {
                             setHomeFeedState(prev => ({ ...prev, sortType: 'friends', posts: [], cursor: null, hasLoaded: false }));
                             setPage('home');
@@ -2231,8 +2408,10 @@ const MainAppContent = () => {
                                          {notifCount>0 && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                      </button>
                                 )}
-                                <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full dark:text-white dark:hover:bg-gray-800 transition">
+                                <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-full dark:text-white dark:hover:bg-gray-800 transition relative">
                                     <Menu size={24} />
+                                    {/* FIX: Titik merah di hamburger menu jika ada chat */}
+                                    {chatUnreadCount > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                 </button>
                             </div>
                         </header> 
