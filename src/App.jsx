@@ -52,8 +52,7 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
     Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
-    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical,
-    Maximize2, VolumeX 
+    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical
 } from 'lucide-react';
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
@@ -338,24 +337,25 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
+// FIX: Format Waktu Relatif (Update 2025)
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
     try {
         const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
         const now = new Date();
         const seconds = Math.floor((now - date) / 1000);
-        const fullDate = date.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         
-        // FIX: Format Waktu Relatif (Hari/Jam/Menit) sesuai permintaan
-        if (seconds > 86400) {
-            const days = Math.floor(seconds / 86400);
-            return { relative: `${days} hari`, full: fullDate };
-        }
-        if (seconds < 60) return { relative: 'Baru saja', full: fullDate };
+        // Custom Short Format
+        if (seconds < 60) return { relative: 'Baru saja', full: '' };
         const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return { relative: `${minutes} menit`, full: fullDate };
+        if (minutes < 60) return { relative: `${minutes} menit`, full: '' };
         const hours = Math.floor(minutes / 60);
-        return { relative: `${hours} jam`, full: fullDate };
+        if (hours < 24) return { relative: `${hours} jam`, full: '' };
+        const days = Math.floor(hours / 24);
+        if (days < 7) return { relative: `${days} hari`, full: '' };
+        if (days < 30) return { relative: `${Math.floor(days/7)} minggu`, full: '' };
+        
+        return { relative: date.toLocaleDateString('id-ID'), full: date.toLocaleDateString('id-ID') };
     } catch (e) { return { relative: 'Baru saja', full: '' }; }
 };
 
@@ -1211,178 +1211,57 @@ const Lightbox = ({ images, initialIndex, onClose }) => {
     );
 };
 
-// FIX: Komponen Baru ModernAudioPlayer (Vidstack Style)
-const ModernAudioPlayer = ({ src }) => {
+// FIX: Audio Player UI Update (Vidstack-like style)
+const AudioPlayer = ({ src }) => {
     const audioRef = useRef(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [duration, setDuration] = useState(0);
 
-    const togglePlay = (e) => { 
-        e.stopPropagation(); 
-        if (!audioRef.current) return;
-        if (isPlaying) audioRef.current.pause(); 
-        else audioRef.current.play(); 
-        setIsPlaying(!isPlaying); 
-    };
-
-    const handleTimeUpdate = () => {
-        if (!audioRef.current) return;
-        const current = audioRef.current.currentTime;
-        const total = audioRef.current.duration;
-        setDuration(total);
-        setProgress((current / total) * 100);
-    };
-
-    const formatTime = (time) => {
-        if (!time) return "0:00";
-        const min = Math.floor(time / 60);
-        const sec = Math.floor(time % 60);
-        return `${min}:${sec < 10 ? '0' + sec : sec}`;
-    };
-
+    const togglePlay = () => { if (audioRef.current) { if (isPlaying) audioRef.current.pause(); else audioRef.current.play(); setIsPlaying(!isPlaying); } };
+    
     return (
-        <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl p-3 flex items-center gap-3 mb-4 shadow-sm border border-gray-200 dark:border-gray-700 relative overflow-hidden group">
-            {/* Background Blur Effect */}
-            <div className="absolute inset-0 bg-gradient-to-r from-sky-500/5 to-purple-500/5 opacity-50"></div>
-            
-            <button onClick={togglePlay} className="relative z-10 w-10 h-10 bg-white dark:bg-gray-700 text-sky-600 dark:text-sky-400 rounded-full flex items-center justify-center shadow-md hover:scale-105 transition active:scale-95">
-                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-1"/>}
-            </button>
-            
-            <div className="flex-1 relative z-10">
-                <div className="flex justify-between text-[10px] font-bold text-gray-500 dark:text-gray-400 mb-1">
-                    <span className="flex items-center gap-1"><Music size={10}/> Audio Clip</span>
-                    <span>{formatTime(audioRef.current?.currentTime)} / {formatTime(duration)}</span>
-                </div>
-                {/* Progress Bar */}
-                <div className="w-full h-1.5 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden cursor-pointer" onClick={(e) => {
-                    const rect = e.target.getBoundingClientRect();
-                    const percent = (e.clientX - rect.left) / rect.width;
-                    if(audioRef.current) audioRef.current.currentTime = percent * duration;
-                }}>
-                    <div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-100 ease-linear" style={{width: `${progress}%`}}></div>
-                </div>
-            </div>
-            
-            <audio ref={audioRef} src={src} onTimeUpdate={handleTimeUpdate} onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} className="hidden"/>
+        <div className="group bg-black/90 rounded-2xl p-4 flex items-center gap-4 mb-4 shadow-lg border border-white/10 overflow-hidden relative">
+             <div className="absolute inset-0 bg-gradient-to-r from-sky-900/20 to-purple-900/20 opacity-50"></div>
+             <button onClick={togglePlay} className="relative z-10 w-12 h-12 bg-white rounded-full flex items-center justify-center text-black shadow-xl hover:scale-105 transition">
+                {isPlaying ? <Pause size={20} fill="black"/> : <Play size={20} fill="black" className="ml-1"/>}
+             </button>
+             <div className="flex-1 relative z-10">
+                 <div className="flex items-center gap-2 mb-2">
+                     <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1"><Music size={12} className="text-sky-400"/> AUDIO PREVIEW</span>
+                 </div>
+                 <div className="h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
+                     <div className="h-full bg-sky-500 transition-all duration-300" style={{width: `${progress}%`}}></div>
+                 </div>
+                 <audio 
+                    ref={audioRef} 
+                    src={src} 
+                    className="hidden" 
+                    onTimeUpdate={(e) => setProgress((e.target.currentTime / e.target.duration) * 100)}
+                    onEnded={() => {setIsPlaying(false); setProgress(0);}} 
+                    onPause={() => setIsPlaying(false)} 
+                    onPlay={() => setIsPlaying(true)}
+                 />
+             </div>
         </div>
     );
 };
 
-// FIX: Komponen Baru ModernVideoPlayer (Vidstack Style)
-const ModernVideoPlayer = ({ src }) => {
-    const videoRef = useRef(null);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [progress, setProgress] = useState(0);
-    const [isMuted, setIsMuted] = useState(false);
-    const [showControls, setShowControls] = useState(true);
-    const controlTimeout = useRef(null);
-
-    const togglePlay = (e) => {
-        e.stopPropagation();
-        if(!videoRef.current) return;
-        if(isPlaying) videoRef.current.pause();
-        else videoRef.current.play();
-        setIsPlaying(!isPlaying);
-    };
-
-    const handleTimeUpdate = () => {
-        if(!videoRef.current) return;
-        const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-        setProgress(progress);
-    };
-
-    const toggleMute = (e) => {
-        e.stopPropagation();
-        if(!videoRef.current) return;
-        videoRef.current.muted = !isMuted;
-        setIsMuted(!isMuted);
-    };
-
-    const handleMouseEnter = () => {
-        setShowControls(true);
-        clearTimeout(controlTimeout.current);
-    };
-
-    const handleMouseLeave = () => {
-        if(isPlaying) {
-            controlTimeout.current = setTimeout(() => setShowControls(false), 2000);
-        }
-    };
-
-    return (
-        <div className="relative w-full rounded-2xl overflow-hidden bg-black group shadow-lg" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave} onClick={togglePlay}>
-            <video 
-                ref={videoRef} 
-                src={src} 
-                className="w-full h-auto max-h-[500px] object-contain"
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={() => setIsPlaying(false)}
-                loop
-                playsInline
-            />
-            
-            {/* Center Play Button Overlay */}
-            {!isPlaying && (
-                <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/20 backdrop-blur-[1px]">
-                    <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/30 text-white animate-in zoom-in duration-200 shadow-xl">
-                        <Play size={28} fill="white" className="ml-1"/>
-                    </div>
-                </div>
-            )}
-
-            {/* Controls Bar (Vidstack Style) */}
-            <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 z-20 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-                <div className="flex items-center gap-3">
-                    <button onClick={togglePlay} className="text-white hover:text-sky-400 transition">
-                        {isPlaying ? <Pause size={20} fill="white"/> : <Play size={20} fill="white"/>}
-                    </button>
-                    
-                    {/* Progress Slider */}
-                    <div className="flex-1 h-1 bg-white/30 rounded-full overflow-hidden cursor-pointer group/slider relative" onClick={(e) => {
-                         e.stopPropagation();
-                         const rect = e.currentTarget.getBoundingClientRect();
-                         const p = (e.clientX - rect.left) / rect.width;
-                         if(videoRef.current) videoRef.current.currentTime = p * videoRef.current.duration;
-                    }}>
-                        <div className="h-full bg-sky-500 relative" style={{width: `${progress}%`}}>
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-sm scale-0 group-hover/slider:scale-100 transition-transform"></div>
-                        </div>
-                    </div>
-
-                    <button onClick={toggleMute} className="text-white hover:text-sky-400 transition">
-                        {isMuted ? <VolumeX size={18}/> : <Volume2 size={18}/>}
-                    </button>
-                    
-                    <button onClick={(e) => { e.stopPropagation(); if(videoRef.current) videoRef.current.requestFullscreen(); }} className="text-white hover:text-sky-400 transition">
-                         <Maximize2 size={18}/>
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const AudioPlayer = ({ src }) => {
-    // Legacy Wrapper to support old props but use new design
-    return <ModernAudioPlayer src={src} />;
-};
-
-// FIX: Splash Screen dengan Background Image Baru & Transparent Blur
+// FIX: Splash Screen Update (Background Image & Blur)
 const SplashScreen = () => (
-    <div className="fixed inset-0 bg-cover bg-center z-[100] flex flex-col items-center justify-center relative" style={{backgroundImage: "url('https://c.termai.cc/i120/womQPBg.jpg')"}}>
-        <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/80 backdrop-blur-sm"></div>
-        <div className="relative z-10 flex flex-col items-center animate-in zoom-in duration-500">
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[url('https://c.termai.cc/i120/womQPBg.jpg')] bg-cover bg-center">
+        {/* Overlay Blur & Color */}
+        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm"></div>
+        
+        <div className="relative z-10 flex flex-col items-center">
             <div className="relative mb-8 animate-bounce-slow">
                 <img src={APP_LOGO} className="w-32 h-32 object-contain drop-shadow-2xl"/>
-                <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-30 rounded-full animate-pulse"></div>
+                <div className="absolute inset-0 bg-sky-400 blur-3xl opacity-20 rounded-full animate-pulse"></div>
             </div>
-            <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-purple-600 mb-2 tracking-widest drop-shadow-sm">{APP_NAME}</h1>
-            <div className="w-48 h-1.5 bg-gray-200/50 dark:bg-gray-700/50 rounded-full overflow-hidden mb-4 backdrop-blur-md">
+            <h1 className="text-3xl font-black text-gray-800 dark:text-white mb-2 tracking-widest drop-shadow-sm">{APP_NAME}</h1>
+            <div className="w-48 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full overflow-hidden mb-4 shadow-inner">
                 <div className="h-full bg-sky-500 animate-progress-indeterminate"></div>
             </div>
-            <p className="text-gray-600 dark:text-gray-300 text-xs font-bold animate-pulse">Menghubungkan ke dunia...</p>
+            <p className="text-gray-500 dark:text-gray-300 text-xs font-bold animate-pulse">Menghubungkan ke server...</p>
         </div>
     </div>
 );
@@ -1836,6 +1715,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const CommentList = ({ commentList }) => ( <div className="space-y-3">{commentList.map(c => <CommentItem key={c.id} c={c} isReply={false} />)}</div> );
 
     // UI REDESIGN: Modern Feed Style (Facebook/Threads)
+    // REMOVED HOVER EFFECT: Removed "hover:bg-gray-50/50" from main div
     return (
         <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors">
             {post.isShort && <div className="mb-2"><span className="bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center w-fit"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</span></div>}
@@ -1843,6 +1723,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             <div className="flex justify-between items-start mb-3">
                 <div className="flex gap-3">
                     <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer" onClick={() => goToProfile(post.userId)}>
+                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong */}
                         <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
                     </div>
                     <div>
@@ -1887,12 +1768,19 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                     
                     <div onDoubleClick={handleDoubleTap} className="relative mt-2 rounded-xl overflow-hidden">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
+                         {isAudio && <AudioPlayer src={post.mediaUrl || embed.url} />}
                          
-                         {/* FIX: Gunakan Modern Player Component */}
-                         {isAudio && <ModernAudioPlayer src={post.mediaUrl || embed.url} />}
-                         
-                         {/* FIX VIDEO: Render ModernVideoPlayer */}
-                         {isVideo && <ModernVideoPlayer src={post.mediaUrl} />}
+                         {/* FIX: Video UI Upgrade (Vidstack Style - Dark Theme, Rounded) */}
+                         {isVideo && (
+                             <div className="relative rounded-xl overflow-hidden bg-black group">
+                                 <video 
+                                    src={post.mediaUrl} 
+                                    controls 
+                                    className="w-full h-auto max-h-[80vh] object-contain"
+                                    style={{backgroundColor: '#000'}}
+                                 />
+                             </div>
+                         )}
                          
                          {displayEmbed?.type === 'youtube' && <div className="aspect-video rounded-lg overflow-hidden"><iframe src={displayEmbed.embedUrl} className="absolute top-0 left-0 w-full h-full border-0" allowFullScreen></iframe></div>}
                          {displayEmbed?.type === 'instagram' && ( <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"><iframe src={displayEmbed.embedUrl} className="w-full h-full border-0" scrolling="no" allowTransparency="true"></iframe></div>)}
@@ -1935,12 +1823,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     );
 };
 
-// FIX: Tambahkan Prop userPhoto agar bisa disimpan saat posting
-const CreatePost = ({ setPage, userId, username, onSuccess, userPhoto }) => {
+// FIX: Tambahkan prop userPhoto agar foto profil muncul instan saat baru post
+const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
     const { showAlert } = useCustomAlert();
     const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
-    const [loadingText, setLoadingText] = useState(""); 
+    const [loadingText, setLoadingText] = useState(""); // UI: Fun Loading Text
 
     // Fun loading text logic
     const funTexts = ["Menghubungi satelit...", "Memasak postingan...", "Mengirim sinyal ke Mars...", "Sabar ya, lagi loading...", "Menyusun pixel...", "Mengupload kenangan...", "Hampir siap..."];
@@ -1972,9 +1860,22 @@ const CreatePost = ({ setPage, userId, username, onSuccess, userPhoto }) => {
             if (form.files.length > 0) { const firstFile = form.files[0]; if (firstFile.type.startsWith('image')) { mediaType = 'image'; setProg(10); for (let i = 0; i < form.files.length; i++) { const base64 = await compressImageToBase64(form.files[i]); mediaUrls.push(base64); setProg(10 + ((i + 1) / form.files.length) * 80); } } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) { const uploadedUrl = await uploadToFaaAPI(firstFile, setProg); mediaUrls.push(uploadedUrl); mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio'; setProg(100); } } else if (form.url) { mediaType = 'link'; mediaUrls.push(form.url); }
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             
-            // FIX: Sertakan photoURL di user object agar saat postingan baru muncul, foto profil tidak blank
-            const ref = await addDoc(collection(db, getPublicCollection('posts')), { userId, title: form.title, content: form.content, mediaUrls: mediaUrls, mediaUrl: mediaUrls[0] || '', mediaType: mediaType, timestamp: serverTimestamp(), likes: [], commentsCount: 0, category: category, user: {username, uid: userId, photoURL: userPhoto || ''} });
+            // FIX: Sertakan photoURL dalam data user saat membuat post
+            const ref = await addDoc(collection(db, getPublicCollection('posts')), { 
+                userId, 
+                title: form.title, 
+                content: form.content, 
+                mediaUrls: mediaUrls, 
+                mediaUrl: mediaUrls[0] || '', 
+                mediaType: mediaType, 
+                timestamp: serverTimestamp(), 
+                likes: [], 
+                commentsCount: 0, 
+                category: category, 
+                user: { username, uid: userId, photoURL: userPhoto } // <-- FIX DISINI
+            });
             
+            // FIX: HARDCORE MODE - Buat Post cuma +2 Poin (sebelumnya +10)
             await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(2), lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
             await showAlert("Postingan berhasil diterbitkan!", 'success');
@@ -2522,8 +2423,9 @@ const MainAppContent = () => {
 
     const isMeDeveloper = user && user.email === DEVELOPER_EMAIL; const targetUser = users.find(u => u.uid === targetUid); const isGuest = !user; 
     
-    // FIX: Tentukan halaman mana saja yang menyembunyikan Navbar
-    const isNavbarHidden = ['legal', 'chat', 'create', 'notifications'].includes(page);
+    // FIX: Halaman tanpa Navbar
+    const hideNavbarPages = ['create', 'chat', 'notifications', 'legal'];
+    const showHeader = !hideNavbarPages.includes(page);
 
     return (
         <ErrorBoundary>
@@ -2547,8 +2449,8 @@ const MainAppContent = () => {
                         }}
                     />
 
-                    {/* FIX: Navbar disembunyikan jika halaman chat/create/legal/notifications */}
-                    {!isNavbarHidden && ( 
+                    {/* FIX: Navbar Logic - Sembunyikan di halaman tertentu */}
+                    {showHeader && ( 
                         <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
                             {/* Left: Hamburger & Logo */}
                             <div className="flex items-center gap-4">
@@ -2586,9 +2488,9 @@ const MainAppContent = () => {
                         </header> 
                     )}
 
-                    <main className={!isNavbarHidden ? 'pt-16 md:pt-20' : ''}>
-                        {/* FIX: Pass userPhoto ke CreatePost */}
+                    <main className={showHeader ? 'pt-16 md:pt-20' : ''}>
                         {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
+                        {/* FIX: Kirim userPhoto ke CreatePost */}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} userPhoto={profile?.photoURL} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                         {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
@@ -2600,8 +2502,8 @@ const MainAppContent = () => {
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
                     </main>
                     
-                    {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON DESKTOP & HIDDEN PAGES */}
-                    {!isNavbarHidden && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
+                    {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
                     {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
                     {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
