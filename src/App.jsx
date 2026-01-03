@@ -1154,8 +1154,15 @@ const PWAInstallPrompt = () => {
     );
 };
 
+// FIX: Avatar component update to handle broken URLs better
 const Avatar = ({ src, alt, className, fallbackText }) => {
     const [error, setError] = useState(false);
+    
+    // Reset error state when src changes
+    useEffect(() => {
+        setError(false);
+    }, [src]);
+
     const safeFallback = fallbackText ? fallbackText : "?";
     if (!src || error) { return ( <div className={`${className} bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-black text-gray-500 dark:text-gray-400 select-none`}>{safeFallback[0]?.toUpperCase() || '?'}</div> ); }
     return <img src={src} alt={alt} className={`${className} object-cover`} onError={() => setError(true)} loading="lazy" />;
@@ -1758,8 +1765,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const mediaList = post.mediaUrls || (post.mediaUrl ? [post.mediaUrl] : []);
 
     useEffect(() => {
+        // Sync state with props change (Realtime support)
         if (currentUserId) { setLiked(post.likes?.includes(currentUserId)); setIsSaved(profile?.savedPosts?.includes(post.id)); } else { setLiked(false); setIsSaved(false); }
         setLikeCount(post.likes?.length || 0);
+        // Force update if post updates externally
     }, [post, currentUserId, profile?.savedPosts]);
 
     const handleLike = async () => {
@@ -1852,7 +1861,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             <div className="flex justify-between items-start mb-3">
                 <div className="flex gap-3">
                     <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong */}
+                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong. Data user di post ini dijamin oleh parent. */}
                         <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
                     </div>
                     <div>
@@ -2068,25 +2077,36 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const isSelf = viewerUid === profileData?.uid; 
     const isDev = profileData?.email === DEVELOPER_EMAIL;
 
+    // FIX: Switch from API to REALTIME FIRESTORE LISTENER
+    // Ini memperbaiki masalah foto profile hilang di halaman profile karena data diambil realtime
+    // dan user data di-inject langsung dari profileData yang sudah lengkap.
     useEffect(() => {
+        if(!profileData?.uid) return;
         setLoadingLocal(true);
         setLocalPosts([]); 
         
-        const fetchUserPosts = async () => {
-            try {
-                const data = await fetchFeedData({
-                    mode: 'user',
-                    userId: profileData?.uid, 
-                    limit: 20
-                });
-                const enrichedPosts = data.posts.map(p => ({
-                    ...p,
-                    user: profileData
-                }));
-                setLocalPosts(enrichedPosts);
-            } catch (e) { console.error("Profile Fetch Error:", e); } finally { setLoadingLocal(false); }
-        };
-        if (profileData?.uid) { fetchUserPosts(); }
+        // Query posts by userId
+        const q = query(
+            collection(db, getPublicCollection('posts')), 
+            where('userId', '==', profileData.uid),
+            orderBy('timestamp', 'desc'),
+            limit(20)
+        );
+        
+        const unsub = onSnapshot(q, (snapshot) => {
+            const realtimePosts = snapshot.docs.map(d => ({
+                id: d.id,
+                ...d.data(),
+                user: profileData // Force inject user data agar foto profil selalu ada & realtime
+            }));
+            setLocalPosts(realtimePosts);
+            setLoadingLocal(false);
+        }, (e) => {
+            console.error("Profile posts error:", e);
+            setLoadingLocal(false);
+        });
+
+        return () => unsub();
     }, [profileData?.uid]); 
 
     if (!profileData) {
@@ -2380,36 +2400,73 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     );
 };
 
+// FIX: SinglePostView menjadi Full Realtime (Post & User Listener)
 const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     const cachedPost = allPosts.find(p => p.id === postId);
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
+    const [authorProfile, setAuthorProfile] = useState(cachedPost?.user || null);
     const [loading, setLoading] = useState(!cachedPost);
     const [error, setError] = useState(false);
+
+    // 1. Realtime Post Listener
     useEffect(() => {
-        if (cachedPost) { setFetchedPost(cachedPost); setLoading(false); return; }
-        const fetchSinglePost = async () => {
-            setLoading(true);
-            try {
-                const docRef = doc(db, getPublicCollection('posts'), postId);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    const userSnap = await getDoc(doc(db, getPublicCollection('userProfiles'), data.userId));
-                    const completePost = { id: docSnap.id, ...data, user: userSnap.exists() ? userSnap.data() : { username: 'User' } };
-                    setFetchedPost(completePost);
-                } else { setError(true); }
-            } catch (e) { console.error(e); setError(true); }
+        setLoading(true);
+        const docRef = doc(db, getPublicCollection('posts'), postId);
+        
+        const unsubPost = onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = { id: docSnap.id, ...docSnap.data() };
+                setFetchedPost(data);
+                
+                // Jika user object tidak lengkap di post, kita rely ke useEffect ke-2
+                if (data.user && data.user.photoURL) {
+                    setAuthorProfile(data.user);
+                }
+            } else {
+                setError(true);
+            }
             setLoading(false);
+        }, (err) => {
+            console.error(err);
+            setError(true);
+            setLoading(false);
+        });
+
+        return () => unsubPost();
+    }, [postId]);
+
+    // 2. Realtime User Profile Listener (Untuk menjamin foto profil selalu muncul/update)
+    useEffect(() => {
+        if (!fetchedPost?.userId) return;
+
+        const userRef = doc(db, getPublicCollection('userProfiles'), fetchedPost.userId);
+        const unsubUser = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setAuthorProfile(prev => ({ ...prev, ...docSnap.data(), uid: docSnap.id }));
+            }
+        });
+
+        return () => unsubUser();
+    }, [fetchedPost?.userId]);
+
+    // Merge post data dengan realtime author data
+    const finalPost = useMemo(() => {
+        if (!fetchedPost) return null;
+        return {
+            ...fetchedPost,
+            user: authorProfile || fetchedPost.user || { username: 'User' }
         };
-        if (postId) fetchSinglePost();
-    }, [postId, cachedPost]);
+    }, [fetchedPost, authorProfile]);
+
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
+    
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
-    if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    if (error || !finalPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    
     return (
         <div className="max-w-md md:max-w-xl mx-auto p-4 pb-40 pt-24">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={fetchedPost} {...props}/>
+            <PostItem post={finalPost} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
         </div>
     );
