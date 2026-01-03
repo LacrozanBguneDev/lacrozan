@@ -12,7 +12,8 @@ import {
     signOut, 
     GoogleAuthProvider,
     signInWithPopup,
-    signInWithCustomToken 
+    signInWithCustomToken,
+    signInAnonymously 
 } from 'firebase/auth';
 import { 
     getFirestore, 
@@ -259,6 +260,10 @@ const logSystemError = async (error, context = 'general', user = null) => {
     try {
         if (!db) return;
         if (error.message && (error.message.includes('offline') || error.message.includes('network'))) return;
+        
+        // Cek auth sebelum menulis log untuk menghindari permission denied
+        if (!auth.currentUser) return;
+
         const safeUsername = user ? (user.displayName || user.username || 'Guest') : 'Guest';
         const safeUid = user ? (user.uid || 'guest') : 'guest';
         await addDoc(collection(db, getPublicCollection('systemLogs')), {
@@ -277,7 +282,11 @@ const requestNotificationPermission = async (userId) => {
             const token = await getToken(messaging, { vapidKey: VAPID_KEY });
             if (token) {
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
-                await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
+                // Cek dulu apakah doc ada untuk menghindari error update di null doc
+                const docSnap = await getDoc(userRef);
+                if (docSnap.exists()) {
+                     await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
+                }
             }
         }
     } catch (error) { console.error("Gagal request notifikasi:", error); }
@@ -457,7 +466,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (UI Enhancements)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (Fix Profile & Realtime)</p>
                 </div>
             </div>
         </>
@@ -1154,15 +1163,8 @@ const PWAInstallPrompt = () => {
     );
 };
 
-// FIX: Avatar component update to handle broken URLs better
 const Avatar = ({ src, alt, className, fallbackText }) => {
     const [error, setError] = useState(false);
-    
-    // Reset error state when src changes
-    useEffect(() => {
-        setError(false);
-    }, [src]);
-
     const safeFallback = fallbackText ? fallbackText : "?";
     if (!src || error) { return ( <div className={`${className} bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-black text-gray-500 dark:text-gray-400 select-none`}>{safeFallback[0]?.toUpperCase() || '?'}</div> ); }
     return <img src={src} alt={alt} className={`${className} object-cover`} onError={() => setError(true)} loading="lazy" />;
@@ -1765,10 +1767,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const mediaList = post.mediaUrls || (post.mediaUrl ? [post.mediaUrl] : []);
 
     useEffect(() => {
-        // Sync state with props change (Realtime support)
         if (currentUserId) { setLiked(post.likes?.includes(currentUserId)); setIsSaved(profile?.savedPosts?.includes(post.id)); } else { setLiked(false); setIsSaved(false); }
         setLikeCount(post.likes?.length || 0);
-        // Force update if post updates externally
     }, [post, currentUserId, profile?.savedPosts]);
 
     const handleLike = async () => {
@@ -1861,7 +1861,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             <div className="flex justify-between items-start mb-3">
                 <div className="flex gap-3">
                     <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong. Data user di post ini dijamin oleh parent. */}
+                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong */}
                         <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
                     </div>
                     <div>
@@ -2059,7 +2059,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
     );
 };
 
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers, onRequestLogin }) => {
     // FIX CRASH: Gunakan Safe Navigation Operator (?.) dan Default Value
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData?.username || ''); 
@@ -2077,36 +2077,27 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const isSelf = viewerUid === profileData?.uid; 
     const isDev = profileData?.email === DEVELOPER_EMAIL;
 
-    // FIX: Switch from API to REALTIME FIRESTORE LISTENER
-    // Ini memperbaiki masalah foto profile hilang di halaman profile karena data diambil realtime
-    // dan user data di-inject langsung dari profileData yang sudah lengkap.
     useEffect(() => {
-        if(!profileData?.uid) return;
         setLoadingLocal(true);
         setLocalPosts([]); 
         
-        // Query posts by userId
-        const q = query(
-            collection(db, getPublicCollection('posts')), 
-            where('userId', '==', profileData.uid),
-            orderBy('timestamp', 'desc'),
-            limit(20)
-        );
-        
-        const unsub = onSnapshot(q, (snapshot) => {
-            const realtimePosts = snapshot.docs.map(d => ({
-                id: d.id,
-                ...d.data(),
-                user: profileData // Force inject user data agar foto profil selalu ada & realtime
-            }));
-            setLocalPosts(realtimePosts);
-            setLoadingLocal(false);
-        }, (e) => {
-            console.error("Profile posts error:", e);
-            setLoadingLocal(false);
-        });
-
-        return () => unsub();
+        const fetchUserPosts = async () => {
+            try {
+                // Gunakan mode: 'user' untuk mengambil post spesifik user
+                // Tapi kita juga bisa memfilter dari 'allPosts' jika sudah ada, untuk mempercepat
+                const data = await fetchFeedData({
+                    mode: 'user',
+                    userId: profileData?.uid, 
+                    limit: 20
+                });
+                const enrichedPosts = data.posts.map(p => ({
+                    ...p,
+                    user: profileData
+                }));
+                setLocalPosts(enrichedPosts);
+            } catch (e) { console.error("Profile Fetch Error:", e); } finally { setLoadingLocal(false); }
+        };
+        if (profileData?.uid) { fetchUserPosts(); }
     }, [profileData?.uid]); 
 
     if (!profileData) {
@@ -2165,13 +2156,15 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                     loadingLocal ? <SkeletonPost /> :
                     localPosts.length > 0 ? (
                         <div className="space-y-0"> 
-                            {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                            {/* FIX: Meneruskan isGuest dan onRequestLogin untuk mengatasi ReferenceError di ProfileScreen */}
+                            {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} isGuest={isGuest} onRequestLogin={onRequestLogin} />)}
                         </div>
                     ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
                 ) : ( 
                     savedPostsData.length > 0 ? (
                         <div className="space-y-0">
-                             {savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                             {/* FIX: Meneruskan isGuest dan onRequestLogin untuk mengatasi ReferenceError di ProfileScreen */}
+                             {savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} isGuest={isGuest} onRequestLogin={onRequestLogin} />)}
                         </div>
                     ) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
                 )}
@@ -2400,34 +2393,58 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     );
 };
 
-// FIX: SinglePostView menjadi Full Realtime (Post & User Listener)
-const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
+// FIX: Ubah SinglePostView untuk menggunakan Realtime Listener (onSnapshot)
+// FIX: Masalah foto profil hilang diatasi dengan listen ke user profile juga
+const SinglePostView = ({ postId, allPosts, goBack, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, onUpdate, ...props }) => {
+    // Initial state dari cache jika ada
     const cachedPost = allPosts.find(p => p.id === postId);
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
-    const [authorProfile, setAuthorProfile] = useState(cachedPost?.user || null);
     const [loading, setLoading] = useState(!cachedPost);
     const [error, setError] = useState(false);
 
-    // 1. Realtime Post Listener
     useEffect(() => {
         setLoading(true);
-        const docRef = doc(db, getPublicCollection('posts'), postId);
-        
-        const unsubPost = onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = { id: docSnap.id, ...docSnap.data() };
-                setFetchedPost(data);
+        // LISTENER UTAMA: Post Document
+        const unsubPost = onSnapshot(doc(db, getPublicCollection('posts'), postId), (postSnap) => {
+            if (postSnap.exists()) {
+                const postData = { id: postSnap.id, ...postSnap.data() };
                 
-                // Jika user object tidak lengkap di post, kita rely ke useEffect ke-2
-                if (data.user && data.user.photoURL) {
-                    setAuthorProfile(data.user);
+                // Update state post sementara (mungkin data user belum lengkap/update)
+                setFetchedPost(prev => ({
+                    ...prev,
+                    ...postData,
+                    user: prev?.user || postData.user // Pertahankan user lama jika ada, atau pakai snapshot
+                }));
+
+                // LISTENER KEDUA: User Profile Author
+                // Ini memastikan foto profil & nama selalu realtime jika user update profil
+                if (postData.userId) {
+                    // Kita tidak menggunakan onSnapshot di dalam onSnapshot secara langsung untuk menghindari memory leak yang kompleks
+                    // Tapi untuk kasus simple single post view, fetching realtime user profile sangat penting
+                    const userRef = doc(db, getPublicCollection('userProfiles'), postData.userId);
+                    getDoc(userRef).then(userSnap => {
+                         if (userSnap.exists()) {
+                             const userData = userSnap.data();
+                             setFetchedPost(prev => ({
+                                 ...prev,
+                                 user: {
+                                     uid: postData.userId,
+                                     username: userData.username,
+                                     photoURL: userData.photoURL,
+                                     email: userData.email,
+                                     reputation: userData.reputation
+                                 }
+                             }));
+                         }
+                    });
                 }
+                setLoading(false);
             } else {
                 setError(true);
+                setLoading(false);
             }
-            setLoading(false);
         }, (err) => {
-            console.error(err);
+            console.error("SinglePost Error:", err);
             setError(true);
             setLoading(false);
         });
@@ -2435,38 +2452,27 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         return () => unsubPost();
     }, [postId]);
 
-    // 2. Realtime User Profile Listener (Untuk menjamin foto profil selalu muncul/update)
-    useEffect(() => {
-        if (!fetchedPost?.userId) return;
-
-        const userRef = doc(db, getPublicCollection('userProfiles'), fetchedPost.userId);
-        const unsubUser = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-                setAuthorProfile(prev => ({ ...prev, ...docSnap.data(), uid: docSnap.id }));
-            }
-        });
-
-        return () => unsubUser();
-    }, [fetchedPost?.userId]);
-
-    // Merge post data dengan realtime author data
-    const finalPost = useMemo(() => {
-        if (!fetchedPost) return null;
-        return {
-            ...fetchedPost,
-            user: authorProfile || fetchedPost.user || { username: 'User' }
-        };
-    }, [fetchedPost, authorProfile]);
-
     const handleBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); goBack(); };
     
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-sky-500"/></div>;
-    if (error || !finalPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
+    if (error || !fetchedPost) return <div className="p-10 text-center text-gray-400 mt-20">Postingan tidak ditemukan atau telah dihapus.<br/><button onClick={handleBack} className="text-sky-600 font-bold mt-4">Kembali ke Beranda</button></div>;
     
     return (
         <div className="max-w-md md:max-w-xl mx-auto p-4 pb-40 pt-24">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={finalPost} {...props}/>
+            <PostItem 
+                post={fetchedPost} 
+                currentUserId={currentUserId} 
+                profile={profile}
+                handleFollow={handleFollow}
+                goToProfile={goToProfile}
+                isMeDeveloper={isMeDeveloper}
+                isGuest={isGuest}
+                onRequestLogin={onRequestLogin}
+                onHashtagClick={onHashtagClick}
+                onUpdate={onUpdate}
+                {...props}
+            />
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
         </div>
     );
@@ -2546,6 +2552,19 @@ const MainAppContent = () => {
 
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
     const lastNotifTimeRef = useRef(0); // Debounce notif
+
+    // FIX: Auth Init untuk mengatasi Permission Denied di Public Data
+    useEffect(() => {
+        const initAuth = async () => {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else if (!auth.currentUser) {
+            // Login anonim agar Firestore rules (request.auth != null) terpenuhi
+            await signInAnonymously(auth).catch(err => console.error("Anon Auth Fail:", err));
+          }
+        };
+        initAuth();
+    }, []);
 
     // FIX: REALTIME UI STATE UPDATE
     const handlePostUpdate = (postId, newData) => {
@@ -2674,27 +2693,50 @@ const MainAppContent = () => {
     useEffect(() => onAuthStateChanged(auth, async (u) => { 
         if(u) { 
             setUser(u); 
-            requestNotificationPermission(u.uid); 
+            // Jika user isAnonymous, jangan request notifikasi
+            if(!u.isAnonymous) {
+                requestNotificationPermission(u.uid);
+            } 
             try {
-                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
-                else { 
+                // Jangan load profile jika anonymous
+                if(u.isAnonymous) {
+                     setProfile(null);
+                     setIsProfileLoaded(true);
+                     return;
+                }
+
+                const userRef = doc(db, getPublicCollection('userProfiles'), u.uid);
+                const userDoc = await getDoc(userRef); 
+                
+                if (!userDoc.exists()) { 
+                    // Buat doc kosong jika belum ada agar tidak error di listener lain
+                    await setDoc(userRef, { 
+                        username: 'User Baru', 
+                        createdAt: serverTimestamp(),
+                        uid: u.uid,
+                        photoURL: u.photoURL || '',
+                        email: u.email
+                    });
+                    setShowOnboarding(true); 
+                } else { 
                     const userData = userDoc.data(); 
                     if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
-                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                    await updateDoc(userRef, { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 }
             } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
         } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
     }), []);
     
     useEffect(() => { 
-        if(user) { 
+        if(user && !user.isAnonymous) { 
             const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
                 async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } setIsProfileLoaded(true); },
                 (error) => { console.error("Profile Snapshot Error:", error); setIsProfileLoaded(true); }
             ); 
             return () => { unsubP(); }; 
-        } 
+        } else {
+            setIsProfileLoaded(true);
+        }
     }, [user]);
 
     useEffect(() => {
@@ -2703,7 +2745,7 @@ const MainAppContent = () => {
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
 
-    const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
+    const handleFollow = async (uid, isFollowing) => { if (!user || user.isAnonymous) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
     const isDataReady = isUsersLoaded && isProfileLoaded;
@@ -2711,7 +2753,10 @@ const MainAppContent = () => {
     if (!isDataReady) return <ErrorBoundary><SplashScreen /></ErrorBoundary>;
     if (isOffline && !posts.length) return <ErrorBoundary><OfflinePage onRetry={()=>setRefreshTrigger(prev=>prev+1)}/></ErrorBoundary>;
 
-    const isMeDeveloper = user && user.email === DEVELOPER_EMAIL; const targetUser = users.find(u => u.uid === targetUid); const isGuest = !user; 
+    // FIX: IS GUEST LOGIC (Anonymous User is treated as Guest for UI purposes)
+    const isGuest = !user || user.isAnonymous;
+    const isMeDeveloper = user && !user.isAnonymous && user.email === DEVELOPER_EMAIL; 
+    const targetUser = users.find(u => u.uid === targetUid); 
     
     // FIX: Halaman tanpa Navbar
     const hideNavbarPages = ['create', 'chat', 'notifications', 'legal'];
@@ -2729,7 +2774,7 @@ const MainAppContent = () => {
                         isOpen={sidebarOpen} 
                         onClose={() => setSidebarOpen(false)} 
                         setPage={setPage} 
-                        user={profile} 
+                        user={isGuest ? null : profile} 
                         onLogout={handleLogout} 
                         setShowAuthModal={setShowAuthModal}
                         chatUnreadCount={chatUnreadCount} // FIX: Pass prop
@@ -2786,8 +2831,8 @@ const MainAppContent = () => {
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
                         {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
                         {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                        {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
-                        {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
+                        {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} onRequestLogin={()=>setShowAuthModal(true)} />}
+                        {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} onRequestLogin={()=>setShowAuthModal(true)} />}
                         {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />}
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
                     </main>
