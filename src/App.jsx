@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
+import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah diinstall)
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
@@ -1390,23 +1391,20 @@ const SkeletonPost = () => (
 const renderMarkdown = (text, onHashtagClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
-    // SECURITY FIX: Escape HTML tags untuk mencegah XSS
-    // Ini adalah langkah "BIJAK" pertama: membersihkan tag HTML mentah
-    let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    
-    // Convert links with XSS protection (Block javascript:)
+    let html = text;
+
+    // Convert MD Links [Label](url)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
-        // Cek protokol berbahaya - LANGKAH BIJAK KEDUA
-        if (/^(javascript|vbscript|data):/i.test(url)) return `${label} (Link Diblokir)`;
-        return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1" onClick="event.stopPropagation()">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
+        return `<a href="${url}" target="_blank" class="text-sky-600 font-bold hover:underline inline-flex items-center gap-1">${label} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
     });
 
+    // Convert Raw URLs
     html = html.replace(/(https?:\/\/[^\s<]+)/g, (match) => { 
         if (match.includes('href="')) return match; 
-        return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all" onClick="event.stopPropagation()">${match}</a>`; 
+        return `<a href="${match}" target="_blank" class="text-sky-600 hover:underline break-all">${match}</a>`; 
     });
 
-    // Formatting Markdown
+    // Formatting MD
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                .replace(/\*(.*?)\*/g, '<em>$1</em>')
                .replace(/`(.*?)`/g, '<code class="bg-sky-50 dark:bg-sky-900/30 px-1 rounded text-sm text-sky-700 dark:text-sky-400 font-mono border border-sky-100 dark:border-sky-800">$1</code>');
@@ -1414,9 +1412,27 @@ const renderMarkdown = (text, onHashtagClick) => {
     // Hashtags
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     html = html.replace(/\n/g, '<br>');
+
+    // 2. SANITASI AKHIR DENGAN DOMPURIFY (Hapus XSS)
+    const cleanHtml = DOMPurify.sanitize(html, {
+        ADD_ATTR: ['target', 'class', 'data-tag'], 
+        ADD_TAGS: ['svg', 'path', 'polyline', 'line'], 
+    });
     
-    // FIX: Font size diperkecil (text-[13px] / text-sm) dan leading relaxed agar compact tapi terbaca
-    return <div className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" dangerouslySetInnerHTML={{ __html: html }} onClick={(e) => { if (e.target.classList.contains('hashtag')) { e.stopPropagation(); if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); } }}/>;
+    return (
+        <div 
+            className="text-gray-800 dark:text-gray-200 leading-relaxed break-words text-[13px] md:text-sm" 
+            dangerouslySetInnerHTML={{ __html: cleanHtml }} 
+            onClick={(e) => { 
+                if (e.target.classList.contains('hashtag')) { 
+                    e.stopPropagation(); 
+                    if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); 
+                }
+                const link = e.target.closest('a');
+                if (link) { e.stopPropagation(); }
+            }}
+        />
+    );
 };
 
 // ==========================================
