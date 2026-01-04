@@ -457,7 +457,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.2 (UI Enhancements)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.3 (Interaction Fixes)</p>
                 </div>
             </div>
         </>
@@ -1764,6 +1764,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
     const handleLike = async () => {
         if (isGuest) { onRequestLogin(); return; }
+        if (!currentUserId) return; // Safety check
+
         const newLiked = !liked; setLiked(newLiked); setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
         
         // Optimistic UI Update in Parent
@@ -1778,7 +1780,18 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         try {
             if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(1) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
             else { await updateDoc(ref, { likes: arrayRemove(currentUserId) }); }
-        } catch (error) { setLiked(!newLiked); setLikeCount(prev => !newLiked ? prev + 1 : prev - 1); }
+        } catch (error) { 
+            console.error("Like failed, rolling back:", error);
+            // Rollback Local State
+            setLiked(!newLiked); 
+            setLikeCount(prev => !newLiked ? prev + 1 : prev - 1);
+            // FIX: Rollback Parent State (Critical for Consistency)
+            if(onUpdate) {
+                onUpdate(post.id, {
+                    likes: !newLiked ? [...(post.likes||[]), currentUserId] : (post.likes||[]).filter(id => id !== currentUserId)
+                });
+            }
+        }
     };
 
     const handleDoubleTap = () => { setShowHeartOverlay(true); setTimeout(() => setShowHeartOverlay(false), 800); if (!liked) { handleLike(); } };
@@ -2052,6 +2065,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
 
 const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
     // FIX CRASH: Gunakan Safe Navigation Operator (?.) dan Default Value
+    const { showAlert } = useCustomAlert();
     const [edit, setEdit] = useState(false); 
     const [name, setName] = useState(profileData?.username || ''); 
     const [file, setFile] = useState(null); 
@@ -2088,6 +2102,17 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         };
         if (profileData?.uid) { fetchUserPosts(); }
     }, [profileData?.uid]); 
+    
+    // FIX: Share Profile
+    const handleShareProfile = async () => {
+        const url = `${window.location.origin}?user=${profileData.uid}`;
+        try {
+            await navigator.clipboard.writeText(url);
+            showAlert('Link profil berhasil disalin! Sebarkan ke temanmu.', 'success');
+        } catch (e) {
+            showAlert('Gagal menyalin link.', 'error');
+        }
+    };
 
     if (!profileData) {
         return ( <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center pt-24"><User size={48} className="text-gray-300 mb-4"/><h3 className="text-gray-500 font-bold text-lg">Profil Tidak Ditemukan</h3><p className="text-gray-400 text-sm mt-2 max-w-xs">Pengguna ini mungkin tidak ada atau data sedang dimuat.</p><button onClick={() => window.location.reload()} className="mt-6 text-sky-500 font-bold text-xs hover:underline">Muat Ulang Halaman</button></div> );
@@ -2117,6 +2142,12 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
         <div className="max-w-md md:max-w-2xl lg:max-w-4xl mx-auto pb-24 pt-20">
             <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
                 {rank && rank <= 3 && ( <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>#{rank} VIRAL</div> )}
+                
+                {/* FIX: Tombol Share Profile */}
+                <button onClick={handleShareProfile} className="absolute top-4 right-4 z-20 bg-white/20 hover:bg-white/40 backdrop-blur-md p-2 rounded-full text-gray-700 dark:text-white transition">
+                    <Share2 size={18} />
+                </button>
+                
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${rank===1 ? 'border-yellow-400' : isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
@@ -2253,10 +2284,23 @@ const HomeScreen = ({
 const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfileId }) => {
     const [notifs, setNotifs] = useState([]);
     
-    // FETCH
+    // FIX: Simplified Query to Prevent Ghosting
+    // Menghapus 'orderBy(type)' dan 'where(type != chat)' dari query level untuk stabilitas index
     useEffect(() => { 
-        const q = query(collection(db, getPublicCollection('notifications')), where('toUserId','==',userId), where('type', '!=', 'chat'), orderBy('type'), orderBy('timestamp','desc'), limit(50)); 
-        return onSnapshot(q, s => setNotifs(s.docs.map(d=>({id:d.id,...d.data()})).filter(n=>!n.isRead))); 
+        if(!userId) return;
+        const q = query(
+            collection(db, getPublicCollection('notifications')), 
+            where('toUserId','==',userId), 
+            orderBy('timestamp','desc'), 
+            limit(50)
+        ); 
+        
+        // Filter 'chat' dan 'isRead' di memori (client-side)
+        return onSnapshot(q, s => {
+            const raw = s.docs.map(d=>({id:d.id,...d.data()}));
+            const filtered = raw.filter(n => !n.isRead && n.type !== 'chat');
+            setNotifs(filtered);
+        }); 
     }, [userId]);
     
     // GROUPING LOGIC
@@ -2555,7 +2599,20 @@ const MainAppContent = () => {
     const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); await showAlert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas.", 'success'); setShowRewards(false); } catch (e) { await showAlert("Gagal klaim: " + e.message, 'error'); } };
     const handleLogout = async () => { const ok = await showConfirm("Yakin ingin keluar akun?"); if(ok) { await signOut(auth); setPage('home'); setSidebarOpen(false); } };
 
-    useEffect(() => { const p = new URLSearchParams(window.location.search).get('post'); if (p) { setTargetPid(p); setPage('view_post'); } }, []);
+    // FIX: URL Parsing untuk Deep Link Profile & Post
+    useEffect(() => { 
+        const params = new URLSearchParams(window.location.search);
+        const p = params.get('post');
+        const u = params.get('user'); // New Param for Profile Sharing
+        
+        if (p) { 
+            setTargetPid(p); 
+            setPage('view_post'); 
+        } else if (u) {
+            setTargetUid(u);
+            setPage('other-profile');
+        }
+    }, []);
 
     // FIX: Listen Chat Unread Counts Specifically
     useEffect(() => {
@@ -2738,23 +2795,4 @@ const MainAppContent = () => {
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
                     {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
-                    {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}
-                    {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}
-                    {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}
-                    <PWAInstallPrompt />
-                </div>
-            </div>
-        </ErrorBoundary>
-    );
-};
-
-const NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 transition duration-300 flex flex-col items-center ${active ? 'text-sky-500' : 'text-gray-400'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);
-
-const NavBtnDesktop = ({ icon: Icon, active, onClick, label }) => (
-    <button onClick={onClick} className={`p-2 transition duration-300 flex items-center gap-2 px-3 py-1.5 rounded-full ${active ? 'bg-sky-50 text-sky-600 dark:bg-gray-800 dark:text-sky-400' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200'}`}>
-        <Icon size={20} strokeWidth={active?2.5:2} />
-        <span className={`text-xs font-bold ${active ? 'block' : 'hidden'}`}>{label}</span>
-    </button>
-);
-
-export default App;
+                    {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}\n                    {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}\n                    {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}\n                    <PWAInstallPrompt />\n                </div>\n            </div>\n        </ErrorBoundary>\n    );\n};\n\nconst NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 transition duration-300 flex flex-col items-center ${active ? 'text-sky-500' : 'text-gray-400'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);\n\nconst NavBtnDesktop = ({ icon: Icon, active, onClick, label }) => (\n    <button onClick={onClick} className={`p-2 transition duration-300 flex items-center gap-2 px-3 py-1.5 rounded-full ${active ? 'bg-sky-50 text-sky-600 dark:bg-gray-800 dark:text-sky-400' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200'}`}>\n        <Icon size={20} strokeWidth={active?2.5:2} />\n        <span className={`text-xs font-bold ${active ? 'block' : 'hidden'}`}>{label}</span>\n    </button>\n);\n\nexport default App;\n
