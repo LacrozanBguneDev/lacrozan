@@ -2795,4 +2795,64 @@ const MainAppContent = () => {
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
                     {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
                     
-                    {showAuthModal && <AuthModal onClose={()=>setShowAuthModal(false)}/>}\n                    {showRewards && ( <DailyRewardModal onClose={()=>setShowRewards(false)} onClaim={handleClaimReward} canClaim={canClaimReward} nextClaimTime={nextRewardTime} isGuest={isGuest} onLoginRequest={()=>{ setShowRewards(false); setShowAuthModal(true); }} /> )}\n                    {showOnboarding && user && <OnboardingScreen user={user} onComplete={()=>setShowOnboarding(false)}/>}\n                    <PWAInstallPrompt />\n                </div>\n            </div>\n        </ErrorBoundary>\n    );\n};\n\nconst NavBtn = ({ icon: Icon, active, onClick }) => (<button onClick={onClick} className={`p-2 transition duration-300 flex flex-col items-center ${active ? 'text-sky-500' : 'text-gray-400'}`}><Icon size={24} strokeWidth={active?2.5:2} /></button>);\n\nconst NavBtnDesktop = ({ icon: Icon, active, onClick, label }) => (\n    <button onClick={onClick} className={`p-2 transition duration-300 flex items-center gap-2 px-3 py-1.5 rounded-full ${active ? 'bg-sky-50 text-sky-600 dark:bg-gray-800 dark:text-sky-400' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200'}`}>\n        <Icon size={20} strokeWidth={active?2.5:2} />\n        <span className={`text-xs font-bold ${active ? 'block' : 'hidden'}`}>{label}</span>\n    </button>\n);\n\nexport default App;\n
+                   
+{showAuthModal && (
+    <AuthModal onClose={() => setShowAuthModal(false)} />
+)}
+
+{showRewards && (
+    <DailyRewardModal
+        onClose={() => setShowRewards(false)}
+        onClaim={handleClaimReward}
+        canClaim={canClaimReward}
+        nextClaimTime={nextRewardTime}
+        isGuest={isGuest}
+        onLoginRequest={() => {
+            setShowRewards(false);
+            setShowAuthModal(true);
+        }}
+    />
+)}
+
+{showOnboarding && user && (
+    <OnboardingScreen
+        user={user}
+        onComplete={() => setShowOnboarding(false)}
+    />
+)}
+
+<PWAInstallPrompt />
+</div>
+</div>
+</ErrorBoundary>
+);
+};
+
+const NavBtn = ({ icon: Icon, active, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`p-2 transition duration-300 flex flex-col items-center ${
+            active ? 'text-sky-500' : 'text-gray-400'
+        }`}
+    >
+        <Icon size={24} strokeWidth={active ? 2.5 : 2} />
+    </button>
+);
+
+const NavBtnDesktop = ({ icon: Icon, active, onClick, label }) => (
+    <button
+        onClick={onClick}
+        className={`p-2 transition duration-300 flex items-center gap-2 px-3 py-1.5 rounded-full ${
+            active
+                ? 'bg-sky-50 text-sky-600 dark:bg-gray-800 dark:text-sky-400'
+                : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+        }`}
+    >
+        <Icon size={20} strokeWidth={active ? 2.5 : 2} />
+        <span className={`text-xs font-bold ${active ? 'block' : 'hidden'}`}>
+            {label}
+        </span>
+    </button>
+);
+
+export default App;
