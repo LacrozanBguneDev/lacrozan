@@ -170,18 +170,18 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// --- KONSTANTA GLOBAL & API (DIPERBARUI UNTUK BACKEND CONFIG) ---
-// Kita ubah menjadi let agar bisa diupdate setelah fetch config
-const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
-let APP_NAME = "BguneNet";
-let APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
-let DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
-let API_ENDPOINT = '/api/feed';
-let firebaseConfig = null; // Akan diisi dari backend
 
-const API_KEY = process.env.REACT_APP_API_KEY;
-const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
+useEffect(() => {
+  fetch("/api/public-config")
+    .then(r => r.json())
+    .then(cfg => {
+      Object.assign(CONFIG, cfg);
+    })
+    .catch(err => {
+      console.error("Config load failed:", err);
+    });
+}, []);
+
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
