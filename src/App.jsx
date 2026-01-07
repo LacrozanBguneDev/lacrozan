@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
-import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS
+import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah diinstall)
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
@@ -58,21 +58,6 @@ import {
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
 // setLogLevel('silent'); 
-
-// --- KONFIGURASI STATIC (FIX AGAR TIDAK CRASH DI CANVAS) ---
-// Menggantikan fetch('/api/public-config') yang error
-const APP_NAME = "Projek Ku";
-const APP_LOGO = "https://cdn-icons-png.flaticon.com/512/3059/3059518.png"; // Placeholder Logo
-const DEV_PHOTO = "https://cdn-icons-png.flaticon.com/512/2202/2202112.png";
-const API_ENDPOINT = ""; // Isi jika ada backend eksternal
-const API_KEY = "";
-const VAPID_KEY = "";
-const DEVELOPER_EMAIL = "admin@projekku.com"; // Ganti dengan email admin
-
-// Konfigurasi Firebase dari Environment Canvas
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
 // --- CUSTOM ALERT SYSTEM (MODERN REPLACEMENT) ---
 const CustomAlertContext = createContext();
@@ -185,36 +170,53 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Initialize Firebase with Error Handling
+// --- KONSTANTA GLOBAL & API (DIPERBARUI UNTUK BACKEND CONFIG) ---
+// Kita ubah menjadi let agar bisa diupdate setelah fetch config
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
+let APP_NAME = "BguneNet";
+let APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
+let DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
+let API_ENDPOINT = '/api/feed';
+let firebaseConfig = null; // Akan diisi dari backend
+
+const API_KEY = process.env.REACT_APP_API_KEY;
+const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
+const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
+
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
+
+// Initialize Firebase Variables (Diinisialisasi nanti setelah config di-load)
 let app, auth, db, googleProvider, messaging;
-try {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-    googleProvider = new GoogleAuthProvider();
-    
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        try {
-            messaging = getMessaging(app);
-        } catch (e) {
-            console.log("Messaging skipped/not supported:", e);
+
+const initFirebaseServices = (config) => {
+    try {
+        app = initializeApp(config);
+        auth = getAuth(app);
+        db = getFirestore(app);
+        googleProvider = new GoogleAuthProvider();
+        
+        if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+            try {
+                messaging = getMessaging(app);
+            } catch (e) {
+                console.log("Messaging skipped/not supported:", e);
+            }
         }
+    } catch (error) {
+        console.error("Firebase Initialization Error:", error);
     }
-} catch (error) {
-    console.error("Firebase Initialization Error:", error);
-}
+};
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
 
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
-    // FIX: Fallback jika API tidak tersedia (karena ini Canvas)
-    if (!API_ENDPOINT) {
-        // Return kosong atau mock data jika diperlukan
+    if (!API_KEY) {
+        console.warn("API Key missing, returning empty feed.");
         return { posts: [], nextCursor: null };
     }
-    
     const params = new URLSearchParams();
     params.append('mode', mode === 'friends' ? 'home' : mode); 
     params.append('limit', limit);
@@ -301,9 +303,21 @@ const compressImageToBase64 = (file) => {
 };
 
 const uploadToFaaAPI = async (file, onProgress) => {
-    // Mock upload jika endpoint tidak valid di canvas
-    onProgress(100);
-    return "https://via.placeholder.com/500?text=Media+Uploaded";
+    const apiUrl = 'https://api-faa.my.id/faa/tourl'; 
+    const formData = new FormData();
+    onProgress(10); formData.append('file', file); 
+    try {
+        const progressInterval = setInterval(() => { onProgress(prev => Math.min(prev + 5, 90)); }, 500);
+        const response = await fetch(apiUrl, { method: 'POST', body: formData });
+        clearInterval(progressInterval);
+        onProgress(95);
+        if (!response.ok) { throw new Error(`Server Error: ${response.status}`); }
+        const data = await response.json();
+        onProgress(100);
+        if (data && data.result && data.result.url) { return data.result.url; } 
+        else if (data && data.url) { return data.url; } 
+        else { throw new Error('Gagal mendapatkan URL dari server.'); }
+    } catch (error) { onProgress(0); throw new Error('Gagal upload video/audio. Cek koneksi.'); }
 };
 
 const sendNotification = async (toUserId, type, message, fromUser, postId = null) => {
@@ -378,6 +392,7 @@ const isUserOnline = (lastSeen) => {
 // BAGIAN 3: KOMPONEN UI KECIL & SIDEBAR
 // ==========================================
 
+// FIX: Tambahkan props chatUnreadCount untuk indikator merah di sidebar
 const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriendsClick, setShowAuthModal, chatUnreadCount }) => {
     const sidebarRef = useRef(null);
     useEffect(() => {
@@ -421,23 +436,20 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                     <SidebarItem icon={Trophy} label="Papan Peringkat" onClick={() => { setPage('leaderboard'); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Sosial & Info</div>
-                    
-                    {/* FIX: Modifikasi Tombol Chat untuk Mode Tamu */}
+                    {/* FIX: Indikator Chat Belum Dibaca - LOGIKA TAMU DITAMBAHKAN DISINI */}
                     <SidebarItem 
                         icon={MessageCircle} 
                         label="Ruang Chat" 
-                        onClick={() => { 
-                            if(!user) {
-                                onClose();
-                                if(setShowAuthModal) setShowAuthModal(true);
+                        onClick={() => {
+                            if (!user) {
+                                handleGuestAction(); // Tampilkan popup login jika tamu
                             } else {
                                 setPage('chat'); 
-                                onClose(); 
+                                onClose();
                             }
                         }} 
                         badge={chatUnreadCount} 
                     />
-
                     <SidebarItem icon={Users} label="Teman Saya" onClick={() => { handleFriendsClick(); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Hukum & Bantuan</div>
@@ -470,7 +482,7 @@ const SidebarItem = ({ icon: Icon, label, onClick, badge }) => (
 );
 
 // ==========================================
-// BAGIAN: SISTEM CHAT REALTIME
+// BAGIAN: SISTEM CHAT REALTIME (DIPERBAIKI TOTAL)
 // ==========================================
 
 const ChatSystem = ({ currentUser, onBack }) => {
@@ -1144,6 +1156,13 @@ const PWAInstallPrompt = () => {
             <div className="flex items-center gap-2"><button onClick={()=>{setShowBanner(false); localStorage.setItem('pwa_dismissed', Date.now())}} className="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-full"><X size={16}/></button><button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 transition">Pasang</button></div>
         </div>
     );
+};
+
+const Avatar = ({ src, alt, className, fallbackText }) => {
+    const [error, setError] = useState(false);
+    const safeFallback = fallbackText ? fallbackText : "?";
+    if (!src || error) { return ( <div className={`${className} bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center font-black text-gray-500 dark:text-gray-400 select-none`}>{safeFallback[0]?.toUpperCase() || '?'}</div> ); }
+    return <img src={src} alt={alt} className={`${className} object-cover`} onError={() => setError(true)} loading="lazy" />;
 };
 
 const NetworkStatus = () => {
@@ -2519,6 +2538,46 @@ const MainAppContent = () => {
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
     const lastNotifTimeRef = useRef(0); // Debounce notif
 
+    // ----------------------------------------------------
+    // LOGIKA BARU: CONFIG FETCHING
+    // ----------------------------------------------------
+    const [config, setConfig] = useState(null);
+
+    useEffect(() => {
+        fetch("/api/public-config")
+            .then(r => r.json())
+            .then(data => {
+                // Update global variables
+                // Meskipun kita destructure di bawah, kita tetap update global
+                // agar komponen lain yang mengakses global variables tetap jalan
+                if (data.APP_NAME) APP_NAME = data.APP_NAME;
+                if (data.APP_LOGO) APP_LOGO = data.APP_LOGO;
+                if (data.DEV_PHOTO) DEV_PHOTO = data.DEV_PHOTO;
+                if (data.API_ENDPOINT) API_ENDPOINT = data.API_ENDPOINT;
+                if (data.firebaseConfig) {
+                    firebaseConfig = data.firebaseConfig;
+                    initFirebaseServices(firebaseConfig);
+                }
+                
+                setConfig(data);
+            })
+            .catch(err => {
+                console.error("Gagal load config:", err);
+                // Fallback jika gagal (optional, tapi di sini kita ikuti instruksi return null jika !config)
+            });
+    }, []);
+
+    if (!config) return null; // Sesuai permintaan: jika belum ada config, return null (blank)
+
+    const {
+        // APP_NAME, // Kita gunakan global variable saja agar tidak shadowing
+        // APP_LOGO,
+        // DEV_PHOTO,
+        // API_ENDPOINT,
+        // firebaseConfig
+    } = config;
+    // ----------------------------------------------------
+
     // FIX: REALTIME UI STATE UPDATE
     const handlePostUpdate = (postId, newData) => {
         if (!newData) {
@@ -2601,7 +2660,7 @@ const MainAppContent = () => {
 
     // FIX: Listen Chat Unread Counts Specifically
     useEffect(() => {
-        if (!user) return;
+        if (!user || !db) return; // Add check for db
         const qChat = query(
             collection(db, getPublicCollection('chats')), 
             where('participants', 'array-contains', user.uid)
@@ -2617,11 +2676,11 @@ const MainAppContent = () => {
             setChatUnreadCount(unread);
         });
         return () => unsubChat();
-    }, [user]);
+    }, [user]); // Removed db from dep array to avoid infinite loop if db ref changes (it shouldn't)
 
     // FIX: Notifikasi Regular (Kecuali Chat)
     useEffect(() => {
-        if (!user) return;
+        if (!user || !db) return; // Add check for db
         // Filter type != 'chat' tidak bisa langsung di Firestore karena limitasi compound query
         // Jadi kita ambil notif belum dibaca, lalu filter di client
         const q = query(
@@ -2656,37 +2715,43 @@ const MainAppContent = () => {
         return () => unsubscribe();
     }, [user]);
 
-    useEffect(() => onAuthStateChanged(auth, async (u) => { 
-        if(u) { 
-            setUser(u); 
-            requestNotificationPermission(u.uid); 
-            try {
-                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
-                else { 
-                    const userData = userDoc.data(); 
-                    if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
-                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                }
-            } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
-        } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
-    }), []);
+    // FIX: auth check inside effect
+    useEffect(() => {
+        if (auth) {
+            return onAuthStateChanged(auth, async (u) => { 
+                if(u) { 
+                    setUser(u); 
+                    requestNotificationPermission(u.uid); 
+                    try {
+                        const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                        if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
+                        else { 
+                            const userData = userDoc.data(); 
+                            if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
+                            await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                        }
+                    } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
+                } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
+            });
+        }
+    }, [auth]); // Run when auth is initialized
     
     useEffect(() => { 
-        if(user) { 
+        if(user && db) { 
             const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
                 async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } setIsProfileLoaded(true); },
                 (error) => { console.error("Profile Snapshot Error:", error); setIsProfileLoaded(true); }
             ); 
             return () => { unsubP(); }; 
         } 
-    }, [user]);
+    }, [user]); // Removed db
 
     useEffect(() => {
+        if (!db) return;
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), (s) => { setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))); setIsUsersLoaded(true); }, (error) => { console.error("CRITICAL ERROR: Gagal load userProfiles.", error); setIsUsersLoaded(true); });
         const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), (s) => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); setPosts(raw); setIsLoadingFeed(false); }, (error) => { console.error("CRITICAL ERROR: Gagal load posts cache.", error); setIsLoadingFeed(false); });
         return () => { unsubUsers(); unsubCache(); };
-    }, [refreshTrigger]); 
+    }, [refreshTrigger, db]); // Wait for db
 
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
