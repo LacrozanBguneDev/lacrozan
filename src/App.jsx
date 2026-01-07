@@ -171,24 +171,34 @@ class ErrorBoundary extends React.Component {
 }
 
 
-const [config, setConfig] = useState(null);
+function App() {
+  const [config, setConfig] = useState(null);
 
-useEffect(() => {
-  fetch("/api/public-config")
-    .then(r => r.json())
-    .then(setConfig);
-}, []);
+  useEffect(() => {
+    fetch("/api/public-config")
+      .then(r => r.json())
+      .then(setConfig)
+      .catch(console.error);
+  }, []);
 
-if (!config) return null;
+  if (!config) return null;
 
-const {
-  APP_NAME,
-  APP_LOGO,
-  DEV_PHOTO,
-  API_ENDPOINT,
-  firebaseConfig
-} = config;
+  const {
+    APP_NAME,
+    APP_LOGO,
+    DEV_PHOTO,
+    API_ENDPOINT,
+    firebaseConfig
+  } = config;
 
+  return (
+    <ErrorBoundary>
+      {/* KODE APP KAMU YANG SUDAH ADA */}
+    </ErrorBoundary>
+  );
+}
+
+export default App;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
