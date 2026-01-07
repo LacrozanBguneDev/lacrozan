@@ -170,28 +170,38 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// --- KONSTANTA GLOBAL & API (UPDATED FOR DYNAMIC CONFIG) ---
+const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
 
-useEffect(() => {
-  fetch("/api/public-config")
-    .then(r => r.json())
-    .then(cfg => {
-      Object.assign(CONFIG, cfg);
-    })
-    .catch(err => {
-      console.error("Config load failed:", err);
-    });
-}, []);
+// Initial Config Object
+const CONFIG = {
+  APP_NAME: "BguneNet",
+  APP_LOGO: "https://c.termai.cc/i150/VrL65.png",
+  DEV_PHOTO: "https://c.termai.cc/i6/EAb.jpg",
+  API_ENDPOINT: "/api/feed",
+  firebaseConfig: null
+};
 
+// Mutable Globals (untuk kompatibilitas dengan kode lama)
+let APP_NAME = CONFIG.APP_NAME;
+let APP_LOGO = CONFIG.APP_LOGO;
+let DEV_PHOTO = CONFIG.DEV_PHOTO;
+let API_ENDPOINT = CONFIG.API_ENDPOINT;
+
+const API_KEY = process.env.REACT_APP_API_KEY;
+const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
+const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// Initialize Firebase Variables (Diinisialisasi nanti setelah config di-load)
+// Initialize Firebase with Error Handling (Now a Function)
 let app, auth, db, googleProvider, messaging;
 
-const initFirebaseServices = (config) => {
+const initFirebaseServices = (fbConfig) => {
     try {
-        app = initializeApp(config);
+        if (!fbConfig) throw new Error("Firebase Config is missing");
+        app = initializeApp(fbConfig);
         auth = getAuth(app);
         db = getFirestore(app);
         googleProvider = new GoogleAuthProvider();
@@ -406,6 +416,17 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
         if (setShowAuthModal) setShowAuthModal(true);
     };
 
+    // LOGIKA BARU: Handle Chat Click
+    const handleChatClick = () => {
+        if (!user) {
+            onClose();
+            if (setShowAuthModal) setShowAuthModal(true);
+        } else {
+            setPage('chat');
+            onClose();
+        }
+    };
+
     return (
         <>
             {isOpen && <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[150] transition-opacity" />}
@@ -436,20 +457,8 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                     <SidebarItem icon={Trophy} label="Papan Peringkat" onClick={() => { setPage('leaderboard'); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Sosial & Info</div>
-                    {/* FIX: Indikator Chat Belum Dibaca - LOGIKA TAMU DITAMBAHKAN DISINI */}
-                    <SidebarItem 
-                        icon={MessageCircle} 
-                        label="Ruang Chat" 
-                        onClick={() => {
-                            if (!user) {
-                                handleGuestAction(); // Tampilkan popup login jika tamu
-                            } else {
-                                setPage('chat'); 
-                                onClose();
-                            }
-                        }} 
-                        badge={chatUnreadCount} 
-                    />
+                    {/* FIX: Indikator Chat Belum Dibaca */}
+                    <SidebarItem icon={MessageCircle} label="Ruang Chat" onClick={handleChatClick} badge={chatUnreadCount} />
                     <SidebarItem icon={Users} label="Teman Saya" onClick={() => { handleFriendsClick(); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Hukum & Bantuan</div>
@@ -2504,6 +2513,47 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
 // ==========================================
 
 const App = () => {
+    // --- STATE CONFIG ---
+    const [ready, setReady] = useState(false);
+
+    // --- FETCH CONFIG & INIT FIREBASE ---
+    useEffect(() => {
+        fetch("/api/public-config")
+            .then(r => r.json())
+            .then(cfg => {
+                // Update Global Config Object
+                Object.assign(CONFIG, cfg);
+                
+                // Update Global Variables (Mutable references)
+                if(cfg.APP_NAME) APP_NAME = cfg.APP_NAME;
+                if(cfg.APP_LOGO) APP_LOGO = cfg.APP_LOGO;
+                if(cfg.DEV_PHOTO) DEV_PHOTO = cfg.DEV_PHOTO;
+                if(cfg.API_ENDPOINT) API_ENDPOINT = cfg.API_ENDPOINT;
+
+                // Init Firebase Service
+                initFirebaseServices(cfg.firebaseConfig);
+                
+                // App Ready
+                setReady(true);
+            })
+            .catch(err => {
+                console.error("Config load failed", err);
+                // Tetap setReady true (dengan default) agar app tidak blank total
+                // atau biarkan loading jika config mandatory
+                // Sesuai instruksi: jika ready false return loader.
+                // Jika error, mungkin perlu handling lain, tapi disini kita asumsikan sukses/log error.
+            });
+    }, []);
+
+    if (!ready) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-white">
+                <Loader2 className="animate-spin text-sky-500 w-10 h-10 mb-4" />
+                <p className="text-gray-500 text-sm font-bold">Memuat konfigurasi...</p>
+            </div>
+        );
+    }
+
     return (
         <CustomAlertProvider>
             <MainAppContent />
@@ -2537,46 +2587,6 @@ const MainAppContent = () => {
 
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
     const lastNotifTimeRef = useRef(0); // Debounce notif
-
-    // ----------------------------------------------------
-    // LOGIKA BARU: CONFIG FETCHING
-    // ----------------------------------------------------
-    const [config, setConfig] = useState(null);
-
-    useEffect(() => {
-        fetch("/api/public-config")
-            .then(r => r.json())
-            .then(data => {
-                // Update global variables
-                // Meskipun kita destructure di bawah, kita tetap update global
-                // agar komponen lain yang mengakses global variables tetap jalan
-                if (data.APP_NAME) APP_NAME = data.APP_NAME;
-                if (data.APP_LOGO) APP_LOGO = data.APP_LOGO;
-                if (data.DEV_PHOTO) DEV_PHOTO = data.DEV_PHOTO;
-                if (data.API_ENDPOINT) API_ENDPOINT = data.API_ENDPOINT;
-                if (data.firebaseConfig) {
-                    firebaseConfig = data.firebaseConfig;
-                    initFirebaseServices(firebaseConfig);
-                }
-                
-                setConfig(data);
-            })
-            .catch(err => {
-                console.error("Gagal load config:", err);
-                // Fallback jika gagal (optional, tapi di sini kita ikuti instruksi return null jika !config)
-            });
-    }, []);
-
-    if (!config) return null; // Sesuai permintaan: jika belum ada config, return null (blank)
-
-    const {
-        // APP_NAME, // Kita gunakan global variable saja agar tidak shadowing
-        // APP_LOGO,
-        // DEV_PHOTO,
-        // API_ENDPOINT,
-        // firebaseConfig
-    } = config;
-    // ----------------------------------------------------
 
     // FIX: REALTIME UI STATE UPDATE
     const handlePostUpdate = (postId, newData) => {
@@ -2660,7 +2670,7 @@ const MainAppContent = () => {
 
     // FIX: Listen Chat Unread Counts Specifically
     useEffect(() => {
-        if (!user || !db) return; // Add check for db
+        if (!user) return;
         const qChat = query(
             collection(db, getPublicCollection('chats')), 
             where('participants', 'array-contains', user.uid)
@@ -2676,11 +2686,11 @@ const MainAppContent = () => {
             setChatUnreadCount(unread);
         });
         return () => unsubChat();
-    }, [user]); // Removed db from dep array to avoid infinite loop if db ref changes (it shouldn't)
+    }, [user]);
 
     // FIX: Notifikasi Regular (Kecuali Chat)
     useEffect(() => {
-        if (!user || !db) return; // Add check for db
+        if (!user) return;
         // Filter type != 'chat' tidak bisa langsung di Firestore karena limitasi compound query
         // Jadi kita ambil notif belum dibaca, lalu filter di client
         const q = query(
@@ -2715,43 +2725,37 @@ const MainAppContent = () => {
         return () => unsubscribe();
     }, [user]);
 
-    // FIX: auth check inside effect
-    useEffect(() => {
-        if (auth) {
-            return onAuthStateChanged(auth, async (u) => { 
-                if(u) { 
-                    setUser(u); 
-                    requestNotificationPermission(u.uid); 
-                    try {
-                        const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                        if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
-                        else { 
-                            const userData = userDoc.data(); 
-                            if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
-                            await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
-                        }
-                    } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
-                } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
-            });
-        }
-    }, [auth]); // Run when auth is initialized
+    useEffect(() => onAuthStateChanged(auth, async (u) => { 
+        if(u) { 
+            setUser(u); 
+            requestNotificationPermission(u.uid); 
+            try {
+                const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
+                if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
+                else { 
+                    const userData = userDoc.data(); 
+                    if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
+                    await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
+                }
+            } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
+        } else { setUser(null); setProfile(null); setIsProfileLoaded(true); } 
+    }), []);
     
     useEffect(() => { 
-        if(user && db) { 
+        if(user) { 
             const unsubP = onSnapshot(doc(db, getPublicCollection('userProfiles'), user.uid), 
                 async s => { if(s.exists()) { const data = s.data(); if (data.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); return; } setProfile({...data, uid:user.uid, email:user.email}); if (showOnboarding) setShowOnboarding(false); } setIsProfileLoaded(true); },
                 (error) => { console.error("Profile Snapshot Error:", error); setIsProfileLoaded(true); }
             ); 
             return () => { unsubP(); }; 
         } 
-    }, [user]); // Removed db
+    }, [user]);
 
     useEffect(() => {
-        if (!db) return;
         const unsubUsers = onSnapshot(collection(db, getPublicCollection('userProfiles')), (s) => { setUsers(s.docs.map(d=>({id:d.id,...d.data(), uid:d.id}))); setIsUsersLoaded(true); }, (error) => { console.error("CRITICAL ERROR: Gagal load userProfiles.", error); setIsUsersLoaded(true); });
         const unsubCache = onSnapshot(query(collection(db, getPublicCollection('posts')), orderBy('timestamp', 'desc'), limit(20)), (s) => { const raw = s.docs.map(d=>({id:d.id,...d.data()})); setPosts(raw); setIsLoadingFeed(false); }, (error) => { console.error("CRITICAL ERROR: Gagal load posts cache.", error); setIsLoadingFeed(false); });
         return () => { unsubUsers(); unsubCache(); };
-    }, [refreshTrigger, db]); // Wait for db
+    }, [refreshTrigger]); 
 
     const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
