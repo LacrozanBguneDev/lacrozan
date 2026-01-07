@@ -1,62 +1,49 @@
 import admin from "firebase-admin";
+import { CONFIG } from './config.js'; // Config rahasia backend
 
 /* ================== KONFIGURASI & INISIALISASI ================== */
-const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
+const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
 
-// Variabel global untuk menyimpan koneksi dan error
 let db = null;
 let initError = null;
 
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* --- Helper: Parse Service Account (Support JSON & Base64) --- */
 const getServiceAccount = () => {
   const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!rawEnv) throw new Error("Environment Variable FIREBASE_SERVICE_ACCOUNT tidak ditemukan/kosong.");
 
   let serviceAccount;
   try {
-    // Percobaan 1: Parse sebagai JSON string biasa
     serviceAccount = JSON.parse(rawEnv);
-  } catch (jsonErr) {
+  } catch {
     try {
-      // Percobaan 2: Jika gagal, coba decode dari Base64
       const decoded = Buffer.from(rawEnv, 'base64').toString('utf-8');
       serviceAccount = JSON.parse(decoded);
-    } catch (base64Err) {
-      // Jika kedua cara gagal, berarti format string rusak
-      throw new Error("Format FIREBASE_SERVICE_ACCOUNT tidak valid (Bukan JSON valid ataupun Base64).");
+    } catch {
+      throw new Error("Format FIREBASE_SERVICE_ACCOUNT tidak valid.");
     }
   }
 
-  // Perbaikan format private_key (mengubah \n string menjadi newline karakter asli)
-  if (serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  } else {
-    throw new Error("Properti 'private_key' tidak ditemukan dalam JSON Service Account.");
-  }
+  if (!serviceAccount.private_key) throw new Error("Properti 'private_key' tidak ditemukan.");
+  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
   return serviceAccount;
 };
 
-/* --- Inisialisasi Firebase --- */
 try {
   if (!admin.apps.length) {
     const serviceAccount = getServiceAccount();
-    
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   }
   db = admin.firestore();
 } catch (err) {
   console.error("FIREBASE_INIT_ERROR:", err);
-  // Simpan pesan error asli untuk ditampilkan di response nanti
   initError = err.message || "Unknown Initialization Error";
 }
 
-/* ================== UTILITAS (LOGIKA FEED) ================== */
+/* ================== UTILITAS ================== */
 const safeMillis = ts => {
   if (!ts) return Date.now();
   if (typeof ts.toMillis === "function") return ts.toMillis();
@@ -84,21 +71,12 @@ const dailySeedSort = posts => {
 
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
-  // 1. Cek Kesiapan Database
-  if (!db) {
-    // Tampilkan error asli agar mudah didebug
-    return res.status(500).json({ 
-      error: true, 
-      message: "Firestore not initialized", 
-      details: initError // <--- INI PENTING: Baca ini di response browser kamu
-    });
-  }
+  // Firestore siap?
+  if (!db) return res.status(500).json({ error: true, message: "Firestore not initialized", details: initError });
 
-  // 2. Cek API Key
+  // Validasi API key
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "API key invalid" });
-  }
+  if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) return res.status(401).json({ error: true, message: "API key invalid" });
 
   try {
     const mode = req.query.mode || "home";
@@ -107,8 +85,6 @@ export default async function handler(req, res) {
     const cursorId = req.query.cursor || null;
 
     let queryRef = db.collection(POSTS_PATH);
-
-    /* ================== MODE FOLLOWING ================== */
     let followingIds = null;
     let isFollowingFallback = false;
 
@@ -119,24 +95,21 @@ export default async function handler(req, res) {
         if (!viewerSnap.exists) isFollowingFallback = true;
         else {
           const viewerData = viewerSnap.data() || {};
-          followingIds = Array.isArray(viewerData.following)
-            ? viewerData.following.slice(0, 10)
-            : [];
-          if (followingIds.length === 0) isFollowingFallback = true;
+          followingIds = Array.isArray(viewerData.following) ? viewerData.following.slice(0, 10) : [];
+          if (!followingIds.length) isFollowingFallback = true;
         }
       }
     }
 
-    /* ================== FILTER CATEGORY ================== */
+    // Filter category / user / following
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
     if (mode === "following" && followingIds?.length && !isFollowingFallback)
       queryRef = queryRef.where("userId", "in", followingIds);
 
-    /* ================== BUFFERING & QUERY ================== */
+    // Query Firestore
     const bufferSize = limitReq * 3;
     queryRef = queryRef.orderBy("timestamp", "desc");
-
     if (cursorId) {
       const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
       if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
@@ -144,19 +117,11 @@ export default async function handler(req, res) {
     }
 
     const snap = await queryRef.limit(bufferSize).get();
+    if (snap.empty && mode !== "following") return res.json({ posts: [], nextCursor: null });
 
-    if (snap.empty) {
-      if (mode === "following") isFollowingFallback = true;
-      else return res.json({ posts: [], nextCursor: null });
-    }
+    const allFetchedPosts = snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
 
-    const allFetchedPosts = snap.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      timestamp: safeMillis(d.data()?.timestamp),
-    }));
-
-    /* ================== LOGIKA PENGACAKAN FEED ================== */
+    // Logika feed
     let finalPosts = [];
     if (mode === "home" || mode === "popular" || (mode === "following" && isFollowingFallback)) {
       const userGroups = {};
@@ -165,17 +130,15 @@ export default async function handler(req, res) {
         if (!userGroups[p.userId]) userGroups[p.userId] = [];
         userGroups[p.userId].push(p);
       });
-
       let pool = [];
       Object.values(userGroups).forEach(group => pool.push(...group.slice(0, 2)));
-
       pool = dailySeedSort(pool);
       finalPosts = shuffle(pool);
     } else finalPosts = dailySeedSort(allFetchedPosts);
 
-    const result = finalPosts.slice(0, limitReq);
+    let result = finalPosts.slice(0, limitReq);
 
-    /* ================== JOIN USER DATA ================== */
+    // Join user data
     const uids = [...new Set(result.map(p => p.userId).filter(Boolean))];
     const userMap = {};
     if (uids.length) {
@@ -183,26 +146,33 @@ export default async function handler(req, res) {
       userSnaps.forEach(s => { if (s.exists) userMap[s.id] = s.data(); });
     }
 
-    const postsResponse = result.map(p => {
+    let postsResponse = result.map(p => {
       const u = userMap[p.userId] || {};
       return {
         ...p,
-        user: {
-          username: u.username || "User",
-          photoURL: u.photoURL || null,
-          reputation: u.reputation || 0,
-          email: u.email || "",
-        },
+        user: { username: u.username || "User", photoURL: u.photoURL || null, reputation: u.reputation || 0, email: u.email || "" }
       };
     });
 
-    /* ================== NEXT CURSOR ================== */
+    /* ================== FETCH EXTERNAL API ================== */
+    if (CONFIG.FEED_API_URL) {
+      try {
+        const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
+        if (extRes.ok) {
+          const extData = await extRes.json();
+          if (Array.isArray(extData.posts)) postsResponse.push(...extData.posts);
+        } else console.warn("External feed API response not ok:", extRes.status);
+      } catch (err) {
+        console.warn("External feed fetch error:", err);
+      }
+    }
+
+    postsResponse = postsResponse.slice(0, limitReq);
+
+    // Next cursor
     const lastDocInSnap = snap.docs[snap.docs.length - 1];
-    const nextCursor = allFetchedPosts.length >= bufferSize
-      ? lastDocInSnap?.id || null
-      : result.length > 0
-      ? result[result.length - 1].id
-      : null;
+    const nextCursor = allFetchedPosts.length >= bufferSize ? lastDocInSnap?.id || null
+      : result.length ? result[result.length - 1].id : null;
 
     res.status(200).json({ posts: postsResponse, nextCursor });
 
