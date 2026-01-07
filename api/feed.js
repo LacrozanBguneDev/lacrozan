@@ -1,7 +1,7 @@
 import admin from "firebase-admin";
 
 /* ================== KONFIGURASI & INISIALISASI ================== */
-const REQUIRED_API_KEY = process.env.REACT_APP_FEED_API_KEY?.trim() || null;
+const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || null;
 
 // Variabel global untuk menyimpan koneksi dan error
 let db = null;
