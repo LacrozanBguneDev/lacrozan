@@ -171,7 +171,7 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
+const DEVELOPER_EMAIL = process.env.DEV_EMAIL; 
 const APP_NAME = "BguneNet";
 const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
 const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
@@ -190,9 +190,9 @@ const firebaseConfig = {
   measurementId: "G-G0VWNHHVB8",
 };
 
-const API_KEY = process.env.REACT_APP_API_KEY;
-const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
+const API_KEY = process.env.APP_API_KEY;
+const VAPID_KEY = process.env.VAPID_KEY;
+const FEED_API_KEY = process.env.FEED_API_KEY;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
