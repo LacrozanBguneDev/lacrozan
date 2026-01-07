@@ -1,12 +1,23 @@
-import { CONFIG } from "../config";
+// Semua rahasia dan default public di sini
+export const CONFIG = {
+  // 🔒 RAHASIA (hanya backend)
+  DEVELOPER_EMAIL: process.env.DEV_EMAIL,
+  API_KEY: process.env.APP_API_KEY,
+  VAPID_KEY: process.env.VAPID_KEY,
+  FEED_API_KEY: process.env.FEED_API_KEY,
 
-export default function handler(req, res) {
-  // Kirim HANYA public config
-  res.status(200).json({
-    APP_NAME: CONFIG.APP_NAME,
-    APP_LOGO: CONFIG.APP_LOGO,
-    DEV_PHOTO: CONFIG.DEV_PHOTO,
-    API_ENDPOINT: CONFIG.API_ENDPOINT,
-    firebaseConfig: CONFIG.firebaseConfig
-  });
-}
+  // 🌍 PUBLIK
+  APP_NAME: "BguneNet",
+  APP_LOGO: "https://c.termai.cc/i150/VrL65.png",
+  DEV_PHOTO: "https://c.termai.cc/i6/EAb.jpg",
+  API_ENDPOINT: "/api/feed",
+  firebaseConfig: {
+    apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc",
+    authDomain: "eduku-web.firebaseapp.com",
+    projectId: "eduku-web",
+    storageBucket: "eduku-web.firebasestorage.com",
+    messagingSenderId: "662463693471",
+    appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
+    measurementId: "G-G0VWNHHVB8",
+  }
+};
