@@ -170,29 +170,24 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// --- KONSTANTA GLOBAL & API ---
-const DEVELOPER_EMAIL = process.env.DEV_EMAIL; 
-const APP_NAME = "BguneNet";
-const APP_LOGO = "https://c.termai.cc/i150/VrL65.png";
-const DEV_PHOTO = "https://c.termai.cc/i6/EAb.jpg";
 
-// Endpoint API
-const API_ENDPOINT = '/api/feed';
+const [config, setConfig] = useState(null);
 
-// Konfigurasi Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyDz8mZoFdWLZs9zRC2xDndRzKQ7sju-Goc", 
-  authDomain: "eduku-web.firebaseapp.com",
-  projectId: "eduku-web",
-  storageBucket: "eduku-web.firebasestorage.com",
-  messagingSenderId: "662463693471",
-  appId: "1:662463693471:web:e0f19e4497aa3f1de498aa",
-  measurementId: "G-G0VWNHHVB8",
-};
+useEffect(() => {
+  fetch("/api/public-config")
+    .then(r => r.json())
+    .then(setConfig);
+}, []);
 
-const API_KEY = process.env.APP_API_KEY;
-const VAPID_KEY = process.env.VAPID_KEY;
-const FEED_API_KEY = process.env.FEED_API_KEY;
+if (!config) return null;
+
+const {
+  APP_NAME,
+  APP_LOGO,
+  DEV_PHOTO,
+  API_ENDPOINT,
+  firebaseConfig
+} = config;
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
