@@ -1,5 +1,5 @@
 import admin from "firebase-admin";
-import { CONFIG } from './config.js'; // Config rahasia backend
+import { CONFIG } from './config.js'; // Import config rahasia backend
 
 /* ================== KONFIGURASI & INISIALISASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
@@ -71,10 +71,10 @@ const dailySeedSort = posts => {
 
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
-  // Firestore siap?
+  // 1. Cek Firestore
   if (!db) return res.status(500).json({ error: true, message: "Firestore not initialized", details: initError });
 
-  // Validasi API key
+  // 2. Validasi API key
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (!REQUIRED_API_KEY || apiKey !== REQUIRED_API_KEY) return res.status(401).json({ error: true, message: "API key invalid" });
 
@@ -101,7 +101,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Filter category / user / following
+    // Filter category/user/following
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
     if (mode === "following" && followingIds?.length && !isFollowingFallback)
@@ -148,14 +148,11 @@ export default async function handler(req, res) {
 
     let postsResponse = result.map(p => {
       const u = userMap[p.userId] || {};
-      return {
-        ...p,
-        user: { username: u.username || "User", photoURL: u.photoURL || null, reputation: u.reputation || 0, email: u.email || "" }
-      };
+      return { ...p, user: { username: u.username || "User", photoURL: u.photoURL || null, reputation: u.reputation || 0, email: u.email || "" } };
     });
 
-    /* ================== FETCH EXTERNAL API ================== */
-    if (CONFIG.FEED_API_URL) {
+    /* ================== FETCH SERVER-TO-SERVER ================== */
+    if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
       try {
         const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
         if (extRes.ok) {
