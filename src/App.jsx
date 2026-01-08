@@ -219,6 +219,15 @@ const initFirebaseServices = (fbConfig) => {
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
+// FITUR BARU: Format Angka (1000 -> 1rb)
+const formatNumber = (num) => {
+    if (num === undefined || num === null) return '0';
+    if (num >= 1000000000) return (num / 1000000000).toFixed(1).replace(/\.0$/, '') + 'm'; // Miliar
+    if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'jt'; // Juta
+    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'rb'; // Ribu
+    return num.toString();
+};
+
 const fetchFeedData = async ({
     mode = 'home',
     limit = 10,
@@ -1686,8 +1695,10 @@ const LegalPage = ({ onBack }) => {
 };
 
 const LeaderboardScreen = ({ allUsers, currentUser }) => {
-    // FIX: Leaderboard Logic - Top 10 Only (Tingkat Dewa) & User Rank Message
-    const sortedUsers = useMemo(() => { return [...allUsers].sort((a, b) => (b.reputation || 0) - (a.reputation || 0)); }, [allUsers]);
+    // UPDATE LOGIC: Sort Berdasarkan FOLLOWERS (Bukan Reputation/XP)
+    const sortedUsers = useMemo(() => { 
+        return [...allUsers].sort((a, b) => (b.followers?.length || 0) - (a.followers?.length || 0)); 
+    }, [allUsers]);
     const top10 = sortedUsers.slice(0, 10);
     
     // Cari ranking user saat ini di list FULL (sebelum di slice)
@@ -1696,19 +1707,19 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
 
     return (
         <div className="max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto p-4 pb-24 pt-20">
-            {/* Banner Reset Mingguan */}
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
-                <div className="bg-red-500 text-white p-2 rounded-lg"><TimerReset size={20}/></div>
+            {/* Banner Top Followers */}
+            <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm">
+                <div className="bg-sky-500 text-white p-2 rounded-lg"><Users size={20}/></div>
                 <div>
-                    <h3 className="font-bold text-red-700 dark:text-red-400 text-sm">Reset Poin Mingguan</h3>
-                    {/* PERBAIKAN 3: Text Leaderboard diubah sesuai permintaan */}
-                    <p className="text-xs text-red-600 dark:text-red-300 mt-1 leading-relaxed">
-                        Perhatian! Semua poin reputasi akan <strong>direset menjadi 0</strong> setiap hari <strong>Kamis pukul 11:00 WIB</strong>.
+                    <h3 className="font-bold text-sky-700 dark:text-sky-400 text-sm">Papan Peringkat Populer</h3>
+                    <p className="text-xs text-sky-600 dark:text-sky-300 mt-1 leading-relaxed">
+                        Peringkat ini dihitung berdasarkan <strong>Jumlah Pengikut (Followers)</strong>.
+                        <br/>Semakin banyak yang mengikuti kamu, semakin tinggi posisimu!
                     </p>
                 </div>
             </div>
 
-            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top 10 Legenda (Hardcore)</h1>
+            <h1 className="text-xl font-black text-gray-800 dark:text-white mb-6 flex items-center gap-2"><Trophy className="text-yellow-500"/> Top 10 Populer (Followers)</h1>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden h-fit">
                     {top10.map((u, index) => {
@@ -1718,8 +1729,8 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
                             <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${rankStyle}`}>
                                 <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-600':index===1?'text-gray-500':index===2?'text-orange-600':'text-gray-300'}`}>{index + 1}</div>
                                 <div className="relative mr-3"><Avatar src={u.photoURL} fallbackText={u.username} className={`w-12 h-12 rounded-full border-2 ${index===0?'border-yellow-500':index===1?'border-gray-400':index===2?'border-orange-500':'border-gray-200 dark:border-gray-600'}`}/>{index === 0 && <div className="absolute -top-2 -right-1 animate-bounce">{rankIcon}</div>}</div>
-                                <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">{u.followers?.length || 0} Pengikut</p></div>
-                                <div className="text-right"><div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1"><Flame size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>{u.reputation || 0}</div><div className="text-[9px] text-gray-400 uppercase font-bold">Poin</div></div>
+                                <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">{formatNumber(u.reputation || 0)} Poin Aktivitas</p></div>
+                                <div className="text-right"><div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1"><Users size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>{formatNumber(u.followers?.length || 0)}</div><div className="text-[9px] text-gray-400 uppercase font-bold">Pengikut</div></div>
                             </div>
                          )
                     })}
@@ -1730,23 +1741,22 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
                      {/* Pesan Semangat jika tidak masuk Top 10 */}
                     {!isMeInTop10 && currentUser && (
                         <div className="bg-sky-50 dark:bg-sky-900/20 p-6 rounded-3xl text-center border border-sky-100 dark:border-sky-800">
-                            <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm text-2xl">💪</div>
-                            <h3 className="font-bold text-gray-800 dark:text-white mb-1">Perjalanan Masih Panjang!</h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Masuk Top 10 butuh dedikasi tinggi.</p>
+                            <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm text-2xl">🚀</div>
+                            <h3 className="font-bold text-gray-800 dark:text-white mb-1">Ayo Cari Teman Baru!</h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Perbanyak koneksi untuk masuk ke daftar populer.</p>
                             <p className="text-xs font-bold text-sky-600 dark:text-sky-400 bg-white dark:bg-gray-800 py-1 px-3 rounded-full inline-block shadow-sm">
-                                Posisi Kamu: #{myRankIndex + 1}
+                                Peringkat Kamu: #{myRankIndex + 1}
                             </p>
                         </div>
                     )}
 
                     <div className="bg-gray-900 p-6 rounded-3xl text-white shadow-lg relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500 blur-3xl opacity-20 rounded-full"></div>
-                        <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Gamepad2/> Sistem Poin (Tingkat Dewa)</h3>
+                        <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Gamepad2/> Tips Populer</h3>
                         <ul className="space-y-3 text-sm text-gray-300">
-                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Membuat Post</span> <span className="text-green-400 font-bold">+2 Poin</span></li>
-                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Berkomentar</span> <span className="text-green-400 font-bold">+1 Poin</span></li>
-                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Dapat Like</span> <span className="text-green-400 font-bold">+1 Poin</span></li>
-                            <li className="flex justify-between items-center pt-2"><span className="text-red-400">Hapus Post</span> <span className="text-red-400 font-bold">Sanksi Berat</span></li>
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Aktif Posting Konten</span> <span className="text-green-400 font-bold">Penting</span></li>
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Saling Follow</span> <span className="text-green-400 font-bold">Wajib</span></li>
+                            <li className="flex justify-between items-center border-b border-gray-800 pb-2"><span>Ramah di Komentar</span> <span className="text-green-400 font-bold">Disukai</span></li>
                         </ul>
                     </div>
                 </div>
@@ -1968,11 +1978,11 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 <div className="flex gap-6">
                     <button onClick={handleLike} className={`flex items-center gap-1.5 transition group hover:text-rose-500 ${liked ? 'text-rose-500' : ''}`}>
                         <Heart size={20} fill={liked ? 'currentColor' : 'none'} className="group-active:scale-125 transition-transform"/> 
-                        <span className="text-xs font-medium">{likeCount || 0}</span>
+                        <span className="text-xs font-medium">{formatNumber(likeCount || 0)}</span>
                     </button>
                     <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-1.5 transition hover:text-sky-500">
                         <MessageSquare size={20} /> 
-                        <span className="text-xs font-medium">{post.commentsCount || 0}</span>
+                        <span className="text-xs font-medium">{formatNumber(post.commentsCount || 0)}</span>
                     </button>
                     <button onClick={sharePost} className="flex items-center gap-1.5 transition hover:text-green-500">
                         <Share2 size={20} />
@@ -2192,7 +2202,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${rank===1 ? 'border-yellow-400' : isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
-                <div className="px-8 mt-2 mb-4 w-full"><div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1"><span>{profileData.reputation || 0} XP</span><span>{rankProgress.next ? `${rankProgress.next} XP` : 'MAX'}</span></div><div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div></div><p className="text-[10px] text-center mt-1 text-sky-500 font-bold">{rankProgress.next ? `Butuh ${rankProgress.next - (profileData.reputation||0)} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}</p></div>
+                <div className="px-8 mt-2 mb-4 w-full"><div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1"><span>{formatNumber(profileData.reputation || 0)} XP</span><span>{rankProgress.next ? `${formatNumber(rankProgress.next)} XP` : 'MAX'}</span></div><div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div></div><p className="text-[10px] text-center mt-1 text-sky-500 font-bold">{rankProgress.next ? `Butuh ${formatNumber(rankProgress.next - (profileData.reputation||0))} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}</p></div>
                 
                 {/* PERBAIKAN: Tombol Follow Profil dengan Warna */}
                 {!isSelf && !isGuest && ( 
@@ -2208,7 +2218,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 )}
                 
                 {isDev && isSelf && <button onClick={()=>setShowDev(true)} className="w-full mt-2 bg-gray-800 text-white py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-900 shadow-lg"><ShieldCheck size={16}/> Dashboard Developer</button>}
-                <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{followersCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{followingCount}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{friendsCount}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
+                <div className="flex justify-center gap-6 mt-6 border-t dark:border-gray-700 pt-6"><div><span className="font-bold text-xl block dark:text-white">{formatNumber(followersCount)}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Pengikut</span></div><div><span className="font-bold text-xl block dark:text-white">{formatNumber(followingCount)}</span><span className="text-[10px] text-gray-400 font-bold uppercase">Mengikuti</span></div><div><span className="font-bold text-xl block text-emerald-600">{formatNumber(friendsCount)}</span><span className="text-[10px] text-emerald-600 font-bold uppercase">Teman</span></div></div>
             </div>
             {isSelf && ( <div className="flex gap-2 px-4 mb-6"><button onClick={() => setActiveTab('posts')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'posts' ? 'bg-sky-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Postingan Saya</button><button onClick={() => setActiveTab('saved')} className={`flex-1 py-2 text-xs font-bold rounded-full transition ${activeTab === 'saved' ? 'bg-purple-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500'}`}>Disimpan</button></div> )}
             <div className="px-4">
@@ -2309,7 +2319,7 @@ const HomeScreen = ({
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-2 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-4"><CheckCircle size={14}/> Postingan Baru Disematkan</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
                         </div>
                     ))}
                 </div>
