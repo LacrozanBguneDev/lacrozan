@@ -200,7 +200,7 @@ let app, auth, db, googleProvider, messaging;
 // ==========================
 const fetchFirebaseConfig = async () => {
     try {
-        const res = await fetch('/api/firebase');
+        const res = await fetch('/api/firebase-config');
         if (!res.ok) throw new Error("Failed to fetch Firebase config");
         const fbConfig = await res.json();
         CONFIG.firebaseConfig = fbConfig; // simpan ke CONFIG
