@@ -219,15 +219,20 @@ const initFirebaseServices = (fbConfig) => {
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
 // ==========================================
+const fetchFeedData = async ({
+    mode = 'home',
+    limit = 10,
+    cursor = null,
+    viewerId = null,
+    userId = null,
+    q = null
+}) => {
 
-const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
-    if (!API_KEY) {
-        // console.warn("API Key missing, returning empty feed.");
-        // Silent return is better here if logic relies on global init later
-    }
+    // 1. Bangun query param
     const params = new URLSearchParams();
-    params.append('mode', mode === 'friends' ? 'home' : mode); 
+    params.append('mode', mode === 'friends' ? 'home' : mode);
     params.append('limit', limit);
+
     if (cursor) params.append('cursor', cursor);
     if (viewerId) params.append('viewerId', viewerId);
     if (userId) params.append('userId', userId);
@@ -235,24 +240,42 @@ const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerI
 
     const url = `${API_ENDPOINT}?${params.toString()}`;
 
+    // 2. Header aman (API key opsional)
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+
+    // ⚠️ HANYA kirim x-api-key kalau ADA isinya
+    if (typeof API_KEY === 'string' && API_KEY.trim() !== '') {
+        headers['x-api-key'] = API_KEY;
+    }
+
     try {
         const response = await fetch(url, {
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': API_KEY, 
-            },
+            method: 'GET',
+            headers,
         });
-        if (!response.ok) throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+
+        if (!response.ok) {
+            throw new Error(`Server Error ${response.status}`);
+        }
+
         const data = await response.json();
-        return { 
-            posts: data.posts || [], 
-            nextCursor: data.nextCursor
+
+        return {
+            posts: Array.isArray(data.posts) ? data.posts : [],
+            nextCursor: data.nextCursor ?? null,
         };
-    } catch (error) {
-        console.error("API Fetch Error (Feed):", error);
-        return { posts: [], nextCursor: null };
+
+    } catch (err) {
+        console.error('API Fetch Error (Feed):', err);
+        return {
+            posts: [],
+            nextCursor: null,
+        };
     }
 };
+
 
 const logSystemError = async (error, context = 'general', user = null) => {
     console.error(`[SystemLog:${context}]`, error);
