@@ -297,7 +297,7 @@ const requestNotificationPermission = async (userId) => {
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const token = await getToken(messaging, { vapidKey: 'process.env.VAPID_KEY;' }); // Placeholder to avoid error
+            const token = await getToken(messaging, { vapidKey: 'BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE' }); // Placeholder to avoid error
             if (token) {
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
                 await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
@@ -1487,7 +1487,7 @@ const DeveloperDashboard = ({ onClose }) => {
     const [allUsersList, setAllUsersList] = useState([]);
     const [activeTab, setActiveTab] = useState('overview'); 
     const [systemLogs, setSystemLogs] = useState([]);
-    const DEVELOPER_EMAIL = "admin@bgune.net";
+    const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
 
     useEffect(() => {
         const fetchData = async () => {
@@ -1784,7 +1784,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [lightboxIndex, setLightboxIndex] = useState(0);
 
     const isOwner = currentUserId && post.userId === currentUserId;
-    const DEVELOPER_EMAIL = "admin@bgune.net";
+    const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
     const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
@@ -2119,7 +2119,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     const viewerUid = viewerProfile ? viewerProfile.uid : null;
     const isSelf = viewerUid === profileData?.uid; 
-    const DEVELOPER_EMAIL = "admin@bgune.net";
+    const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     const isDev = profileData?.email === DEVELOPER_EMAIL;
 
     useEffect(() => {
@@ -2636,7 +2636,7 @@ const MainAppContent = () => {
     const [darkMode, setDarkMode] = useState(false); const [isOffline, setIsOffline] = useState(!navigator.onLine); 
     const [showRewards, setShowRewards] = useState(false); const [canClaimReward, setCanClaimReward] = useState(false); 
     const [nextRewardTime, setNextRewardTime] = useState('');
-    const DEVELOPER_EMAIL = "admin@bgune.net";
+    const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     
     // NEW STATE: Sidebar
     const [sidebarOpen, setSidebarOpen] = useState(false);
