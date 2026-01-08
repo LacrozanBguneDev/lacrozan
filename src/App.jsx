@@ -186,8 +186,8 @@ let APP_NAME = CONFIG.APP_NAME;
 let APP_LOGO = CONFIG.APP_LOGO;
 let DEV_PHOTO = CONFIG.DEV_PHOTO;
 let API_ENDPOINT = CONFIG.API_ENDPOINT;
-
-
+// FIX: Definisi API_KEY untuk mencegah ReferenceError saat fetchFeedData dipanggil
+let API_KEY = ""; 
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
@@ -229,8 +229,6 @@ const initFirebaseServices = (fbConfig) => {
         console.error("Firebase Initialization Error:", error);
     }
 };
-
-
 
 
 // ==========================================
@@ -291,7 +289,7 @@ const requestNotificationPermission = async (userId) => {
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+            const token = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_HERE' }); // Placeholder to avoid error
             if (token) {
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
                 await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
@@ -391,6 +389,7 @@ const getMediaEmbed = (url) => {
 };
 
 const getReputationBadge = (reputation, isDev) => {
+    const DEVELOPER_EMAIL = "admin@bgune.net"; // Default placeholder
     if (isDev) return { label: "DEV", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 1000) return { label: "LEGEND", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
     if (reputation >= 500) return { label: "STAR", icon: Gem, color: "bg-purple-500 text-white" };
@@ -1478,6 +1477,7 @@ const DeveloperDashboard = ({ onClose }) => {
     const [allUsersList, setAllUsersList] = useState([]);
     const [activeTab, setActiveTab] = useState('overview'); 
     const [systemLogs, setSystemLogs] = useState([]);
+    const DEVELOPER_EMAIL = "admin@bgune.net";
 
     useEffect(() => {
         const fetchData = async () => {
@@ -1774,6 +1774,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [lightboxIndex, setLightboxIndex] = useState(0);
 
     const isOwner = currentUserId && post.userId === currentUserId;
+    const DEVELOPER_EMAIL = "admin@bgune.net";
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
     const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
@@ -2108,6 +2109,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     const viewerUid = viewerProfile ? viewerProfile.uid : null;
     const isSelf = viewerUid === profileData?.uid; 
+    const DEVELOPER_EMAIL = "admin@bgune.net";
     const isDev = profileData?.email === DEVELOPER_EMAIL;
 
     useEffect(() => {
@@ -2531,33 +2533,55 @@ const App = () => {
     // --- STATE CONFIG ---
     const [ready, setReady] = useState(false);
 
-    // --- FETCH CONFIG & INIT FIREBASE ---
+    // --- FETCH CONFIG & INIT FIREBASE (REVISED FOR CANVAS/VERCEL) ---
     useEffect(() => {
-        fetch("/api/public-config")
-            .then(r => r.json())
-            .then(cfg => {
-                // Update Global Config Object
-                Object.assign(CONFIG, cfg);
-                
-                // Update Global Variables (Mutable references)
-                if(cfg.APP_NAME) APP_NAME = cfg.APP_NAME;
-                if(cfg.APP_LOGO) APP_LOGO = cfg.APP_LOGO;
-                if(cfg.DEV_PHOTO) DEV_PHOTO = cfg.DEV_PHOTO;
-                if(cfg.API_ENDPOINT) API_ENDPOINT = cfg.API_ENDPOINT;
+        const initSystem = async () => {
+            // 1. Cek Environment Config (Canvas/Vercel)
+            let fbConfig = null;
+            if (typeof __firebase_config !== 'undefined') {
+                try {
+                    fbConfig = JSON.parse(__firebase_config);
+                } catch (e) { console.error("Parse Env Error", e); }
+            }
 
-                // Init Firebase Service
-                initFirebaseServices(cfg.firebaseConfig);
+            // 2. Fetch Fallback (Original Logic)
+            if (!fbConfig) {
+                try {
+                    const r = await fetch("/api/public-config");
+                    if (r.ok) {
+                        const cfg = await r.json();
+                        Object.assign(CONFIG, cfg);
+                        if(cfg.APP_NAME) APP_NAME = cfg.APP_NAME;
+                        if(cfg.APP_LOGO) APP_LOGO = cfg.APP_LOGO;
+                        if(cfg.DEV_PHOTO) DEV_PHOTO = cfg.DEV_PHOTO;
+                        if(cfg.API_ENDPOINT) API_ENDPOINT = cfg.API_ENDPOINT;
+                        fbConfig = cfg.firebaseConfig;
+                    }
+                } catch (err) {
+                    console.error("Config load failed", err);
+                }
+            }
+
+            // 3. Initialize Firebase
+            if (fbConfig) {
+                initFirebaseServices(fbConfig);
                 
-                // App Ready
+                // 4. Auth Handshake (Canvas Requirement)
+                // Ini memastikan aplikasi bisa baca Firestore tanpa harus login Google dulu
+                if (auth) {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        try { await signInWithCustomToken(auth, __initial_auth_token); } 
+                        catch (e) { console.error("Auth Token Error", e); }
+                    }
+                }
+                
                 setReady(true);
-            })
-            .catch(err => {
-                console.error("Config load failed", err);
-                // Tetap setReady true (dengan default) agar app tidak blank total
-                // atau biarkan loading jika config mandatory
-                // Sesuai instruksi: jika ready false return loader.
-                // Jika error, mungkin perlu handling lain, tapi disini kita asumsikan sukses/log error.
-            });
+            } else {
+                console.error("CRITICAL: No Firebase Config Available");
+            }
+        };
+
+        initSystem();
     }, []);
 
     if (!ready) {
@@ -2589,6 +2613,7 @@ const MainAppContent = () => {
     const [darkMode, setDarkMode] = useState(false); const [isOffline, setIsOffline] = useState(!navigator.onLine); 
     const [showRewards, setShowRewards] = useState(false); const [canClaimReward, setCanClaimReward] = useState(false); 
     const [nextRewardTime, setNextRewardTime] = useState('');
+    const DEVELOPER_EMAIL = "admin@bgune.net";
     
     // NEW STATE: Sidebar
     const [sidebarOpen, setSidebarOpen] = useState(false);
