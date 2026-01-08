@@ -230,6 +230,7 @@ const initFirebaseServices = (fbConfig) => {
     }
 };
 
+fetchFirebaseConfig();
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
