@@ -192,23 +192,8 @@ let API_KEY = "";
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
-// Initialize Firebase with Error Handling (Now a Function)
+// Initialize Firebase Variables Only (No execution here!)
 let app, auth, db, googleProvider, messaging;
-
-// ==========================
-// 🔥 DYNAMIC CONFIG FETCH
-// ==========================
-const fetchFirebaseConfig = async () => {
-    try {
-        const res = await fetch('/api/firebase-config');
-        if (!res.ok) throw new Error("Failed to fetch Firebase config");
-        const fbConfig = await res.json();
-        CONFIG.firebaseConfig = fbConfig; // simpan ke CONFIG
-        initFirebaseServices(fbConfig);
-    } catch (err) {
-        console.error("Error fetching Firebase config:", err);
-    }
-};
 
 const initFirebaseServices = (fbConfig) => {
     try {
@@ -225,12 +210,11 @@ const initFirebaseServices = (fbConfig) => {
                 console.log("Messaging skipped/not supported:", e);
             }
         }
+        console.log("Firebase initialized successfully.");
     } catch (error) {
         console.error("Firebase Initialization Error:", error);
     }
 };
-
-fetchFirebaseConfig();
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
@@ -238,8 +222,8 @@ fetchFirebaseConfig();
 
 const fetchFeedData = async ({ mode = 'home', limit = 10, cursor = null, viewerId = null, userId = null, q = null }) => {
     if (!API_KEY) {
-        console.warn("API Key missing, returning empty feed.");
-        return { posts: [], nextCursor: null };
+        // console.warn("API Key missing, returning empty feed.");
+        // Silent return is better here if logic relies on global init later
     }
     const params = new URLSearchParams();
     params.append('mode', mode === 'friends' ? 'home' : mode); 
@@ -519,7 +503,7 @@ const ChatSystem = ({ currentUser, onBack }) => {
 
     // Fetch Chat List
     useEffect(() => {
-        if (!currentUser) return;
+        if (!currentUser || !db) return;
         setLoading(true);
         // Query chats where user is participant
         const q = query(collection(db, getPublicCollection('chats')), where('participants', 'array-contains', currentUser.uid));
@@ -535,7 +519,7 @@ const ChatSystem = ({ currentUser, onBack }) => {
 
     // Handle New Chat / Select Chat
     const handleSelectChat = async (recipientId, recipientData) => {
-        if (!currentUser || !recipientId) return;
+        if (!currentUser || !recipientId || !db) return;
         
         // Cek existing chat
         const existingChat = chats.find(c => c.participants.includes(recipientId));
@@ -652,6 +636,7 @@ const ChatListItem = ({ chat, currentUserId, onClick, onLongPress }) => {
     const longPressTimer = useRef(null);
 
     useEffect(() => {
+        if(!db) return;
         const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), otherId), doc => {
             if (doc.exists()) setProfile(doc.data());
         });
@@ -701,6 +686,7 @@ const NewChatSelector = ({ currentUser, onClose, onSelect }) => {
         const load = async () => {
             setLoading(true);
             try {
+                if(!db) return;
                 const myProfile = await getDoc(doc(db, getPublicCollection('userProfiles'), currentUser.uid));
                 if (myProfile.exists()) {
                     const data = myProfile.data();
@@ -776,7 +762,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
 
     // Fetch Recipient Profile
     useEffect(() => {
-        if (!recipientId) return;
+        if (!recipientId || !db) return;
         const unsub = onSnapshot(doc(db, getPublicCollection('userProfiles'), recipientId), (doc) => {
             if (doc.exists()) setRecipientProfile({ uid: doc.id, ...doc.data() });
         });
@@ -787,7 +773,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
     // Jalankan hanya sekali saat komponen mount
     useEffect(() => {
         const cleanupOldMessages = async () => {
-            if (!chatId) return;
+            if (!chatId || !db) return;
             try {
                 const sevenDaysAgo = new Date();
                 sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -814,7 +800,7 @@ const ChatRoom = ({ currentUser, chatId, recipient, onBack }) => {
 
     // Fetch Messages with Limit (Lazy Loading)
     useEffect(() => {
-        if (!chatId) return;
+        if (!chatId || !db) return;
         
         // FIX: Path error - Gunakan collection() dengan path lengkap
         const messagesRef = collection(db, getPublicCollection('chats'), chatId, 'messages');
@@ -1794,7 +1780,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
     const handleLike = async () => {
         if (isGuest) { onRequestLogin(); return; }
-        if (!currentUserId) return; // Safety check
+        if (!currentUserId || !db) return; // Safety check
 
         const newLiked = !liked; setLiked(newLiked); setLikeCount(prev => newLiked ? prev + 1 : prev - 1);
         
@@ -1857,7 +1843,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); if(onUpdate) onUpdate(post.id, { title: editedTitle, content: editedContent }); };
     const sharePost = async () => { try { await navigator.clipboard.writeText(`${window.location.origin}?post=${post.id}`); await showAlert('Link Disalin! Orang lain bisa membukanya langsung.', 'success'); } catch (e) { await showAlert('Gagal menyalin link', 'error'); } };
 
-    useEffect(() => { if (!showComments) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
+    useEffect(() => { if (!showComments || !db) return; const q = query(collection(db, getPublicCollection('comments')), where('postId', '==', post.id)); return onSnapshot(q, s => { setComments(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp?.toMillis || 0) - (b.timestamp?.toMillis || 0))); }); }, [showComments, post.id]);
 
     const embed = useMemo(() => getMediaEmbed(post.mediaUrl), [post.mediaUrl]);
     // FIX VIDEO: Prioritaskan mediaType 'video' dari API agar tidak dianggap embed link biasa
@@ -2465,6 +2451,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
         const fetchSinglePost = async () => {
             setLoading(true);
             try {
+                if(!db) return;
                 const docRef = doc(db, getPublicCollection('posts'), postId);
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
@@ -2532,10 +2519,12 @@ const SearchScreen = ({ allUsers, profile, handleFollow, goToProfile, isGuest, o
 
 const App = () => {
     // --- STATE CONFIG ---
+    // READY adalah gatekeeper. Jika false, MainAppContent tidak akan dirender.
     const [ready, setReady] = useState(false);
 
     // --- FETCH CONFIG & INIT FIREBASE (REVISED FOR CANVAS/VERCEL) ---
     useEffect(() => {
+        // HANYA JALANKAN SEKALI SAAT MOUNT
         const initSystem = async () => {
             // 1. Cek Environment Config (Canvas/Vercel)
             let fbConfig = null;
@@ -2545,30 +2534,35 @@ const App = () => {
                 } catch (e) { console.error("Parse Env Error", e); }
             }
 
-            // 2. Fetch Fallback (Original Logic)
+            // 2. Fetch Fallback (Original Logic + Valid endpoint)
             if (!fbConfig) {
                 try {
-                    const r = await fetch("/api/public-config");
+                    // Coba endpoint firebase-config yang dibilang valid oleh user
+                    const r = await fetch("/api/firebase-config"); 
                     if (r.ok) {
                         const cfg = await r.json();
-                        Object.assign(CONFIG, cfg);
-                        if(cfg.APP_NAME) APP_NAME = cfg.APP_NAME;
-                        if(cfg.APP_LOGO) APP_LOGO = cfg.APP_LOGO;
-                        if(cfg.DEV_PHOTO) DEV_PHOTO = cfg.DEV_PHOTO;
-                        if(cfg.API_ENDPOINT) API_ENDPOINT = cfg.API_ENDPOINT;
-                        fbConfig = cfg.firebaseConfig;
+                        // Jika struktur JSON langsung config, pakai cfg.
+                        // Jika cfg.firebaseConfig, sesuaikan.
+                        fbConfig = cfg.firebaseConfig || cfg; 
+                    } else {
+                        // Fallback ke public-config jika firebase-config gagal
+                        const r2 = await fetch("/api/public-config");
+                        if (r2.ok) {
+                            const cfg2 = await r2.json();
+                            Object.assign(CONFIG, cfg2);
+                            fbConfig = cfg2.firebaseConfig;
+                        }
                     }
                 } catch (err) {
                     console.error("Config load failed", err);
                 }
             }
 
-            // 3. Initialize Firebase
+            // 3. Initialize Firebase SECARA ASYNC DI DALAM COMPONENT
             if (fbConfig) {
                 initFirebaseServices(fbConfig);
                 
-                // 4. Auth Handshake (Canvas Requirement)
-                // Ini memastikan aplikasi bisa baca Firestore tanpa harus login Google dulu
+                // 4. Auth Handshake
                 if (auth) {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         try { await signInWithCustomToken(auth, __initial_auth_token); } 
@@ -2576,6 +2570,7 @@ const App = () => {
                     }
                 }
                 
+                // 5. SET READY TRUE HANYA SETELAH SEMUA SELESAI
                 setReady(true);
             } else {
                 console.error("CRITICAL: No Firebase Config Available");
@@ -2583,7 +2578,7 @@ const App = () => {
         };
 
         initSystem();
-    }, []);
+    }, []); // Empty dependency array ensures run once
 
     if (!ready) {
         return (
@@ -2596,12 +2591,16 @@ const App = () => {
 
     return (
         <CustomAlertProvider>
+            {/* MainAppContent hanya dirender jika ready === true, artinya auth sudah siap */}
             <MainAppContent />
         </CustomAlertProvider>
     );
 };
 
 const MainAppContent = () => {
+    // Guard Clause Tambahan
+    if (!auth) return <div className="p-10 text-center">Auth Error. Silakan refresh.</div>;
+
     const { showConfirm, showAlert } = useCustomAlert();
     const [user, setUser] = useState(undefined); const [profile, setProfile] = useState(null); 
     const [page, setPage] = useState('home'); 
