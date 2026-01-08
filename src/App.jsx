@@ -171,15 +171,14 @@ class ErrorBoundary extends React.Component {
 }
 
 // --- KONSTANTA GLOBAL & API (UPDATED FOR DYNAMIC CONFIG) ---
-const DEVELOPER_EMAIL = process.env.REACT_APP_DEV_EMAIL; 
+
 
 // Initial Config Object
 const CONFIG = {
   APP_NAME: "BguneNet",
   APP_LOGO: "https://c.termai.cc/i150/VrL65.png",
   DEV_PHOTO: "https://c.termai.cc/i6/EAb.jpg",
-  API_ENDPOINT: "/api/feed",
-  firebaseConfig: null
+  API_ENDPOINT: "/api/feed"
 };
 
 // Mutable Globals (untuk kompatibilitas dengan kode lama)
@@ -188,15 +187,28 @@ let APP_LOGO = CONFIG.APP_LOGO;
 let DEV_PHOTO = CONFIG.DEV_PHOTO;
 let API_ENDPOINT = CONFIG.API_ENDPOINT;
 
-const API_KEY = process.env.REACT_APP_API_KEY;
-const VAPID_KEY = process.env.REACT_APP_VAPID_KEY;
-const FEED_API_KEY = process.env.REACT_APP_FEED_API_KEY;
+
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
 
 // Initialize Firebase with Error Handling (Now a Function)
 let app, auth, db, googleProvider, messaging;
+
+// ==========================
+// 🔥 DYNAMIC CONFIG FETCH
+// ==========================
+const fetchFirebaseConfig = async () => {
+    try {
+        const res = await fetch('/api/firebase');
+        if (!res.ok) throw new Error("Failed to fetch Firebase config");
+        const fbConfig = await res.json();
+        CONFIG.firebaseConfig = fbConfig; // simpan ke CONFIG
+        initFirebaseServices(fbConfig);
+    } catch (err) {
+        console.error("Error fetching Firebase config:", err);
+    }
+};
 
 const initFirebaseServices = (fbConfig) => {
     try {
@@ -205,7 +217,7 @@ const initFirebaseServices = (fbConfig) => {
         auth = getAuth(app);
         db = getFirestore(app);
         googleProvider = new GoogleAuthProvider();
-        
+
         if (typeof window !== "undefined" && "serviceWorker" in navigator) {
             try {
                 messaging = getMessaging(app);
@@ -217,6 +229,9 @@ const initFirebaseServices = (fbConfig) => {
         console.error("Firebase Initialization Error:", error);
     }
 };
+
+
+
 
 // ==========================================
 // BAGIAN 2: UTILITY FUNCTIONS & HELPERS
