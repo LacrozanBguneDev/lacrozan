@@ -297,7 +297,7 @@ const requestNotificationPermission = async (userId) => {
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const token = await getToken(messaging, { vapidKey: 'YOUR_VAPID_KEY_HERE' }); // Placeholder to avoid error
+            const token = await getToken(messaging, { vapidKey: 'process.env.VAPID_KEY;' }); // Placeholder to avoid error
             if (token) {
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
                 await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
@@ -397,7 +397,7 @@ const getMediaEmbed = (url) => {
 };
 
 const getReputationBadge = (reputation, isDev) => {
-    const DEVELOPER_EMAIL = "admin@bgune.net"; // Default placeholder
+    const DEVELOPER_EMAIL = "irhamdika00@gmail.com"; // Default placeholder
     if (isDev) return { label: "DEV", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     if (reputation >= 1000) return { label: "LEGEND", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
     if (reputation >= 500) return { label: "STAR", icon: Gem, color: "bg-purple-500 text-white" };
