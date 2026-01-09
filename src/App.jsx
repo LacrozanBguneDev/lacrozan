@@ -308,8 +308,12 @@ const requestNotificationPermission = async (userId) => {
         if (permission === 'granted') {
             const token = await getToken(messaging, { vapidKey: 'BJyR2rcpzyDvJSPNZbLPBwIX3Gj09ArQLbjqb7S7aRBGlQDAnkOmDvEmuw9B0HGyMZnpj2CfLwi5mGpGWk8FimE' }); // Placeholder to avoid error
             if (token) {
+                // Check if doc exists first to prevent permission-denied error
                 const userRef = doc(db, getPublicCollection('userProfiles'), userId);
-                await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
+                const userSnap = await getDoc(userRef);
+                if (userSnap.exists()) {
+                    await updateDoc(userRef, { fcmTokens: arrayUnion(token), lastTokenUpdate: serverTimestamp() });
+                }
             }
         }
     } catch (error) { console.error("Gagal request notifikasi:", error); }
@@ -405,17 +409,13 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-// MODIFIED: Badge berdasarkan Followers, bukan Reputation
+// MODIFIED: Badge hanya untuk DEVELOPER
 const getReputationBadge = (followerCount, isDev) => {
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com"; // Default placeholder
     if (isDev) return { label: "DEV", icon: ShieldCheck, color: "bg-blue-600 text-white" };
     
-    // Ganti logika poin ke jumlah followers
-    if (followerCount >= 10000) return { label: "ARTIS", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
-    if (followerCount >= 1000) return { label: "SELEB", icon: Gem, color: "bg-purple-500 text-white" };
-    if (followerCount >= 500) return { label: "RISING", icon: Flame, color: "bg-orange-500 text-white" };
-    if (followerCount >= 100) return { label: "HITS", icon: Star, color: "bg-sky-500 text-white" };
-    return { label: "MEMBER", icon: User, color: "bg-gray-100 text-gray-500" };
+    // Semua label lain DIHAPUS sesuai permintaan
+    return null;
 };
 
 const extractHashtags = (text) => {
@@ -1588,28 +1588,58 @@ const LegalPage = ({ onBack }) => {
                 {/* KEBIJAKAN PRIVASI DIPERLENGKAP */}
                 <section>
                     <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><Lock size={18} className="text-sky-500"/> Kebijakan Privasi (Update 2025)</h2>
-                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
-                        <p className="mb-3">Di {APP_NAME}, kami menghargai privasi Anda. Berikut adalah detail data yang kami proses:</p>
-                        <ul className="list-disc pl-5 space-y-2 mb-3">
-                            <li><strong>Identitas:</strong> Kami menggunakan Google Login untuk autentikasi yang aman. Kami hanya menyimpan Nama, Email, dan Foto Profil publik Anda.</li>
-                            <li><strong>Konten Pengguna:</strong> Postingan, Komentar, dan Pesan Chat disimpan secara aman di server kami. Anda memiliki hak penuh untuk menghapus konten Anda kapan saja.</li>
-                            <li><strong>Keamanan:</strong> Pesan chat bersifat pribadi namun tidak terenkripsi end-to-end (E2EE) saat ini. Kami memantau aktivitas mencurigakan demi keamanan komunitas.</li>
-                            <li><strong>Cookies & Cache:</strong> Aplikasi menggunakan penyimpanan lokal browser untuk performa yang lebih cepat.</li>
-                        </ul>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700 space-y-4 text-justify">
+                        <p>
+                            Selamat datang di <strong>{APP_NAME}</strong>. Kami sangat menghargai privasi dan keamanan data Anda. 
+                            Dokumen ini menjelaskan bagaimana kami mengumpulkan, menggunakan, dan melindungi informasi pribadi Anda saat menggunakan layanan kami.
+                        </p>
+                        
+                        <div>
+                            <h4 className="font-bold text-sky-600 dark:text-sky-400 mb-1">1. Data yang Kami Kumpulkan</h4>
+                            <p className="mb-1">Kami mengumpulkan informasi berikut untuk memberikan layanan terbaik:</p>
+                            <ul className="list-disc pl-5 space-y-1">
+                                <li><strong>Informasi Akun:</strong> Saat Anda mendaftar menggunakan Google, kami menyimpan Nama Lengkap, Alamat Email, dan Foto Profil publik Anda.</li>
+                                <li><strong>Konten Pengguna:</strong> Postingan, foto, video, komentar, dan pesan chat yang Anda unggah disimpan dengan aman di server kami.</li>
+                                <li><strong>Data Teknis:</strong> Kami mencatat alamat IP, jenis perangkat, dan browser untuk tujuan keamanan dan analisis performa sistem.</li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-sky-600 dark:text-sky-400 mb-1">2. Penggunaan Data</h4>
+                            <p>Data Anda digunakan semata-mata untuk operasional aplikasi, seperti menampilkan profil, memfasilitasi interaksi sosial, dan mengirimkan notifikasi penting. Kami <strong>TIDAK AKAN PERNAH</strong> menjual data pribadi Anda kepada pihak ketiga.</p>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-sky-600 dark:text-sky-400 mb-1">3. Keamanan Data</h4>
+                            <p>Kami menerapkan standar keamanan industri untuk melindungi data Anda dari akses yang tidak sah. Meskipun pesan chat bersifat pribadi, harap diingat bahwa saat ini pesan belum terenkripsi end-to-end (E2EE), sehingga kami menyarankan untuk tidak membagikan informasi sensitif seperti password atau data finansial melalui chat.</p>
+                        </div>
                     </div>
                 </section>
                 
                 {/* KETENTUAN LAYANAN */}
                 <section>
                     <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><FileText size={18} className="text-purple-500"/> Ketentuan Layanan</h2>
-                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700">
-                        <p className="mb-3">Dengan menggunakan aplikasi {APP_NAME} (Edisi 2025), Anda setuju untuk:</p>
-                        <ul className="list-disc pl-5 space-y-2">
-                            <li>Tidak memposting konten ilegal, pornografi, judi, atau ujaran kebencian (SARA).</li>
-                            <li>Saling menghormati antar pengguna. Bullying dan pelecehan tidak ditoleransi.</li>
-                            <li>Tidak melakukan spam, scam, atau penggunaan bot otomatis.</li>
-                            <li>Kami berhak memblokir akun yang melanggar aturan tanpa peringatan.</li>
-                        </ul>
+                    <div className="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl text-sm text-gray-600 dark:text-gray-300 leading-relaxed border border-gray-100 dark:border-gray-700 space-y-4 text-justify">
+                        <p>Dengan mengakses atau menggunakan aplikasi ini, Anda setuju untuk terikat oleh syarat dan ketentuan berikut:</p>
+                        
+                        <div>
+                            <h4 className="font-bold text-purple-600 dark:text-purple-400 mb-1">1. Etika Komunitas</h4>
+                            <ul className="list-disc pl-5 space-y-1">
+                                <li>Dilarang keras memposting konten yang mengandung unsur SARA (Suku, Agama, Ras, dan Antargolongan), pornografi, kekerasan, atau ujaran kebencian.</li>
+                                <li>Dilarang melakukan tindakan cyberbullying, pelecehan, atau ancaman terhadap pengguna lain.</li>
+                                <li>Dilarang menyebarkan berita bohong (hoax) atau informasi yang menyesatkan.</li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-purple-600 dark:text-purple-400 mb-1">2. Hak Cipta & Konten</h4>
+                            <p>Anda bertanggung jawab penuh atas segala konten yang Anda unggah. Dengan mengunggah konten, Anda memberikan kami lisensi non-eksklusif untuk menampilkan konten tersebut di platform ini. Hormati hak kekayaan intelektual orang lain.</p>
+                        </div>
+
+                        <div>
+                            <h4 className="font-bold text-purple-600 dark:text-purple-400 mb-1">3. Sanksi Pelanggaran</h4>
+                            <p>Kami memiliki hak mutlak untuk menghapus konten atau memblokir akun (Banned) secara permanen tanpa pemberitahuan sebelumnya jika ditemukan pelanggaran terhadap ketentuan ini demi menjaga keamanan dan kenyamanan komunitas.</p>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -1846,7 +1876,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                             <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>
+                             {userBadge && (
+                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>
+                             )}
                              {isMeme && <span className="bg-yellow-100 text-yellow-800 text-[9px] px-1.5 py-0.5 rounded font-bold">MEME</span>}
                         </div>
                     </div>
@@ -2118,7 +2150,9 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
                 <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
-                <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
+                
+                {/* FIX: Badge hanya muncul jika ada (DEV) */}
+                {badge && <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>}
                 
                 {/* PERBAIKAN: Tombol Follow Profil dengan Warna */}
                 {!isSelf && !isGuest && ( 
@@ -2709,13 +2743,18 @@ const MainAppContent = () => {
     useEffect(() => onAuthStateChanged(auth, async (u) => { 
         if(u) { 
             setUser(u); 
-            requestNotificationPermission(u.uid); 
+            // FIX: Pindahkan request notifikasi ke dalam blok if(userDoc.exists()) di bawah
             try {
                 const userDoc = await getDoc(doc(db, getPublicCollection('userProfiles'), u.uid)); 
-                if (!userDoc.exists()) { setShowOnboarding(true); setIsProfileLoaded(true); } 
-                else { 
+                if (!userDoc.exists()) { 
+                    setShowOnboarding(true); 
+                    setIsProfileLoaded(true); 
+                } else { 
                     const userData = userDoc.data(); 
                     if (userData.isBanned) { await showAlert("AKUN ANDA TELAH DIBLOKIR/BANNED.", 'error'); await signOut(auth); setUser(null); setProfile(null); return; } 
+                    
+                    // Request permission HANYA jika profil user valid
+                    requestNotificationPermission(u.uid);
                     await updateDoc(doc(db, getPublicCollection('userProfiles'), u.uid), { lastSeen: serverTimestamp() }).catch(()=>{}); 
                 }
             } catch(e) { console.error("Auth State change error:", e); setIsProfileLoaded(true); }
