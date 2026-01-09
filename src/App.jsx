@@ -224,7 +224,7 @@ const formatNumber = (num) => {
     if (num === undefined || num === null) return '0';
     if (num >= 1000000000) return (num / 1000000000).toFixed(1).replace(/\.0$/, '') + 'm'; // Miliar
     if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'jt'; // Juta
-    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'rb'; // Ribu
+    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'rb'; // Ribu (Sesuai request 1rb)
     return num.toString();
 };
 
@@ -405,13 +405,17 @@ const getMediaEmbed = (url) => {
     return null;
 };
 
-const getReputationBadge = (reputation, isDev) => {
+// MODIFIED: Badge berdasarkan Followers, bukan Reputation
+const getReputationBadge = (followerCount, isDev) => {
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com"; // Default placeholder
     if (isDev) return { label: "DEV", icon: ShieldCheck, color: "bg-blue-600 text-white" };
-    if (reputation >= 1000) return { label: "LEGEND", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
-    if (reputation >= 500) return { label: "STAR", icon: Gem, color: "bg-purple-500 text-white" };
-    if (reputation >= 100) return { label: "HOT", icon: Flame, color: "bg-orange-500 text-white" };
-    return { label: "", icon: User, color: "bg-gray-100 text-gray-500" };
+    
+    // Ganti logika poin ke jumlah followers
+    if (followerCount >= 10000) return { label: "ARTIS", icon: Crown, color: "bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white" };
+    if (followerCount >= 1000) return { label: "SELEB", icon: Gem, color: "bg-purple-500 text-white" };
+    if (followerCount >= 500) return { label: "RISING", icon: Flame, color: "bg-orange-500 text-white" };
+    if (followerCount >= 100) return { label: "HITS", icon: Star, color: "bg-sky-500 text-white" };
+    return { label: "MEMBER", icon: User, color: "bg-gray-100 text-gray-500" };
 };
 
 const extractHashtags = (text) => {
@@ -485,7 +489,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 uppercase tracking-wider">Navigasi Utama</div>
                     <SidebarItem icon={Home} label="Beranda" onClick={() => { setPage('home'); onClose(); }} />
                     <SidebarItem icon={User} label="Profil Saya" onClick={() => { setPage('profile'); onClose(); }} />
-                    <SidebarItem icon={Trophy} label="Papan Peringkat" onClick={() => { setPage('leaderboard'); onClose(); }} />
+                    <SidebarItem icon={Trophy} label="Top Followers" onClick={() => { setPage('leaderboard'); onClose(); }} />
                     
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 mt-6 uppercase tracking-wider">Sosial & Info</div>
                     {/* FIX: Indikator Chat Belum Dibaca */}
@@ -501,7 +505,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.3 (Interaction Fixes)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.4 (Lite Edition)</p>
                 </div>
             </div>
         </>
@@ -1128,61 +1132,6 @@ const MessageBubble = ({ msg, isMe, isSelected, onLongPress }) => {
 // BAGIAN 3: KOMPONEN UI KECIL & SIDEBAR (LANJUTAN)
 // ==========================================
 
-const DraggableGift = ({ onClick, canClaim, nextClaimTime }) => {
-    const [position, setPosition] = useState({ x: window.innerWidth - 70, y: window.innerHeight - 180 });
-    const [isDragging, setIsDragging] = useState(false);
-    const dragStartRef = useRef({ x: 0, y: 0 });
-    const btnRef = useRef(null);
-
-    // FIX: Desktop Mouse Event Listeners untuk Dragging
-    useEffect(() => {
-        const handleWinMove = (e) => {
-            if(isDragging) {
-                e.preventDefault(); // Mencegah seleksi teks
-                const newX = Math.min(Math.max(0, e.clientX - dragStartRef.current.x), window.innerWidth - 60);
-                const newY = Math.min(Math.max(0, e.clientY - dragStartRef.current.y), window.innerHeight - 60);
-                setPosition({ x: newX, y: newY });
-            }
-        };
-        const handleWinUp = () => { if(isDragging) setIsDragging(false); };
-        if (isDragging) {
-             window.addEventListener('mousemove', handleWinMove);
-             window.addEventListener('mouseup', handleWinUp);
-        }
-        return () => {
-            window.removeEventListener('mousemove', handleWinMove);
-            window.removeEventListener('mouseup', handleWinUp);
-        };
-    }, [isDragging]);
-
-    useEffect(() => { setPosition({ x: window.innerWidth - 70, y: window.innerHeight - 150 }); }, []);
-
-    const handleStart = (clientX, clientY) => { setIsDragging(false); if(btnRef.current) { const rect = btnRef.current.getBoundingClientRect(); dragStartRef.current = { x: clientX - rect.left, y: clientY - rect.top }; } };
-    const handleMove = (clientX, clientY) => { setIsDragging(true); const newX = Math.min(Math.max(0, clientX - dragStartRef.current.x), window.innerWidth - 60); const newY = Math.min(Math.max(0, clientY - dragStartRef.current.y), window.innerHeight - 60); setPosition({ x: newX, y: newY }); };
-    const handleEnd = () => { setTimeout(() => setIsDragging(false), 100); };
-
-    return (
-        <div 
-            ref={btnRef} 
-            className="fixed z-[55] touch-none select-none cursor-move transition-shadow" 
-            style={{ left: position.x, top: position.y }} 
-            onTouchStart={(e) => handleStart(e.touches[0].clientX, e.touches[0].clientY)} 
-            onTouchMove={(e) => handleMove(e.touches[0].clientX, e.touches[0].clientY)} 
-            onTouchEnd={handleEnd} 
-            onMouseDown={(e) => {
-                e.preventDefault();
-                handleStart(e.clientX, e.clientY);
-                setIsDragging(true); // Langsung set dragging true untuk desktop
-            }}
-        >
-            <button onClick={() => !isDragging && onClick()} className="bg-gradient-to-br from-yellow-400 to-orange-500 p-2.5 rounded-full shadow-2xl shadow-orange-500/50 relative group active:scale-95 transition-transform">
-                <GiftIcon size={24} className={`text-white ${canClaim ? 'animate-bounce' : ''}`}/>
-                {canClaim && <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
-            </button>
-        </div>
-    );
-};
-
 const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
@@ -1218,33 +1167,6 @@ const NetworkStatus = () => {
     }, []);
     if (!showNotif) return null;
     return ( <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] px-4 py-2 rounded-full text-xs font-bold shadow-xl flex items-center gap-2 transition-all duration-300 ${isOnline ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>{isOnline ? <Wifi size={14}/> : <WifiOff size={14}/>}{isOnline ? "Koneksi Stabil Kembali" : "Koneksi Terputus - Mode Offline"}</div> );
-};
-
-const DailyRewardModal = ({ onClose, onClaim, canClaim, nextClaimTime, isGuest, onLoginRequest }) => {
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4 animate-in zoom-in-95">
-            <div className="bg-white dark:bg-gray-800 rounded-[2rem] p-6 max-w-sm w-full text-center relative overflow-hidden shadow-2xl border border-sky-100 dark:border-gray-700">
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
-                <div className="w-20 h-20 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><GiftIcon size={40} className="text-yellow-600 dark:text-yellow-400"/></div>
-                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2">Hujan Hadiah!</h2>
-                {isGuest ? (
-                    <>
-                        <p className="text-gray-500 text-sm mb-6">Login sekarang untuk mengklaim reputasi gratis dan mulai mendaki Leaderboard!</p>
-                        <button onClick={() => { onClose(); onLoginRequest(); }} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition flex items-center justify-center gap-2"><LogIn size={18}/> Login Untuk Klaim</button>
-                    </>
-                ) : (
-                    <>
-                        <p className="text-gray-500 text-sm mb-6">Login setiap hari untuk mendapatkan reputasi gratis dan jadilah Legend!</p>
-                        {canClaim ? (
-                            <button onClick={onClaim} className="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-orange-200 hover:scale-105 transition flex items-center justify-center gap-2"><Sparkles size={18}/> Klaim Hadiah</button>
-                        ) : (
-                            <div className="bg-gray-100 dark:bg-gray-700 p-3 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-300"><Clock size={16} className="inline mr-1 mb-0.5"/> Tunggu {nextClaimTime} lagi</div>
-                        )}
-                    </>
-                )}
-            </div>
-        </div>
-    );
 };
 
 const Lightbox = ({ images, initialIndex, onClose }) => {
@@ -1574,7 +1496,8 @@ const DeveloperDashboard = ({ onClose }) => {
     const handleBroadcast = async () => { if(!broadcastMsg.trim()) return; const ok = await showConfirm("Kirim pengumuman ke SEMUA user?"); if(!ok) return; setSendingBC(true); try { const usersSnap = await new Promise(resolve => { const unsub = onSnapshot(collection(db, getPublicCollection('userProfiles')), s => { resolve(s); unsub(); }); }); const promises = usersSnap.docs.map(docSnap => addDoc(collection(db, getPublicCollection('notifications')), { toUserId: docSnap.id, fromUserId: 'admin', fromUsername: 'Developer System', fromPhoto: APP_LOGO, type: 'system', message: `📢 PENGUMUMAN: ${broadcastMsg}`, isRead: false, timestamp: serverTimestamp() })); await Promise.all(promises); await showAlert("Pengumuman berhasil dikirim!", 'success'); setBroadcastMsg(''); } catch(e) { await showAlert("Gagal kirim broadcast: " + e.message, 'error'); } finally { setSendingBC(false); } };
     const handleBanUser = async (uid, currentStatus) => { const ok = await showConfirm(currentStatus ? "Buka blokir user ini?" : "BLOKIR/BAN User ini?"); if(!ok) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), { isBanned: !currentStatus }); setAllUsersList(prev => prev.map(u => u.id === uid ? {...u, isBanned: !currentStatus} : u)); await showAlert(currentStatus ? "User di-unban." : "User berhasil di-ban.", 'success'); } catch(e) { await showAlert("Gagal: " + e.message, 'error'); } };
     const handleDeleteUser = async (uid) => { const ok = await showConfirm("⚠️ PERINGATAN: Hapus data user ini secara permanen?"); if(!ok) return; try { await deleteDoc(doc(db, getPublicCollection('userProfiles'), uid)); setAllUsersList(prev => prev.filter(u => u.id !== uid)); await showAlert("Data user dihapus.", 'success'); } catch(e) { await showAlert("Gagal hapus: " + e.message, 'error'); } };
-    const handleUpdateReputation = async (uid, amount, isReset = false) => { const ok = await showConfirm(isReset ? "Reset poin user ini jadi 0?" : `Kurangi poin user ini sebanyak ${amount}?`); if(!ok) return; try { const updateData = isReset ? { reputation: 0 } : { reputation: increment(-amount) }; await updateDoc(doc(db, getPublicCollection('userProfiles'), uid), updateData); await showAlert("Berhasil update poin.", 'success'); } catch(e) { await showAlert("Gagal update poin: " + e.message, 'error'); } };
+    
+    // Fitur manipulasi reputasi disembunyikan karena XP sudah dihapus
 
     const filteredUsers = allUsersList.filter(u => u.username?.toLowerCase().includes(userSearchTerm.toLowerCase()) || u.email?.toLowerCase().includes(userSearchTerm.toLowerCase()));
 
@@ -1606,7 +1529,7 @@ const DeveloperDashboard = ({ onClose }) => {
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-red-100 dark:border-gray-700">
                              <h3 className="font-bold text-gray-800 dark:text-white mb-3 flex items-center gap-2"><UserX size={18} className="text-red-500"/> Manajemen User (Ban/Hapus)</h3>
                              <input value={userSearchTerm} onChange={e=>setUserSearchTerm(e.target.value)} placeholder="Cari username / email..." className="w-full bg-gray-50 dark:bg-gray-700 dark:text-white p-2 rounded-lg text-sm border border-gray-200 dark:border-gray-600 mb-4 outline-none"/>
-                             <div className="max-h-80 overflow-y-auto custom-scrollbar space-y-2">{filteredUsers.map(u => ( <div key={u.id} className="flex flex-col p-3 bg-gray-50 dark:bg-gray-700 rounded-lg gap-2"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Avatar src={u.photoURL} fallbackText={u.username} className="w-8 h-8 rounded-full"/><div><p className="text-xs font-bold dark:text-white">{u.username} {u.isBanned && <span className="text-red-500">(BANNED)</span>}</p><p className="text-[10px] text-gray-500">{u.email} | Rep: {u.reputation || 0}</p></div></div></div><div className="flex gap-2 justify-end"><button onClick={()=>handleUpdateReputation(u.id, 100)} className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-[10px] font-bold border border-yellow-200">-100 Poin</button><button onClick={()=>handleUpdateReputation(u.id, 0, true)} className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-[10px] font-bold border border-orange-200">Reset Poin</button><button onClick={()=>handleBanUser(u.id, u.isBanned)} className={`px-2 py-1 rounded text-[10px] font-bold ${u.isBanned ? 'bg-green-100 text-green-600' : 'bg-gray-200 text-gray-600'}`}>{u.isBanned ? "Unban" : "Ban User"}</button><button onClick={()=>handleDeleteUser(u.id)} className="px-2 py-1 bg-red-100 text-red-600 rounded text-[10px] font-bold border border-red-200">Hapus</button></div></div> ))}</div>
+                             <div className="max-h-80 overflow-y-auto custom-scrollbar space-y-2">{filteredUsers.map(u => ( <div key={u.id} className="flex flex-col p-3 bg-gray-50 dark:bg-gray-700 rounded-lg gap-2"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Avatar src={u.photoURL} fallbackText={u.username} className="w-8 h-8 rounded-full"/><div><p className="text-xs font-bold dark:text-white">{u.username} {u.isBanned && <span className="text-red-500">(BANNED)</span>}</p><p className="text-[10px] text-gray-500">{u.email}</p></div></div></div><div className="flex gap-2 justify-end"><button onClick={()=>handleBanUser(u.id, u.isBanned)} className={`px-2 py-1 rounded text-[10px] font-bold ${u.isBanned ? 'bg-green-100 text-green-600' : 'bg-gray-200 text-gray-600'}`}>{u.isBanned ? "Unban" : "Ban User"}</button><button onClick={()=>handleDeleteUser(u.id)} className="px-2 py-1 bg-red-100 text-red-600 rounded text-[10px] font-bold border border-red-200">Hapus</button></div></div> ))}</div>
                         </div>
                     </div>
                 )}
@@ -1729,7 +1652,7 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
                             <div key={u.uid} className={`flex items-center p-4 border-b border-gray-50 dark:border-gray-700 last:border-0 ${rankStyle}`}>
                                 <div className={`w-8 h-8 flex items-center justify-center font-black text-lg mr-3 ${index===0?'text-yellow-600':index===1?'text-gray-500':index===2?'text-orange-600':'text-gray-300'}`}>{index + 1}</div>
                                 <div className="relative mr-3"><Avatar src={u.photoURL} fallbackText={u.username} className={`w-12 h-12 rounded-full border-2 ${index===0?'border-yellow-500':index===1?'border-gray-400':index===2?'border-orange-500':'border-gray-200 dark:border-gray-600'}`}/>{index === 0 && <div className="absolute -top-2 -right-1 animate-bounce">{rankIcon}</div>}</div>
-                                <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">{formatNumber(u.reputation || 0)} Poin Aktivitas</p></div>
+                                <div className="flex-1"><h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm flex items-center gap-1">{u.username}{index < 3 && <Sparkles size={12} className={index===0?'text-yellow-500':index===1?'text-gray-400':'text-orange-500'}/>}</h3><p className="text-xs text-gray-500 font-medium mt-0.5">Top Creator</p></div>
                                 <div className="text-right"><div className="text-sm font-black text-sky-600 dark:text-sky-400 flex items-center justify-end gap-1"><Users size={14} className={index < 3 ? 'text-rose-500' : 'text-gray-300'}/>{formatNumber(u.followers?.length || 0)}</div><div className="text-[9px] text-gray-400 uppercase font-bold">Pengikut</div></div>
                             </div>
                          )
@@ -1827,7 +1750,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         const ref = doc(db, getPublicCollection('posts'), post.id);
         const authorRef = doc(db, getPublicCollection('userProfiles'), post.userId);
         try {
-            if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { await updateDoc(authorRef, { reputation: increment(1) }); sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
+            if (newLiked) { await updateDoc(ref, { likes: arrayUnion(currentUserId) }); if (post.userId !== currentUserId) { sendNotification(post.userId, 'like', 'menyukai postingan Anda.', profile, post.id); } } 
             else { await updateDoc(ref, { likes: arrayRemove(currentUserId) }); }
         } catch (error) { 
             console.error("Like failed, rolling back:", error);
@@ -1860,17 +1783,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             // Optimistic update
             if(onUpdate) { onUpdate(post.id, { commentsCount: (post.commentsCount || 0) + 1 }); }
 
-            // FIX: HARDCORE MODE - Komen cuma +1 Poin (sebelumnya +5)
-            if (post.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), post.userId), { reputation: increment(1) }); if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
-            if (replyTo && replyTo.userId !== currentUserId) { await updateDoc(doc(db, getPublicCollection('userProfiles'), replyTo.userId), { reputation: increment(1) }); sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
+            if (post.userId !== currentUserId) { if (!replyTo) sendNotification(post.userId, 'comment', `komentar: "${newComment.substring(0, 15)}.."`, profile, post.id); }
+            if (replyTo && replyTo.userId !== currentUserId) { sendNotification(replyTo.userId, 'comment', `membalas komentar Anda: "${newComment.substring(0,15)}.."`, profile, post.id); }
             setNewComment(''); setReplyTo(null);
         } catch (error) { console.error(error); }
     };
 
     const handleDelete = async () => {
-        const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini? Reputasi yang didapat akan DITARIK KEMBALI.";
+        const confirmMsg = isMeDeveloper && !isOwner ? "⚠️ ADMIN: Hapus postingan orang lain?" : "Hapus postingan ini?";
         const ok = await showConfirm(confirmMsg);
-        if (ok) { try { const earnedReputation = 2 + ((post.likes?.length || 0) * 1) + ((post.commentsCount || 0) * 1); const userRef = doc(db, getPublicCollection('userProfiles'), post.userId); await updateDoc(userRef, { reputation: increment(-earnedReputation) }); await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); await showAlert(`Postingan dihapus.`, 'success'); if(onUpdate) onUpdate(post.id, null); /* NULL means deleted */ } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } } 
+        if (ok) { try { await deleteDoc(doc(db, getPublicCollection('posts'), post.id)); await showAlert(`Postingan dihapus.`, 'success'); if(onUpdate) onUpdate(post.id, null); /* NULL means deleted */ } catch (e) { await showAlert("Gagal menghapus: " + e.message, 'error'); } } 
     };
     const handleDeleteComment = async (commentId) => { const ok = await showConfirm("Hapus komentar?"); if(ok) { await deleteDoc(doc(db, getPublicCollection('comments'), commentId)); await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(-1) }); if(onUpdate) onUpdate(post.id, { commentsCount: Math.max(0, (post.commentsCount||0)-1) }); } };
     const handleUpdatePost = async () => { await updateDoc(doc(db, getPublicCollection('posts'), post.id), { title: editedTitle, content: editedContent }); setIsEditing(false); if(onUpdate) onUpdate(post.id, { title: editedTitle, content: editedContent }); };
@@ -1882,7 +1804,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     // FIX VIDEO: Prioritaskan mediaType 'video' dari API agar tidak dianggap embed link biasa
     const isVideo = post.mediaType === 'video' || ((post.mediaUrl && /\.(mp4|webm)$/i.test(post.mediaUrl)) && !embed);
     const isAudio = post.mediaType === 'audio' || (embed && embed.type === 'audio_file');
-    const userBadge = isDeveloper ? getReputationBadge(1000, true) : getReputationBadge(0, false); 
+    // Ganti badge logic
+    const userBadge = getReputationBadge(post.user?.followers?.length || 0, isDeveloper); 
     
     // Gunakan real embed jika bukan video internal dari API
     const displayEmbed = isVideo ? null : embed;
@@ -1923,7 +1846,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                             {isDeveloper && <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>}
+                             <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>
                              {isMeme && <span className="bg-yellow-100 text-yellow-800 text-[9px] px-1.5 py-0.5 rounded font-bold">MEME</span>}
                         </div>
                     </div>
@@ -2057,8 +1980,8 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
                 user: { username, uid: userId, photoURL: userPhoto } // <-- FIX DISINI
             });
             
-            // FIX: HARDCORE MODE - Buat Post cuma +2 Poin (sebelumnya +10)
-            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { reputation: increment(2), lastPostTime: Date.now() }); 
+            // Removed reputation increment
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
             await showAlert("Postingan berhasil diterbitkan!", 'success');
         } catch(e){ await showAlert(e.message, 'error'); } finally { setLoading(false); }
@@ -2176,22 +2099,16 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 
     const save = async () => { setLoad(true); try { let url = profileData.photoURL; if (file) { url = await compressImageToBase64(file); } await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
-    const badge = getReputationBadge(profileData.reputation || 0, isDev);
+    const badge = getReputationBadge(followersCount, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
     const isFollowedByTarget = viewerProfile ? (viewerProfile.followers || []).includes(profileData.uid) : false;
     const isFriend = isFollowing && isFollowedByTarget; 
     const isOnline = isUserOnline(profileData.lastSeen);
     const savedPostsData = isSelf ? allPosts.filter(p => viewerProfile.savedPosts?.includes(p.id)) : [];
 
-    let rank = null;
-    if (allUsers) { const sorted = [...allUsers].sort((a,b) => (b.reputation||0) - (a.reputation||0)); rank = sorted.findIndex(u => u.uid === profileData.uid) + 1; }
-    const getNextRankData = (points) => { if (points < 500) return { next: 500, label: 'Rising Star', percent: (points/500)*100 }; if (points < 2500) return { next: 2500, label: 'Influencer', percent: ((points-500)/2000)*100 }; if (points < 5000) return { next: 5000, label: 'Legend', percent: ((points-2500)/2500)*100 }; return { next: null, label: 'Max Level', percent: 100 }; };
-    const rankProgress = getNextRankData(profileData.reputation || 0);
-
     return (
         <div className="max-w-md md:max-w-2xl lg:max-w-4xl mx-auto pb-24 pt-20">
-            <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border ${rank === 1 ? 'border-yellow-400 ring-2 ring-yellow-200' : rank === 2 ? 'border-gray-400 ring-2 ring-gray-200' : rank === 3 ? 'border-orange-400 ring-2 ring-orange-200' : 'border-sky-50 dark:border-gray-700'}`}>
-                {rank && rank <= 3 && ( <div className={`absolute top-0 right-0 px-4 py-2 rounded-bl-2xl font-black text-white text-xs ${rank===1?'bg-yellow-500':rank===2?'bg-gray-400':'bg-orange-500'}`}>#{rank} VIRAL</div> )}
+            <div className={`bg-white dark:bg-gray-800 p-8 rounded-[2rem] shadow-sm mb-8 mx-4 text-center relative overflow-hidden border border-sky-50 dark:border-gray-700`}>
                 
                 {/* FIX: Tombol Share Profile */}
                 <button onClick={handleShareProfile} className="absolute top-4 right-4 z-20 bg-white/20 hover:bg-white/40 backdrop-blur-md p-2 rounded-full text-gray-700 dark:text-white transition">
@@ -2199,10 +2116,9 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                 </button>
                 
                 <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-sky-200 to-purple-200 dark:from-sky-900 dark:to-purple-900 opacity-30"></div>
-                <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${rank===1 ? 'border-yellow-400' : isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
+                <div className="relative inline-block mb-4 mt-8"><div className={`w-24 h-24 rounded-full overflow-hidden border-4 shadow-lg bg-gray-100 dark:bg-gray-700 ${isOnline ? 'border-emerald-400' : 'border-white dark:border-gray-600'} relative`}>{load && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><Loader2 className="animate-spin text-white" size={32}/></div>}<Avatar src={profileData.photoURL} fallbackText={profileData.username} className="w-full h-full"/></div><div className={`absolute bottom-2 right-2 w-5 h-5 rounded-full border-2 border-white dark:border-gray-800 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-gray-300'}`}></div>{isSelf && !load && <button onClick={()=>setEdit(!edit)} className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow text-sky-600"><Edit size={14}/></button>}</div>
                 {edit ? ( <div className="space-y-3 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl animate-in fade-in"><input value={name} onChange={e=>setName(e.target.value)} className="border-b-2 border-sky-500 w-full text-center font-bold bg-transparent dark:text-white"/><input type="file" onChange={e=>setFile(e.target.files[0])} className="text-xs dark:text-gray-300"/><button onClick={save} disabled={load} className="bg-sky-500 text-white px-4 py-1 rounded-full text-xs">{load?'Mengunggah...':'Simpan'}</button></div> ) : ( <> <h1 className="text-2xl font-black text-gray-800 dark:text-white flex items-center justify-center gap-1">{profileData.username} {isDev && <ShieldCheck size={20} className="text-blue-500"/>}</h1> {isSelf ? ( isEditingMood ? ( <div className="flex items-center justify-center gap-2 mt-2"><input value={mood} onChange={e=>setMood(e.target.value)} placeholder="Status Mood..." className="text-xs p-1 border rounded text-center w-32 dark:bg-gray-700 dark:text-white"/><button onClick={saveMood} className="text-green-500"><Check size={14}/></button></div> ) : ( <div onClick={()=>setIsEditingMood(true)} className="text-sm text-gray-500 mt-1 cursor-pointer hover:text-sky-500 flex items-center justify-center gap-1">{profileData.mood ? `"${profileData.mood}"` : "+ Pasang Status"} <Edit size={10} className="opacity-50"/></div> ) ) : ( profileData.mood && <p className="text-sm text-gray-500 mt-1 italic">"{profileData.mood}"</p> )} </> )}
                 <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs my-4 shadow-sm ${badge.color}`}><badge.icon size={14}/> {badge.label}</div>
-                <div className="px-8 mt-2 mb-4 w-full"><div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1"><span>{formatNumber(profileData.reputation || 0)} XP</span><span>{rankProgress.next ? `${formatNumber(rankProgress.next)} XP` : 'MAX'}</span></div><div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-sky-400 to-purple-500 transition-all duration-1000" style={{width: `${rankProgress.percent}%`}}></div></div><p className="text-[10px] text-center mt-1 text-sky-500 font-bold">{rankProgress.next ? `Butuh ${formatNumber(rankProgress.next - (profileData.reputation||0))} poin lagi ke ${rankProgress.label}` : 'Kamu adalah Legenda!'}</p></div>
                 
                 {/* PERBAIKAN: Tombol Follow Profil dengan Warna */}
                 {!isSelf && !isGuest && ( 
@@ -2319,7 +2235,7 @@ const HomeScreen = ({
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-2 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-4"><CheckCircle size={14}/> Postingan Baru Disematkan</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={onRequestLogin} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
                         </div>
                     ))}
                 </div>
@@ -2644,8 +2560,7 @@ const MainAppContent = () => {
     const [feedError, setFeedError] = useState(false); const [refreshTrigger, setRefreshTrigger] = useState(0); 
     const [showAuthModal, setShowAuthModal] = useState(false); const [showOnboarding, setShowOnboarding] = useState(false); 
     const [darkMode, setDarkMode] = useState(false); const [isOffline, setIsOffline] = useState(!navigator.onLine); 
-    const [showRewards, setShowRewards] = useState(false); const [canClaimReward, setCanClaimReward] = useState(false); 
-    const [nextRewardTime, setNextRewardTime] = useState('');
+    const [showRewards, setShowRewards] = useState(false); 
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     
     // NEW STATE: Sidebar
@@ -2717,13 +2632,6 @@ const MainAppContent = () => {
         if(user) checkAutoReset();
     }, [user]);
 
-    useEffect(() => {
-        if (!profile) return;
-        const lastClaim = profile.lastRewardClaim ? profile.lastRewardClaim.toMillis() : 0; const now = Date.now(); const diff = now - lastClaim; const oneDay = 24 * 60 * 60 * 1000;
-        if (diff >= oneDay) { setCanClaimReward(true); setNextRewardTime(''); } else { setCanClaimReward(false); const remaining = oneDay - diff; const hrs = Math.floor(remaining / (1000 * 60 * 60)); const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60)); setNextRewardTime(`${hrs} jam ${mins} menit`); }
-    }, [profile, showRewards]);
-
-    const handleClaimReward = async () => { if (!canClaimReward || !user) return; try { await updateDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { lastRewardClaim: serverTimestamp(), reputation: increment(50) }); await showAlert("Selamat! Anda mendapatkan 50 Reputasi & Badge Aktivitas.", 'success'); setShowRewards(false); } catch (e) { await showAlert("Gagal klaim: " + e.message, 'error'); } };
     const handleLogout = async () => { const ok = await showConfirm("Yakin ingin keluar akun?"); if(ok) { await signOut(auth); setPage('home'); setSidebarOpen(false); } };
 
     // FIX: URL Parsing untuk Deep Link Profile & Post
@@ -2830,7 +2738,7 @@ const MainAppContent = () => {
         return () => { unsubUsers(); unsubCache(); };
     }, [refreshTrigger]); 
 
-    const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { await updateDoc(targetRef, { reputation: increment(5) }); sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
+    const handleFollow = async (uid, isFollowing) => { if (!user) { setShowAuthModal(true); return; } if (!profile) return; const meRef = doc(db, getPublicCollection('userProfiles'), profile.uid); const targetRef = doc(db, getPublicCollection('userProfiles'), uid); try { if(isFollowing) { await updateDoc(meRef, {following: arrayRemove(uid)}); await updateDoc(targetRef, {followers: arrayRemove(profile.uid)}); } else { await updateDoc(meRef, {following: arrayUnion(uid)}); await updateDoc(targetRef, {followers: arrayUnion(profile.uid)}); if (uid !== profile.uid) { sendNotification(uid, 'follow', 'mulai mengikuti Anda', profile); } } } catch (e) { console.error("Gagal update pertemanan", e); } };
     const handleGoBack = () => { const url = new URL(window.location); url.searchParams.delete('post'); window.history.pushState({}, '', url); setTargetPid(null); setPage('home'); };
 
     const isDataReady = isUsersLoaded && isProfileLoaded;
@@ -2906,7 +2814,7 @@ const MainAppContent = () => {
                     )}
 
                     <main className={showHeader ? 'pt-16 md:pt-20' : ''}>
-                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /><DraggableGift onClick={() => setShowRewards(true)} canClaim={canClaimReward && !isGuest} nextClaimTime={nextRewardTime}/></> )}
+                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /></> )}
                         {/* FIX: Kirim userPhoto ke CreatePost */}
                         {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} userPhoto={profile?.photoURL} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
                         {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
@@ -2925,20 +2833,6 @@ const MainAppContent = () => {
                    
 {showAuthModal && (
     <AuthModal onClose={() => setShowAuthModal(false)} />
-)}
-
-{showRewards && (
-    <DailyRewardModal
-        onClose={() => setShowRewards(false)}
-        onClaim={handleClaimReward}
-        canClaim={canClaimReward}
-        nextClaimTime={nextRewardTime}
-        isGuest={isGuest}
-        onLoginRequest={() => {
-            setShowRewards(false);
-            setShowAuthModal(true);
-        }}
-    />
 )}
 
 {showOnboarding && user && (
