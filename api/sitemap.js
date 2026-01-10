@@ -1,81 +1,65 @@
-import admin from "firebase-admin";
+import fs from "fs";
+import path from "path";
 
-/* ================== INIT FIREBASE ADMIN ================== */
-let db;
+/* ====================== PATH DATA ====================== */
+// Sesuaikan sesuai hosting / project
+const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
+const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-function initFirebase() {
-  if (admin.apps.length) {
-    db = admin.firestore();
-    return;
+export default function handler(req, res) {
+  const baseUrl = "https://app.bgunenet.my.id";
+  let urls = [];
+
+  // ====================== HOMEPAGE ======================
+  urls.push(`
+    <url>
+      <loc>${baseUrl}/</loc>
+      <priority>1.0</priority>
+      <changefreq>daily</changefreq>
+    </url>
+  `);
+
+  // ====================== POSTS ======================
+  try {
+    const postFiles = fs.readdirSync(POSTS_PATH); // baca semua file
+    postFiles.forEach(file => {
+      const postId = path.parse(file).name; // nama file = postId
+      urls.push(`
+        <url>
+          <loc>${baseUrl}/?post=${postId}</loc>
+          <priority>0.8</priority>
+          <changefreq>weekly</changefreq>
+        </url>
+      `);
+    });
+  } catch (err) {
+    console.error("Error reading posts:", err.message);
   }
 
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) throw new Error("FIREBASE_SERVICE_ACCOUNT tidak ada");
-
-  const serviceAccount = JSON.parse(
-    raw.trim().startsWith("{")
-      ? raw
-      : Buffer.from(raw, "base64").toString("utf-8")
-  );
-
-  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-
-  db = admin.firestore();
-}
-
-/* ================== SITEMAP HANDLER ================== */
-export default async function handler(req, res) {
+  // ====================== USERS ======================
   try {
-    initFirebase();
-
-    res.setHeader("Content-Type", "application/xml");
-
-    const baseUrl = "https://app.bgunenet.my.id";
-    let urls = [];
-
-    // HOME
-    urls.push(`
-      <url>
-        <loc>${baseUrl}/</loc>
-        <priority>1.0</priority>
-      </url>
-    `);
-
-    // POSTS
-    const postsSnap = await db.collection("posts").limit(500).get();
-    postsSnap.forEach(doc => {
+    const userFiles = fs.readdirSync(USERS_PATH); // baca semua file
+    userFiles.forEach(file => {
+      const userId = path.parse(file).name; // nama file = userId
       urls.push(`
         <url>
-          <loc>${baseUrl}/?post=${doc.id}</loc>
-          <priority>0.8</priority>
-        </url>
-      `);
-    });
-
-    // USERS
-    const usersSnap = await db.collection("userProfiles").limit(500).get();
-    usersSnap.forEach(doc => {
-      urls.push(`
-        <url>
-          <loc>${baseUrl}/?user=${doc.id}</loc>
+          <loc>${baseUrl}/?user=${userId}</loc>
           <priority>0.5</priority>
+          <changefreq>monthly</changefreq>
         </url>
-      </url>
       `);
     });
+  } catch (err) {
+    console.error("Error reading users:", err.message);
+  }
 
-    const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+  // ====================== GENERATE XML ======================
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.join("")}
 </urlset>`;
 
-    res.status(200).send(sitemap);
-  } catch (err) {
-    console.error("SITEMAP ERROR:", err.message);
-    res.status(500).send("Sitemap generation failed");
-  }
+  // ====================== RESPONSE ======================
+  res.setHeader("Content-Type", "application/xml");
+  res.status(200).send(sitemap);
 }
