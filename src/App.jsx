@@ -1994,7 +1994,18 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
         setLoading(true); setProg(0); setLoadingText("Memulai...");
         try {
             let mediaUrls = []; let mediaType = 'text';
-            if (form.files.length > 0) { const firstFile = form.files[0]; if (firstFile.type.startsWith('image')) { mediaType = 'image'; setProg(10); for (let i = 0; i < form.files.length; i++) { const base64 = await compressImageToBase64(form.files[i]); mediaUrls.push(base64); setProg(10 + ((i + 1) / form.files.length) * 80); } } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) { const uploadedUrl = await uploadToFaaAPI(firstFile, setProg); mediaUrls.push(uploadedUrl); mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio'; setProg(100); } } else if (form.url) { mediaType = 'link'; mediaUrls.push(form.url); }
+            if (form.files.length > 0) { const firstFile = form.files[0]; if (firstFile.type.startsWith('image')) { mediaType = 'image'; setProg(10); for (let i = 0; i < form.files.length; i++) { const base64 = await compressImageToBase64(form.files[i]); mediaUrls.push(base64); setProg(10 + ((i + 1) / form.files.length) * 80); } } else if (firstFile.type.startsWith('video') || firstFile.type.startsWith('audio')) { const uploadedUrl = await uploadToFaaAPI(firstFile, setProg); mediaUrls.push(uploadedUrl); mediaType = firstFile.type.startsWith('video') ? 'video' : 'audio'; setProg(100); } } 
+            
+            // FIX: Auto-append HTTPS jika user memasukkan link tanpa protokol
+            else if (form.url) { 
+                let safeUrl = form.url;
+                if (!/^https?:\/\//i.test(safeUrl)) {
+                    safeUrl = 'https://' + safeUrl;
+                }
+                mediaType = 'link'; 
+                mediaUrls.push(safeUrl); 
+            }
+
             const category = form.content.toLowerCase().includes('#meme') ? 'meme' : 'general';
             
             // FIX: Sertakan photoURL dalam data user saat membuat post
@@ -2359,15 +2370,45 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
             else if(n.postId) { setTargetPostId(n.postId); setPage('view_post'); }
         }
     };
+    
+    // FIX: Fitur Hapus Semua Notifikasi (Tanpa Dibaca)
+    const { showConfirm, showAlert } = useCustomAlert();
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDeleteAll = async () => {
+        if (notifs.length === 0) return;
+        const ok = await showConfirm("Hapus semua notifikasi? (Tanpa dibaca)");
+        if (!ok) return;
+
+        setIsDeleting(true);
+        try {
+            const batch = writeBatch(db);
+            notifs.forEach(n => {
+                const ref = doc(db, getPublicCollection('notifications'), n.id);
+                batch.delete(ref);
+            });
+            await batch.commit();
+            setNotifs([]); // Optimistic clear
+            showAlert("Notifikasi dibersihkan", "success");
+        } catch(e) { console.error(e); showAlert("Gagal hapus", "error"); }
+        finally { setIsDeleting(false); }
+    };
 
     return (
         <div className="max-w-md md:max-w-xl mx-auto p-4 pb-24 pt-20">
-            {/* Header with Back Button */}
-            <div className="flex items-center gap-4 mb-6 sticky top-16 bg-[#F0F4F8] dark:bg-gray-900 z-10 py-2">
-                <button onClick={() => setPage('home')} className="p-2 bg-white dark:bg-gray-800 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm transition">
-                    <ArrowLeft size={20} className="text-gray-700 dark:text-gray-200"/>
-                </button>
-                <h1 className="text-xl font-black text-gray-800 dark:text-white">Notifikasi</h1>
+            {/* Header with Back Button & Delete All */}
+            <div className="flex items-center justify-between mb-6 sticky top-16 bg-[#F0F4F8] dark:bg-gray-900 z-10 py-2">
+                <div className="flex items-center gap-4">
+                    <button onClick={() => setPage('home')} className="p-2 bg-white dark:bg-gray-800 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm transition">
+                        <ArrowLeft size={20} className="text-gray-700 dark:text-gray-200"/>
+                    </button>
+                    <h1 className="text-xl font-black text-gray-800 dark:text-white">Notifikasi</h1>
+                </div>
+                {notifs.length > 0 && (
+                     <button onClick={handleDeleteAll} disabled={isDeleting} className="text-red-500 bg-white dark:bg-gray-800 p-2 rounded-full hover:bg-red-50 shadow-sm transition" title="Hapus Semua">
+                        {isDeleting ? <Loader2 size={20} className="animate-spin"/> : <Trash2 size={20}/>}
+                     </button>
+                )}
             </div>
 
             {groupedNotifs.length===0 ? (
