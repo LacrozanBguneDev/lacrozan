@@ -54,7 +54,7 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi acak (Shuffle) untuk membuat feed terasa hidup
+// Fungsi acak (Shuffle) Fisher-Yates
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -87,7 +87,6 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
-    // Batasi limit agar tidak memberatkan loading (default 10)
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
@@ -105,7 +104,7 @@ export default async function handler(req, res) {
         else {
           const viewerData = viewerSnap.data() || {};
           followingIds = Array.isArray(viewerData.following) ?
-            viewerData.following.slice(0, 10) : []; // Max 10 following untuk query 'in'
+            viewerData.following.slice(0, 10) : []; 
           
           if (!followingIds.length) isFollowingFallback = true;
         }
@@ -113,22 +112,20 @@ export default async function handler(req, res) {
     }
 
     // --- FILTER QUERY ---
-    // Mode Meme & User Filter
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId)
       queryRef = queryRef.where("userId", "==", req.query.userId);
     
-    // Mode Following Asli
     if (mode === "following" && followingIds?.length && !isFollowingFallback) {
       queryRef = queryRef.where("userId", "in", followingIds);
     }
 
-    // --- INTI ALGORITMA: PENGAMBILAN DATA ---
-    // Mengambil buffer secukupnya (limit + sedikit spare) agar timeline tidak lompat jauh
-    const fetchBufferSize = limitReq + 5; 
+    // --- STRATEGI AGGRESSIVE SAMPLING ---
+    // Kita ambil 3x lipat dari yang diminta user.
+    // Misal user minta 10, kita ambil 30.
+    // 10 kita tampilkan (diacak), 20 sisanya kita "buang" (skip) agar next page langsung fresh beda waktu.
+    const fetchBufferSize = limitReq * 3; 
     
-    // WAJIB: Selalu urutkan berdasarkan waktu terbaru (DESC)
-    // Ini menjamin urutan: 24 jam terakhir -> kemarin -> bulan lalu -> dst
     queryRef = queryRef.orderBy("timestamp", "desc");
 
     if (cursorId) {
@@ -136,73 +133,66 @@ export default async function handler(req, res) {
       if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
     }
 
-    // Eksekusi Query ke Database
     const snap = await queryRef.limit(fetchBufferSize).get();
 
-    // Jika data habis/kosong
     if (snap.empty && mode !== "following") {
-      return res.json({
-        posts: [],
-        nextCursor: null
-      });
+      return res.json({ posts: [], nextCursor: null });
     }
 
-    // Ubah data snapshot ke format JSON bersih
     let rawPosts = snap.docs.map(d => ({
       ...d.data(),
       id: d.id,
       timestamp: safeMillis(d.data()?.timestamp)
     }));
 
-    /* ================== LOGIKA "ALIVE" FEED (DIPERBAIKI) ================== */
+    /* ================== LOGIKA PENGACAKAN (THE MIXER) ================== */
     let finalPosts = [];
 
-    // KONDISI 1: HOME (BERANDA) & FOLLOWING FALLBACK
-    // Algoritma Baru: Freshness Boost + Random Tail
     if (mode === "home" || (mode === "following" && isFollowingFallback)) {
       
       const userPostCount = {};
       const uniquePosts = [];
 
-      // A. Filter Anti-Spam (Maksimal 2 post per user dalam satu batch load)
+      // 1. Filter Spam Ketat
       for (const p of rawPosts) {
         const uid = p.userId || "anon";
         const count = userPostCount[uid] || 0;
+        // Hanya izinkan 1 post per user per batch load agar variatif
+        // Kecuali datanya sedikit, baru boleh 2.
+        const maxPerUser = rawPosts.length < 10 ? 2 : 1;
         
-        if (count < 2 || rawPosts.length < 5) {
+        if (count < maxPerUser) {
           uniquePosts.push(p);
           userPostCount[uid] = count + 1;
         }
       }
 
-      // B. LOGIC BARU: "Fresh Boost"
-      // Data sudah urut waktu (DESC). Kita ambil bagian paling atas (terbaru).
-      // Misal: 30% data teratas (atau min 2 postingan) JANGAN DIACAK (Boost).
-      // Sisanya baru diacak biar terasa "beda" tapi tidak menghilangkan barang baru.
+      // 2. Fresh Boost Strategy
+      // Ambil 3 postingan teratas (Wajib Paling Baru) agar user tau update terkini
+      const freshCount = 3; 
       
-      const boostAmount = Math.max(2, Math.floor(uniquePosts.length * 0.3)); 
-      
-      const freshBatch = uniquePosts.slice(0, boostAmount); // Bagian Paling Baru (Boost)
-      const mixBatch = uniquePosts.slice(boostAmount);      // Bagian Agak Lama (Acak)
+      const superFresh = uniquePosts.slice(0, freshCount); // Tetap di atas
+      const toShuffle = uniquePosts.slice(freshCount);     // Sisanya
 
-      // Gabungkan: [Terbaru Tetap] + [Sisanya Diacak]
-      finalPosts = [...freshBatch, ...shuffle(mixBatch)];
+      // Acak total sisa data
+      const shuffledRest = shuffle(toShuffle);
+
+      // Gabungkan
+      finalPosts = [...superFresh, ...shuffledRest];
 
     } 
-    // KONDISI 2: POPULAR (Eksplorasi Total)
     else if (mode === "popular") {
       finalPosts = shuffle(rawPosts);
     } 
-    // KONDISI 3: PROFILE / MEME / FOLLOWING ASLI
     else {
       finalPosts = rawPosts;
     }
 
-    // Potong hasil akhir sesuai limit yang diminta user
+    // Potong sesuai limit request (misal 10)
     let postsResponse = finalPosts.slice(0, limitReq);
 
 
-    /* ================== GET USER DATA (JOIN) ================== */
+    /* ================== JOIN USER DATA ================== */
     const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
     const userMap = {};
     
@@ -215,7 +205,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Gabungkan data post dengan data user
     postsResponse = postsResponse.map(p => {
       const u = userMap[p.userId] || {};
       return {
@@ -229,34 +218,37 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ================== FETCH SERVER EKSTERNAL (OPSIONAL) ================== */
+    /* ================== EXTERNAL FEED ================== */
     if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
       try {
         const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
         if (extRes.ok) {
           const extData = await extRes.json();
           if (Array.isArray(extData.posts)) {
-            // Masukkan data eksternal secara acak ke dalam feed
-            const combined = [...postsResponse, ...extData.posts];
-            postsResponse = combined.slice(0, limitReq); // Potong lagi biar pas limit
+            // Selipkan data external di posisi acak (index 2 atau 3)
+            const insertIdx = Math.floor(Math.random() * 3) + 1;
+            postsResponse.splice(insertIdx, 0, ...extData.posts.slice(0,2));
+            // Potong lagi biar rapi
+            postsResponse = postsResponse.slice(0, limitReq);
           }
         }
       } catch (err) {
-        console.warn("External feed fetch error:", err);
+        // Silent error
       }
     }
 
-    /* ================== NEXT CURSOR LOGIC ================== */
-    // Cursor harus menunjuk ke dokumen terakhir yang diambil dari DATABASE (snap),
-    // BUKAN dari hasil acakan (postsResponse). Ini menjaga urutan waktu timeline.
+    /* ================== NEXT CURSOR LOGIC (FAST FORWARD) ================== */
+    // KUNCI BIAR GAK MONOTON:
+    // Kita arahkan cursor ke dokumen TERAKHIR dari buffer besar yang kita ambil (fetchBufferSize).
+    // Artinya, saat user minta "Next Page", kita melompati data-data yang tidak terpilih tadi.
+    // Ini membuat timeline bergerak lebih cepat mundur ke belakang (24h -> 2 days ago -> dst).
     
     let nextCursor = null;
     
-    // Kita cek apakah masih ada data di DB?
-    if (snap.docs.length > 0) {
-      // Ambil ID dari dokumen terakhir yang kita fetch dari DB
-      const lastDocInBatch = snap.docs[snap.docs.length - 1];
-      nextCursor = lastDocInBatch ? lastDocInBatch.id : null;
+    // Cek apakah data dari DB sebenarnya masih ada?
+    if (snap.docs.length >= limitReq) {
+      const lastDocInBuffer = snap.docs[snap.docs.length - 1];
+      nextCursor = lastDocInBuffer ? lastDocInBuffer.id : null;
     }
 
     res.status(200).json({
