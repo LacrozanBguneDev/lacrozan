@@ -53,7 +53,7 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi acak murni untuk mode Popular
+// Fungsi acak murni HANYA untuk mode Popular (Eksplorasi)
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -117,20 +117,20 @@ export default async function handler(req, res) {
     if (mode === "following" && followingIds?.length && !isFollowingFallback)
       queryRef = queryRef.where("userId", "in", followingIds);
 
-    // --- QUERY FIRESTORE (SELALU AMBIL TERBARU DULU) ---
-    // Kita ambil buffer 3x limit untuk ruang gerak pengacakan/filtering
+    // --- QUERY FIRESTORE ---
+    // Buffer lebih besar (limit * 3) untuk memfilter spam user tanpa kehabisan stok
     const bufferSize = limitReq * 3;
     queryRef = queryRef.orderBy("timestamp", "desc");
 
     if (cursorId) {
       const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
       if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
-      else console.warn("Cursor not found:", cursorId);
+      else console.warn("Cursor not found, starting from top:", cursorId);
     }
 
     const snap = await queryRef.limit(bufferSize).get();
 
-    // Jika kosong, langsung return (kecuali mode following yg bisa fallback ke home logic)
+    // Jika kosong
     if (snap.empty && mode !== "following") {
       return res.json({
         posts: [],
@@ -145,58 +145,47 @@ export default async function handler(req, res) {
     }));
 
 
-    /* ================== LOGIKA FEED (THE BRAIN) ================== */
+    /* ================== LOGIKA FEED (THE BRAIN - FIXED) ================== */
     let finalPosts = [];
 
-    // KONDISI 1: BERANDA (HOME) - Harus Hidup, Beda-beda, tapi tetap Baru
+    // KONDISI 1: BERANDA (HOME) - Prioritas Waktu + Variasi User
     if (mode === "home" || (mode === "following" && isFollowingFallback)) {
       
-      // Langkah A: Cegah Monoton User (Anti-Spam)
-      // Jika User A posting 5 kali berurutan, kita ambil max 2 saja per batch, sisanya nanti
-      let uniqueUserPosts = [];
-      const userCountCheck = {};
+      const userPostCounts = {};
+      const filteredPosts = [];
+
+      // Algoritma: Anti-Spam Linear
+      // Urutan waktu TETAP DIPERTAHANKAN (karena allFetchedPosts sudah sorted by time)
+      // Kita hanya membuang (skip) postingan berlebih dari user yang sama
       
-      for (let p of allFetchedPosts) {
+      for (const p of allFetchedPosts) {
         const uid = p.userId || "anon";
-        const currentCount = userCountCheck[uid] || 0;
-        
-        // Batasi maksimal 2 post dari user yg sama dalam satu tarikan feed
-        // Kecuali postingan total memang sedikit (< 5), maka hajar saja semua
+        const currentCount = userPostCounts[uid] || 0;
+
+        // MAX 2 POST per user per batch load
+        // Kecuali jika feed sangat sepi (kurang dari 5 post total), biarkan saja
         if (currentCount < 2 || allFetchedPosts.length < 5) {
-          uniqueUserPosts.push(p);
-          userCountCheck[uid] = currentCount + 1;
+          filteredPosts.push(p);
+          userPostCounts[uid] = currentCount + 1;
         }
       }
 
-      // Langkah B: Algoritma "Smart Jitter" (Acak Cerdas)
-      // Kita tambahkan nilai random (0 s/d 2 jam) ke timestamp HANYA untuk sorting.
-      // Efeknya: Postingan yang berdekatan waktunya akan teracak posisinya setiap refresh.
-      // Tapi postingan kemarin tidak akan menyalip postingan hari ini.
-      const JITTER_AMOUNT = 7200000; // 2 Jam dalam milidetik
-
-      finalPosts = uniqueUserPosts.map(p => ({
-        ...p,
-        // Score sementara: Waktu asli + Random(0-2 jam)
-        _sortScore: p.timestamp + (Math.random() * JITTER_AMOUNT)
-      })).sort((a, b) => b._sortScore - a._sortScore); // Urutkan berdasarkan score acak tadi
+      // Potong sesuai limit request (misal minta 10, kita punya buffer 30, disaring jadi 15, ambil 10)
+      finalPosts = filteredPosts.slice(0, limitReq);
 
     } 
-    // KONDISI 2: POPULAR - Acak Total (Untuk eksplorasi)
+    // KONDISI 2: POPULAR - Acak Total (Untuk eksplorasi, waktu tidak masalah)
     else if (mode === "popular") {
-      finalPosts = shuffle(allFetchedPosts);
+      finalPosts = shuffle(allFetchedPosts).slice(0, limitReq);
     } 
-    // KONDISI 3: LAINNYA (Meme, User Profile, Following Asli) - WAJIB URUT WAKTU
+    // KONDISI 3: LAINNYA (Meme, User Profile, Following Asli) - MURNI URUT WAKTU
     else {
-      // Tidak diapa-apain, murni urutan timestamp desc dari database
-      finalPosts = allFetchedPosts;
+      finalPosts = allFetchedPosts.slice(0, limitReq);
     }
-
-    // Potong sesuai limit request
-    let result = finalPosts.slice(0, limitReq);
 
 
     /* ================== GET USER DATA ================== */
-    const uids = [...new Set(result.map(p => p.userId).filter(Boolean))];
+    const uids = [...new Set(finalPosts.map(p => p.userId).filter(Boolean))];
     const userMap = {};
     if (uids.length) {
       const userSnaps = await Promise.all(
@@ -207,11 +196,8 @@ export default async function handler(req, res) {
       });
     }
 
-    let postsResponse = result.map(p => {
+    let postsResponse = finalPosts.map(p => {
       const u = userMap[p.userId] || {};
-      // Hapus properti internal _sortScore sebelum dikirim ke frontend
-      delete p._sortScore; 
-      
       return {
         ...p,
         user: {
@@ -232,7 +218,7 @@ export default async function handler(req, res) {
         if (extRes.ok) {
           const extData = await extRes.json();
           if (Array.isArray(extData.posts)) {
-            // Tambahkan postingan eksternal ke bawah
+            // Push data eksternal (pastikan struktur datanya cocok)
             postsResponse.push(...extData.posts);
           }
         }
@@ -241,24 +227,24 @@ export default async function handler(req, res) {
       }
     }
 
-    // Potong lagi jaga-jaga kalau ada tambahan dari eksternal
+    // Final slice just in case external posts made it too long
     postsResponse = postsResponse.slice(0, limitReq);
 
-    /* ================== NEXT CURSOR LOGIC ================== */
-    // Logic cursor diperbaiki agar infinite scroll mulus
-    const lastDocInSnap = snap.docs[snap.docs.length - 1];
+    /* ================== NEXT CURSOR LOGIC (FIXED) ================== */
+    // Cursor HARUS menunjuk ke item terakhir yang DIAMBIL DARI DB (snap),
+    // BUKAN item terakhir yang ditampilkan ke user.
+    // Ini menjamin scroll berikutnya melanjutkan dari posisi database yang benar.
     
-    // Jika kita mengambil dari database (bukan hasil shuffle popular total)
-    // Cursor idealnya adalah ID dari item terakhir di buffer database, 
-    // bukan item terakhir yang ditampilkan (karena urutan ditampilkan sudah diacak dikit).
     let nextCursor = null;
     
-    if (allFetchedPosts.length >= bufferSize) {
-        // Masih ada data di DB
-        nextCursor = lastDocInSnap?.id || null;
+    // Jika jumlah yang diambil dari DB sama dengan bufferSize, 
+    // berarti kemungkinan masih ada data sisa di DB.
+    if (snap.docs.length === bufferSize) {
+      const lastDoc = snap.docs[snap.docs.length - 1];
+      nextCursor = lastDoc.id;
     } else {
-        // Data DB habis
-        nextCursor = null;
+      // Data habis
+      nextCursor = null; 
     }
 
     res.status(200).json({
