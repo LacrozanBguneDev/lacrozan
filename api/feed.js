@@ -1,12 +1,8 @@
 import admin from "firebase-admin";
-import { CONFIG } from './config.js'; 
+import { CONFIG } from './config.js'; // Import config rahasia backend
 
-/* ================== KONFIGURASI ================== */
+/* ================== KONFIGURASI & INISIALISASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
-
-// SETTING BATAS UMUR POSTINGAN (Agar tidak muncul post zaman purba)
-// 90 Hari = 90 * 24 * 60 * 60 * 1000. Ubah angka 90 jika ingin lebih singkat.
-const MAX_POST_AGE_MS = 90 * 24 * 60 * 60 * 1000; 
 
 let db = null;
 let initError = null;
@@ -14,10 +10,9 @@ let initError = null;
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
-/* ================== SETUP FIREBASE ================== */
 const getServiceAccount = () => {
   const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!rawEnv) throw new Error("Environment Variable FIREBASE_SERVICE_ACCOUNT kosong.");
+  if (!rawEnv) throw new Error("Environment Variable FIREBASE_SERVICE_ACCOUNT tidak ditemukan/kosong.");
 
   let serviceAccount;
   try {
@@ -27,14 +22,13 @@ const getServiceAccount = () => {
       const decoded = Buffer.from(rawEnv, 'base64').toString('utf-8');
       serviceAccount = JSON.parse(decoded);
     } catch {
-      throw new Error("Format FIREBASE_SERVICE_ACCOUNT rusak.");
+      throw new Error("Format FIREBASE_SERVICE_ACCOUNT tidak valid.");
     }
   }
-  
-  // Fix format private key
-  if (serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  }
+
+  if (!serviceAccount.private_key) throw new Error("Properti 'private_key' tidak ditemukan.");
+  // Fix newline di private key
+  serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
   return serviceAccount;
 };
@@ -49,10 +43,10 @@ try {
   db = admin.firestore();
 } catch (err) {
   console.error("FIREBASE_INIT_ERROR:", err);
-  initError = err.message;
+  initError = err.message || "Unknown Initialization Error";
 }
 
-/* ================== HELPERS ================== */
+/* ================== UTILITAS ================== */
 const safeMillis = ts => {
   if (!ts) return Date.now();
   if (typeof ts.toMillis === "function") return ts.toMillis();
@@ -60,7 +54,7 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi pengacak array (Fisher-Yates Shuffle)
+// Fungsi acak (Shuffle) untuk membuat feed terasa hidup
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -70,51 +64,72 @@ const shuffle = arr => {
   return a;
 };
 
-/* ================== MAIN HANDLER ================== */
+/* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
-  if (!db) return res.status(500).json({ error: true, message: "DB Error", details: initError });
+  // 1. Cek Firestore
+  if (!db) {
+    return res.status(500).json({
+      error: true,
+      message: "Firestore not initialized",
+      details: initError
+    });
+  }
 
-  // 1. Cek API Key
+  /* ================== VALIDASI API KEY ================== */
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-  if (REQUIRED_API_KEY && apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "Unauthorized" });
+
+  if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
+    return res.status(401).json({
+      error: true,
+      message: "API key invalid"
+    });
   }
 
   try {
     const mode = req.query.mode || "home";
+    // Batasi limit agar tidak memberatkan loading (default 10)
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
 
     let queryRef = db.collection(POSTS_PATH);
+    let followingIds = null;
     let isFollowingFallback = false;
 
-    // 2. Logic Mode Following (Cek User dulu)
+    // --- SETUP MODE FOLLOWING ---
     if (mode === "following") {
-      let followingIds = [];
-      if (viewerId) {
+      if (!viewerId) isFollowingFallback = true;
+      else {
         const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
-        if (viewerSnap.exists) {
-            followingIds = viewerSnap.data().following || [];
+        if (!viewerSnap.exists) isFollowingFallback = true;
+        else {
+          const viewerData = viewerSnap.data() || {};
+          followingIds = Array.isArray(viewerData.following) ?
+            viewerData.following.slice(0, 10) : []; // Max 10 following untuk query 'in'
+          
+          if (!followingIds.length) isFollowingFallback = true;
         }
-      }
-      
-      // Kalau punya following, filter. Kalau gak punya, jadi mode Home (fallback)
-      if (followingIds.length > 0) {
-        // Firestore 'in' query max 10 item, hati-hati disini. Ambil 10 pertama aja.
-        queryRef = queryRef.where("userId", "in", followingIds.slice(0, 10));
-      } else {
-        isFollowingFallback = true;
       }
     }
 
-    // 3. Logic Filter Biasa
+    // --- FILTER QUERY ---
+    // Mode Meme & User Filter
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
-    if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
+    if (mode === "user" && req.query.userId)
+      queryRef = queryRef.where("userId", "==", req.query.userId);
+    
+    // Mode Following Asli
+    if (mode === "following" && followingIds?.length && !isFollowingFallback) {
+      queryRef = queryRef.where("userId", "in", followingIds);
+    }
 
-    // 4. SORTING UTAMA: Waktu (Terbaru)
-    // Kita ambil buffer lebih banyak (limit * 2) biar bisa diacak isinya
-    const fetchLimit = limitReq * 2; 
+    // --- INTI ALGORITMA: PENGAMBILAN DATA ---
+    // Kita mengambil data 3x lebih banyak dari yang diminta (Buffer)
+    // Tujuannya: Agar kita bisa mengacak urutan "Barang Baru" tanpa mengambil barang lama.
+    const fetchBufferSize = limitReq * 3; 
+    
+    // WAJIB: Selalu urutkan berdasarkan waktu terbaru (DESC)
+    // Ini menjamin tidak ada postingan 1 bulan lalu muncul di atas
     queryRef = queryRef.orderBy("timestamp", "desc");
 
     if (cursorId) {
@@ -122,70 +137,82 @@ export default async function handler(req, res) {
       if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
     }
 
-    const snap = await queryRef.limit(fetchLimit).get();
+    // Eksekusi Query ke Database
+    const snap = await queryRef.limit(fetchBufferSize).get();
 
-    // 5. DATA FETCHING
+    // Jika data habis/kosong
+    if (snap.empty && mode !== "following") {
+      return res.json({
+        posts: [],
+        nextCursor: null
+      });
+    }
+
+    // Ubah data snapshot ke format JSON bersih
     let rawPosts = snap.docs.map(d => ({
       ...d.data(),
       id: d.id,
       timestamp: safeMillis(d.data()?.timestamp)
     }));
 
-    // === FILTER: BUANG POSTINGAN KADALUARSA (Zaman Purba) ===
-    // Kalau mode Home/Popular, buang yg lebih tua dari 3 bulan (MAX_POST_AGE_MS)
-    if (mode === "home" || mode === "popular") {
-        const cutoffTime = Date.now() - MAX_POST_AGE_MS;
-        rawPosts = rawPosts.filter(p => p.timestamp > cutoffTime);
-    }
-
-    // Jika setelah difilter kosong, return kosong
-    if (rawPosts.length === 0) {
-      return res.json({ posts: [], nextCursor: null });
-    }
-
-    // 6. PROCESSING (ALGORITMA DISINI)
+    /* ================== LOGIKA "ALIVE" FEED ================== */
     let finalPosts = [];
 
-    if (mode === "home" || isFollowingFallback) {
-      // TEKNIK: "LOCAL SHUFFLE"
-      // Kita sudah ambil data TERBARU dari DB.
-      // Sekarang kita acak urutannya BIAR GAK BORING saat direfresh.
-      // Tapi isinya tetap postingan-postingan baru.
+    // KONDISI 1: HOME (BERANDA) & FOLLOWING FALLBACK
+    // Algoritma: Ambil yang TERBARU -> Saring Spam -> Acak Sedikit Biar Segar
+    if (mode === "home" || (mode === "following" && isFollowingFallback)) {
       
-      // Deduping (Max 2 post per user dalam satu layar)
-      const userCounts = {};
+      const userPostCount = {};
       const uniquePosts = [];
-      for (let p of rawPosts) {
+
+      // A. Filter Anti-Spam (Jangan sampai 1 user memenuhi beranda)
+      for (const p of rawPosts) {
         const uid = p.userId || "anon";
-        if ((userCounts[uid] || 0) < 2) {
-            uniquePosts.push(p);
-            userCounts[uid] = (userCounts[uid] || 0) + 1;
+        const count = userPostCount[uid] || 0;
+        
+        // Ambil max 2 post per user per loading, kecuali kalau datanya dikit banget
+        if (count < 2 || rawPosts.length < 5) {
+          uniquePosts.push(p);
+          userPostCount[uid] = count + 1;
         }
       }
 
-      // ACAK HASILNYA! Ini kunci biar "pas direfresh urutan berubah"
+      // B. The "Alive" Factor (Pengacakan Lokal)
+      // Kita sudah pegang daftar postingan TERBARU. Sekarang kita acak posisinya.
+      // Efek: User refresh -> Isi tetap baru, tapi urutan beda. Gak bosenin.
       finalPosts = shuffle(uniquePosts);
 
-    } else if (mode === "popular") {
-      // Mode popular acak total
+    } 
+    // KONDISI 2: POPULAR (Eksplorasi Total)
+    else if (mode === "popular") {
+      // Acak total dari buffer yang diambil
       finalPosts = shuffle(rawPosts);
-    } else {
-      // Mode User/Meme/Following asli tetep urut waktu biar rapi
+    } 
+    // KONDISI 3: PROFILE / MEME / FOLLOWING ASLI
+    else {
+      // Jangan diacak, biarkan urut waktu murni (kronologis)
       finalPosts = rawPosts;
     }
 
-    // Potong sesuai limit yang diminta user (misal 10)
-    finalPosts = finalPosts.slice(0, limitReq);
+    // Potong hasil akhir sesuai limit yang diminta (misal 10)
+    let postsResponse = finalPosts.slice(0, limitReq);
 
-    // 7. AMBIL DATA USER (JOIN)
-    const uids = [...new Set(finalPosts.map(p => p.userId).filter(Boolean))];
+
+    /* ================== GET USER DATA (JOIN) ================== */
+    const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
     const userMap = {};
+    
     if (uids.length) {
-      const userSnaps = await Promise.all(uids.map(id => db.doc(`${USERS_PATH}/${id}`).get()));
-      userSnaps.forEach(s => { if (s.exists) userMap[s.id] = s.data(); });
+      const userSnaps = await Promise.all(
+        uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
+      );
+      userSnaps.forEach(s => {
+        if (s.exists) userMap[s.id] = s.data();
+      });
     }
 
-    const responsePosts = finalPosts.map(p => {
+    // Gabungkan data post dengan data user
+    postsResponse = postsResponse.map(p => {
       const u = userMap[p.userId] || {};
       return {
         ...p,
@@ -198,28 +225,51 @@ export default async function handler(req, res) {
       };
     });
 
-    // 8. NEXT CURSOR LOGIC (PENTING!)
-    // Cursor harus nunjuk ke ID terakhir dari RAW DATA DATABASE (snap),
-    // BUKAN hasil acakan. Biar scroll selanjutnya nyambung mulus.
-    let nextCursor = null;
-    
-    // Logika: Jika jumlah data yg ditarik dari DB (sebelum filter/acak)
-    // sama dengan batas fetchLimit, berarti masih ada data sisa di DB.
-    if (snap.docs.length === fetchLimit) {
-        const lastDoc = snap.docs[snap.docs.length - 1];
-        nextCursor = lastDoc.id;
-    } else {
-        // Kalau DB ngasih kurang dari limit, berarti data sudah habis.
-        nextCursor = null; 
+    /* ================== FETCH SERVER EKSTERNAL (OPSIONAL) ================== */
+    if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
+      try {
+        const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
+        if (extRes.ok) {
+          const extData = await extRes.json();
+          if (Array.isArray(extData.posts)) {
+            postsResponse.push(...extData.posts);
+          }
+        }
+      } catch (err) {
+        console.warn("External feed fetch error:", err);
+      }
     }
 
-    res.json({
-      posts: responsePosts,
+    // Pastikan tidak melebihi limit setelah digabung eksternal
+    postsResponse = postsResponse.slice(0, limitReq);
+
+    /* ================== NEXT CURSOR LOGIC (CRITICAL FIX) ================== */
+    // Masalah scroll lompat/aneh diperbaiki disini.
+    // Cursor harus menunjuk ke dokumen terakhir di DATABASE (snap), bukan di hasil acakan.
+    
+    let nextCursor = null;
+    
+    // Cek apakah kita masih punya data di DB?
+    // Jika jumlah dokumen yang ditarik (snap) sama dengan yang kita minta (fetchBufferSize),
+    // berarti kemungkinan besar masih ada data berikutnya.
+    if (snap.docs.length >= limitReq) {
+      // Ambil ID dari dokumen terakhir yang benar-benar diambil dari DB
+      const lastDocInBatch = snap.docs[snap.docs.length - 1];
+      nextCursor = lastDocInBatch ? lastDocInBatch.id : null;
+    } else {
+      nextCursor = null; // Data habis
+    }
+
+    res.status(200).json({
+      posts: postsResponse,
       nextCursor
     });
 
   } catch (e) {
     console.error("FEED_ERROR:", e);
-    res.status(500).json({ error: true, message: e.message });
+    res.status(500).json({
+      error: true,
+      message: e.message || "Unknown runtime error"
+    });
   }
 }
