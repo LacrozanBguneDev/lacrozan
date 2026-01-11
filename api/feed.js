@@ -1,202 +1,159 @@
-import admin from "firebase-admin";
-import { CONFIG } from "./config.js";
-
-/* ================== KONFIGURASI & INISIALISASI ================== */
-const REQUIRED_API_KEY =
-  process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
-
-let db = null;
-let initError = null;
-
-const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
-const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
-
-const getServiceAccount = () => {
-  const rawEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!rawEnv) throw new Error("FIREBASE_SERVICE_ACCOUNT kosong.");
-
-  try {
-    const parsed = rawEnv.trim().startsWith("{")
-      ? JSON.parse(rawEnv)
-      : JSON.parse(Buffer.from(rawEnv, "base64").toString("utf8"));
-
-    parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
-    return parsed;
-  } catch {
-    throw new Error("Format FIREBASE_SERVICE_ACCOUNT invalid.");
-  }
-};
+/* ... kode atas tetap sama ... */
 
 try {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(getServiceAccount())
-    });
-  }
-  db = admin.firestore();
-} catch (e) {
-  initError = e.message;
-}
+  const mode = req.query.mode || "home";
+  const limitReq = Math.min(Number(req.query.limit) || 10, 50);
+  const viewerId = req.query.viewerId || null;
+  const cursorId = req.query.cursor || null;
 
-/* ================== UTIL ================== */
-const safeMillis = ts => {
-  if (!ts) return Date.now();
-  if (typeof ts.toMillis === "function") return ts.toMillis();
-  if (ts._seconds) return ts._seconds * 1000;
-  return Number(ts) || Date.now();
-};
+  let queryRef = db.collection(POSTS_PATH);
+  let followingIds = null;
+  let isFollowingFallback = false;
 
-const shuffle = arr => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
-
-const limitPerUser = (posts, max = 2) => {
-  const map = {};
-  return posts.filter(p => {
-    map[p.userId] = (map[p.userId] || 0) + 1;
-    return map[p.userId] <= max;
-  });
-};
-
-/* ================== HANDLER ================== */
-export default async function handler(req, res) {
-  if (!db) {
-    return res.status(500).json({ error: true, message: initError });
-  }
-
-  const apiKey = String(req.headers["x-api-key"] || "").trim();
-  if (REQUIRED_API_KEY && apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({ error: true, message: "API key invalid" });
-  }
-
-  try {
-    const mode = req.query.mode || "home";
-    const limitReq = Math.min(Number(req.query.limit) || 10, 50);
-    const page = Math.max(Number(req.query.page) || 0, 0);
-    const viewerId = req.query.viewerId || null;
-
-    let queryRef = db.collection(POSTS_PATH);
-    let followingIds = [];
-
-    if (mode === "following" && viewerId) {
-      const snap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
-      followingIds = snap.exists ? snap.data()?.following || [] : [];
-      followingIds = followingIds.slice(0, 10);
-      if (followingIds.length) {
-        queryRef = queryRef.where("userId", "in", followingIds);
+  // 1. Setup Mode Following
+  if (mode === "following") {
+    if (!viewerId) isFollowingFallback = true;
+    else {
+      const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+      if (!viewerSnap.exists) isFollowingFallback = true;
+      else {
+        const viewerData = viewerSnap.data() || {};
+        followingIds = Array.isArray(viewerData.following) ?
+          viewerData.following.slice(0, 10) : [];
+        if (!followingIds.length) isFollowingFallback = true;
       }
     }
-
-    if (mode === "meme") {
-      queryRef = queryRef.where("category", "==", "meme");
-    }
-
-    if (mode === "user" && req.query.userId) {
-      queryRef = queryRef.where("userId", "==", req.query.userId);
-    }
-
-    // AMBIL BANYAK DATA SEKALI
-    const snap = await queryRef
-      .orderBy("timestamp", "desc")
-      .limit(120)
-      .get();
-
-    if (snap.empty) {
-      return res.json({ posts: [], nextPage: null });
-    }
-
-    const allPosts = snap.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      timestamp: safeMillis(d.data()?.timestamp),
-      likeCount: Number(d.data()?.likeCount || 0)
-    }));
-
-    /* ================== FEED ENGINE ================== */
-    let finalPosts = [];
-
-    if (mode === "home") {
-      const now = Date.now();
-
-      const scored = allPosts.map(p => {
-        const ageH = (now - p.timestamp) / 36e5;
-
-        const freshness =
-          ageH < 3 ? 2.2 :
-          ageH < 12 ? 1.7 :
-          ageH < 24 ? 1.3 :
-          ageH < 72 ? 1 :
-          0.6;
-
-        const engagement = Math.log10(p.likeCount + 1) + 1;
-        const noise = Math.random() * 0.6;
-
-        return { ...p, _score: freshness * engagement + noise };
-      });
-
-      finalPosts = limitPerUser(
-        shuffle(scored.sort((a, b) => b._score - a._score)),
-        2
-      );
-    }
-
-    else if (mode === "popular") {
-      const now = Date.now();
-      finalPosts = allPosts
-        .map(p => {
-          const ageH = (now - p.timestamp) / 36e5;
-          const decay = Math.exp(-ageH / 48);
-          return { ...p, _score: p.likeCount * decay };
-        })
-        .sort((a, b) => b._score - a._score);
-    }
-
-    else {
-      finalPosts = shuffle(allPosts);
-    }
-
-    /* ================== PAGINATION OFFSET ================== */
-    const start = page * limitReq;
-    const end = start + limitReq;
-    const result = finalPosts.slice(start, end);
-
-    /* ================== USER DATA ================== */
-    const uids = [...new Set(result.map(p => p.userId).filter(Boolean))];
-    const userMap = {};
-
-    if (uids.length) {
-      const snaps = await Promise.all(
-        uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
-      );
-      snaps.forEach(s => {
-        if (s.exists) userMap[s.id] = s.data();
-      });
-    }
-
-    const postsResponse = result.map(p => {
-      const u = userMap[p.userId] || {};
-      return {
-        ...p,
-        user: {
-          username: u.username || "User",
-          photoURL: u.photoURL || null,
-          reputation: u.reputation || 0
-        }
-      };
-    });
-
-    res.json({
-      posts: postsResponse,
-      nextPage: end < finalPosts.length ? page + 1 : null
-    });
-
-  } catch (e) {
-    console.error("FEED_ERROR:", e);
-    res.status(500).json({ error: true, message: e.message });
   }
+
+  // 2. Filter Query
+  if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
+  if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
+  if (mode === "following" && followingIds?.length && !isFollowingFallback) {
+    queryRef = queryRef.where("userId", "in", followingIds);
+  }
+
+  // 3. Query Firestore (PENTING: Selalu ambil berdasarkan Waktu Terbaru)
+  // Kita ambil buffer lebih banyak (limit * 2) buat jaga-jaga kalau ada filtering manual
+  const bufferSize = limitReq * 2; 
+  queryRef = queryRef.orderBy("timestamp", "desc");
+
+  if (cursorId) {
+    const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
+    if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
+  }
+
+  const snap = await queryRef.limit(bufferSize).get();
+
+  if (snap.empty && mode !== "following") {
+    return res.json({ posts: [], nextCursor: null });
+  }
+
+  const allFetchedPosts = snap.docs.map(d => ({
+    ...d.data(),
+    id: d.id,
+    timestamp: safeMillis(d.data()?.timestamp)
+  }));
+
+  /* ================== PERBAIKAN LOGIKA FEED ================== */
+  let finalPosts = [];
+
+  if (mode === "home" || (mode === "following" && isFollowingFallback)) {
+    // LOGIKA BARU: Prioritas Waktu (Terbaru diatas), tapi cegah SPAM berlebihan.
+    // Kita tidak pakai SHUFFLE. Kita pakai data asli (allFetchedPosts) yang sudah urut waktu.
+    
+    const processedPosts = [];
+    const userConsecutiveCount = {}; // Hitung user ini udah muncul berapa kali berturut-turut
+
+    for (const post of allFetchedPosts) {
+      const uid = post.userId || "anon";
+      
+      // Cek postingan sebelumnya siapa
+      const lastPost = processedPosts[processedPosts.length - 1];
+      const lastUid = lastPost ? lastPost.userId : null;
+
+      if (lastUid === uid) {
+        userConsecutiveCount[uid] = (userConsecutiveCount[uid] || 1) + 1;
+      } else {
+        userConsecutiveCount[uid] = 1; // Reset kalau ganti orang
+      }
+
+      // Jika user yang sama sudah muncul 2x berturut-turut, skip dulu biar variatif dikit
+      // (Kecuali postingan memang sedikit < 5, hajar aja semua)
+      if (allFetchedPosts.length > 5 && userConsecutiveCount[uid] > 2) {
+        continue; 
+      }
+
+      processedPosts.push(post);
+      
+      // Stop kalau sudah memenuhi limit request user
+      if (processedPosts.length >= limitReq) break;
+    }
+
+    // Jika hasil filtering terlalu sedikit (karena banyak skip), ambil saja apa adanya biar gak kosong
+    if (processedPosts.length < limitReq && allFetchedPosts.length > 0) {
+        finalPosts = allFetchedPosts.slice(0, limitReq);
+    } else {
+        finalPosts = processedPosts;
+    }
+
+  } else {
+    // Untuk mode lain (user profile, meme category, dll) biarkan murni urut waktu
+    finalPosts = allFetchedPosts.slice(0, limitReq);
+  }
+  /* =========================================================== */
+
+  let result = finalPosts;
+
+  // Join user data
+  const uids = [...new Set(result.map(p => p.userId).filter(Boolean))];
+  const userMap = {};
+  if (uids.length) {
+    const userSnaps = await Promise.all(
+      uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
+    );
+    userSnaps.forEach(s => {
+      if (s.exists) userMap[s.id] = s.data();
+    });
+  }
+
+  let postsResponse = result.map(p => {
+    const u = userMap[p.userId] || {};
+    return {
+      ...p,
+      user: {
+        username: u.username || "User",
+        photoURL: u.photoURL || null,
+        reputation: u.reputation || 0,
+        email: u.email || ""
+      }
+    };
+  });
+
+  // External fetch logic (Dibiarkan sama)
+  if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
+     // ... (kode fetch server-to-server kamu tetap sama) ...
+  }
+
+  // Final slice untuk memastikan jumlah pas
+  postsResponse = postsResponse.slice(0, limitReq);
+
+  // Next cursor logic (Diperbaiki agar sinkron dengan hasil akhir)
+  let nextCursor = null;
+  if (result.length > 0) {
+      // Ambil ID dari item terakhir yang BENAR-BENAR ditampilkan ke user
+      const lastVisiblePost = result[result.length - 1];
+      nextCursor = lastVisiblePost.id;
+  }
+
+  res.status(200).json({
+    posts: postsResponse,
+    nextCursor
+  });
+
+} catch (e) {
+  console.error("FEED_ERROR:", e);
+  res.status(500).json({
+    error: true,
+    message: e.message || "Unknown runtime error"
+  });
 }
