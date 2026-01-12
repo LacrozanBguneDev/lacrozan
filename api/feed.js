@@ -27,7 +27,6 @@ const getServiceAccount = () => {
   }
 
   if (!serviceAccount.private_key) throw new Error("Properti 'private_key' tidak ditemukan.");
-  // Fix newline di private key
   serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
   return serviceAccount;
@@ -54,7 +53,6 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi acak (Shuffle) untuk membuat feed terasa hidup
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -66,7 +64,6 @@ const shuffle = arr => {
 
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
-  // 1. Cek Firestore
   if (!db) {
     return res.status(500).json({
       error: true,
@@ -75,7 +72,6 @@ export default async function handler(req, res) {
     });
   }
 
-  /* ================== VALIDASI API KEY ================== */
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
 
   if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
@@ -87,16 +83,23 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
-    // Batasi limit agar tidak memberatkan loading (default 10)
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
+
+    let cursorTimestamp = null;
+
+    if (cursorId) {
+      const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
+      if (cursorDoc.exists) {
+        cursorTimestamp = safeMillis(cursorDoc.data()?.timestamp);
+      }
+    }
 
     let queryRef = db.collection(POSTS_PATH);
     let followingIds = null;
     let isFollowingFallback = false;
 
-    // --- SETUP MODE FOLLOWING ---
     if (mode === "following") {
       if (!viewerId) isFollowingFallback = true;
       else {
@@ -104,26 +107,22 @@ export default async function handler(req, res) {
         if (!viewerSnap.exists) isFollowingFallback = true;
         else {
           const viewerData = viewerSnap.data() || {};
-          followingIds = Array.isArray(viewerData.following) ?
-            viewerData.following.slice(0, 10) : []; // Max 10 following untuk query 'in'
-          
+          followingIds = Array.isArray(viewerData.following)
+            ? viewerData.following.slice(0, 10)
+            : [];
           if (!followingIds.length) isFollowingFallback = true;
         }
       }
     }
 
-    // --- FILTER QUERY ---
-    // Mode Meme & User Filter
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
     if (mode === "user" && req.query.userId)
       queryRef = queryRef.where("userId", "==", req.query.userId);
-    
-    // Mode Following Asli
+
     if (mode === "following" && followingIds?.length && !isFollowingFallback) {
       queryRef = queryRef.where("userId", "in", followingIds);
     }
 
-    // --- INTI ALGORITMA: PENGAMBILAN DATA (5 FRESH + 5 RANDOM) ---
     const freshLimit = Math.ceil(limitReq / 2);
     const legacyLimit = limitReq - freshLimit;
 
@@ -131,45 +130,61 @@ export default async function handler(req, res) {
     let snapForCursor = null;
 
     if (mode === "home" || (mode === "following" && isFollowingFallback)) {
-      // AMBIL DATA TERBARU (FRESH)
       let freshQuery = queryRef.orderBy("timestamp", "desc");
       if (cursorId) {
         const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
         if (cursorDoc.exists) freshQuery = freshQuery.startAfter(cursorDoc);
       }
+
       const freshSnap = await freshQuery.limit(freshLimit).get();
-      snapForCursor = freshSnap; // Cursor ikut data fresh
+      snapForCursor = freshSnap;
 
       const freshPosts = freshSnap.docs.map(d => ({
-        ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp)
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp)
       }));
 
-      // AMBIL DATA ACAK (LEGACY) DARI 100 TERAKHIR
-      const legacySnap = await db.collection(POSTS_PATH).orderBy("timestamp", "desc").limit(100).get();
+      const legacySnap = await db
+        .collection(POSTS_PATH)
+        .orderBy("timestamp", "desc")
+        .limit(100)
+        .get();
+
       let allLegacy = legacySnap.docs.map(d => ({
-        ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp)
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp)
       }));
-      
+
       const freshIds = new Set(freshPosts.map(p => p.id));
-      allLegacy = allLegacy.filter(p => !freshIds.has(p.id));
+
+      allLegacy = allLegacy.filter(p => {
+        if (freshIds.has(p.id)) return false;
+        if (cursorTimestamp && p.timestamp > cursorTimestamp) return false;
+        return true;
+      });
+
       const randomLegacy = shuffle(allLegacy).slice(0, legacyLimit);
 
       finalRawPosts = [...freshPosts, ...randomLegacy];
     } else {
-      // MODE LAIN (Meme, User, Following Asli) - Tetap Normal
       let normalQuery = queryRef.orderBy("timestamp", "desc");
       if (cursorId) {
         const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
         if (cursorDoc.exists) normalQuery = normalQuery.startAfter(cursorDoc);
       }
+
       const normalSnap = await normalQuery.limit(limitReq).get();
       snapForCursor = normalSnap;
+
       finalRawPosts = normalSnap.docs.map(d => ({
-        ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp)
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp)
       }));
     }
 
-    /* ================== LOGIKA "ALIVE" FEED ================== */
     let finalPosts = [];
 
     if (mode === "home" || (mode === "following" && isFollowingFallback)) {
@@ -184,21 +199,19 @@ export default async function handler(req, res) {
           userPostCount[uid] = count + 1;
         }
       }
-      finalPosts = shuffle(uniquePosts); // Acak lagi hasil blend tadi biar makin liar
-    } 
-    else if (mode === "popular") {
+
+      finalPosts = shuffle(uniquePosts);
+    } else if (mode === "popular") {
       finalPosts = shuffle(finalRawPosts);
-    } 
-    else {
+    } else {
       finalPosts = finalRawPosts;
     }
 
     let postsResponse = finalPosts.slice(0, limitReq);
 
-    /* ================== GET USER DATA (JOIN) ================== */
     const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
     const userMap = {};
-    
+
     if (uids.length) {
       const userSnaps = await Promise.all(
         uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
@@ -221,24 +234,8 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ================== FETCH SERVER EKSTERNAL (OPSIONAL) ================== */
-    if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
-      try {
-        const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
-        if (extRes.ok) {
-          const extData = await extRes.json();
-          if (Array.isArray(extData.posts)) {
-            postsResponse.push(...extData.posts);
-          }
-        }
-      } catch (err) {
-        console.warn("External feed fetch error:", err);
-      }
-    }
-
     postsResponse = postsResponse.slice(0, limitReq);
 
-    /* ================== NEXT CURSOR LOGIC ================== */
     let nextCursor = null;
     if (snapForCursor && !snapForCursor.empty) {
       const lastDocInBatch = snapForCursor.docs[snapForCursor.docs.length - 1];
