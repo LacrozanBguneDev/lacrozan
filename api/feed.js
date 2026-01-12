@@ -53,7 +53,6 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi Acak Total (Fisher-Yates)
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -81,70 +80,77 @@ export default async function handler(req, res) {
   try {
     const mode = req.query.mode || "home";
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
-    const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
 
-    let queryRef = db.collection(POSTS_PATH);
-    let followingIds = null;
-    let isFollowingFallback = false;
+    // Tentukan porsi (Misal 50:50)
+    const freshLimit = Math.ceil(limitReq / 2); // 5 data baru
+    const legacyLimit = limitReq - freshLimit; // 5 data acak
 
-    if (mode === "following") {
-      if (!viewerId) isFollowingFallback = true;
-      else {
-        const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
-        if (!viewerSnap.exists) isFollowingFallback = true;
-        else {
-          const viewerData = viewerSnap.data() || {};
-          followingIds = Array.isArray(viewerData.following) ? viewerData.following.slice(0, 10) : [];
-          if (!followingIds.length) isFollowingFallback = true;
-        }
+    let postsResponse = [];
+    let nextCursor = null;
+
+    if (mode === "home") {
+      // 1. Ambil Data Fresh (Sesuai urutan waktu & Pagination)
+      let freshQuery = db.collection(POSTS_PATH).orderBy("timestamp", "desc");
+      if (cursorId) {
+        const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
+        if (cursorDoc.exists) freshQuery = freshQuery.startAfter(cursorDoc);
+      }
+      const freshSnap = await freshQuery.limit(freshLimit).get();
+      
+      const freshPosts = freshSnap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp),
+        _tag: "fresh"
+      }));
+
+      // Set cursor berdasarkan data fresh terakhir agar pagination tidak rusak
+      if (freshSnap.docs.length > 0) {
+        nextCursor = freshSnap.docs[freshSnap.docs.length - 1].id;
+      }
+
+      // 2. Ambil Data Legacy/Random (Cari dari 100 post terakhir secara acak)
+      // Kita ambil sampel agak jauh di belakang
+      const legacySnap = await db.collection(POSTS_PATH)
+        .orderBy("timestamp", "desc")
+        .limit(100) 
+        .get();
+      
+      let allLegacy = legacySnap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp),
+        _tag: "legacy"
+      }));
+
+      // Filter agar tidak duplikat dengan data fresh yang baru diambil
+      const freshIds = new Set(freshPosts.map(p => p.id));
+      allLegacy = allLegacy.filter(p => !freshIds.has(p.id));
+
+      // Ambil secara acak sebanyak legacyLimit
+      const randomLegacy = shuffle(allLegacy).slice(0, legacyLimit);
+
+      // 3. Gabungkan dan Kocok Ulang (The Blender)
+      postsResponse = shuffle([...freshPosts, ...randomLegacy]);
+
+    } else {
+      // Untuk mode user, meme, atau following: Tetap urut waktu normal (Tanpa campur legacy)
+      let normalQuery = db.collection(POSTS_PATH).orderBy("timestamp", "desc");
+      if (cursorId) {
+        const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
+        if (cursorDoc.exists) normalQuery = normalQuery.startAfter(cursorDoc);
+      }
+      const normalSnap = await normalQuery.limit(limitReq).get();
+      postsResponse = normalSnap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+        timestamp: safeMillis(d.data()?.timestamp)
+      }));
+      if (normalSnap.docs.length > 0) {
+        nextCursor = normalSnap.docs[normalSnap.docs.length - 1].id;
       }
     }
-
-    if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
-    if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
-    if (mode === "following" && followingIds?.length && !isFollowingFallback) {
-      queryRef = queryRef.where("userId", "in", followingIds);
-    }
-
-    // Ambil sedikit cadangan (misal limit 10 ambil 15) untuk diacak-acak
-    const fetchBufferSize = limitReq + 5; 
-    queryRef = queryRef.orderBy("timestamp", "desc");
-
-    if (cursorId) {
-      const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
-      if (cursorDoc.exists) queryRef = queryRef.startAfter(cursorDoc);
-    }
-
-    const snap = await queryRef.limit(fetchBufferSize).get();
-    if (snap.empty && mode !== "following") {
-      return res.json({ posts: [], nextCursor: null });
-    }
-
-    let rawPosts = snap.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      timestamp: safeMillis(d.data()?.timestamp)
-    }));
-
-    /* ================== LOGIKA "FRESH & RANDOM" (ANTI-MONOTON) ================== */
-    let finalPosts = [];
-    let postsForCursor = rawPosts.slice(0, limitReq); // Untuk patokan scroll
-
-    if (mode === "home" || (mode === "following" && isFollowingFallback)) {
-      // 1. Ambil batch data terbaru (misal 10-15 data teratas)
-      // 2. Acak semuanya tanpa ampun
-      // 3. Efeknya: Setiap refresh, 10 data terbaru ini akan bertukar posisi secara liar
-      finalPosts = shuffle(rawPosts.slice(0, limitReq)); 
-    } 
-    else if (mode === "popular") {
-      finalPosts = shuffle(rawPosts);
-    } 
-    else {
-      finalPosts = rawPosts;
-    }
-
-    let postsResponse = finalPosts.slice(0, limitReq);
 
     /* ================== JOIN USER DATA ================== */
     const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
@@ -167,36 +173,9 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ================== EXTERNAL FEED (DIPERBAIKI) ================== */
-    if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
-      try {
-        const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
-        if (extRes.ok) {
-          const extData = await extRes.json();
-          if (Array.isArray(extData.posts) && extData.posts.length > 0) {
-            // Selipkan di posisi acak agar tidak monoton
-            const randIdx = Math.floor(Math.random() * postsResponse.length);
-            postsResponse.splice(randIdx, 0, extData.posts[0]);
-            postsResponse = postsResponse.slice(0, limitReq);
-          }
-        }
-      } catch (err) {}
-    }
-
-    /* ================== NEXT CURSOR (KUNCI TIMELINE) ================== */
-    let nextCursor = null;
-    if (postsForCursor.length > 0) {
-      // Kita ambil item terakhir dari urutan waktu ASLI (sebelum diacak)
-      // Ini supaya saat scroll ke bawah, datanya nyambung terus ke masa lalu
-      const lastItem = postsForCursor[postsForCursor.length - 1];
-      nextCursor = lastItem ? lastItem.id : null;
-    }
-
-    if (snap.docs.length < limitReq) nextCursor = null;
-
     res.status(200).json({
       posts: postsResponse,
-      nextCursor
+      nextCursor: postsResponse.length < 3 ? null : nextCursor
     });
 
   } catch (e) {
