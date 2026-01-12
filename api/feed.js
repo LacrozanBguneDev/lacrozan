@@ -62,6 +62,22 @@ const shuffle = arr => {
   return a;
 };
 
+/* ===== FINAL GUARD: ANTI DUPLIKAT GLOBAL ===== */
+const uniqueById = (posts, limit) => {
+  const seen = new Set();
+  const result = [];
+
+  for (const p of posts) {
+    if (!p || !p.id) continue;
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    result.push(p);
+    if (result.length >= limit) break;
+  }
+
+  return result;
+};
+
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
   if (!db) {
@@ -207,7 +223,7 @@ export default async function handler(req, res) {
       finalPosts = finalRawPosts;
     }
 
-    let postsResponse = finalPosts.slice(0, limitReq);
+    let postsResponse = finalPosts;
 
     const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
     const userMap = {};
@@ -234,7 +250,8 @@ export default async function handler(req, res) {
       };
     });
 
-    postsResponse = postsResponse.slice(0, limitReq);
+    /* ===== FINAL DEDUP APPLY ===== */
+    postsResponse = uniqueById(postsResponse, limitReq);
 
     let nextCursor = null;
     if (snapForCursor && !snapForCursor.empty) {
