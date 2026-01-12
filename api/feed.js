@@ -62,16 +62,29 @@ const shuffle = arr => {
   return a;
 };
 
-/* ===== FINAL GUARD: ANTI DUPLIKAT GLOBAL ===== */
-const uniqueById = (posts, limit) => {
+/* ===== CONTENT SIGNATURE ===== */
+const buildPostKey = p => {
+  const text = (p.text || p.caption || "").trim();
+  const media = Array.isArray(p.media)
+    ? p.media.join(",")
+    : (p.media || p.image || "");
+  return `${p.userId || "anon"}|${text}|${media}`;
+};
+
+/* ===== FINAL GUARD (ID + CONTENT) ===== */
+const uniqueByContent = (posts, limit) => {
   const seen = new Set();
   const result = [];
 
   for (const p of posts) {
-    if (!p || !p.id) continue;
-    if (seen.has(p.id)) continue;
-    seen.add(p.id);
+    if (!p) continue;
+
+    const key = `${p.id}|${buildPostKey(p)}`;
+    if (seen.has(key)) continue;
+
+    seen.add(key);
     result.push(p);
+
     if (result.length >= limit) break;
   }
 
@@ -223,35 +236,8 @@ export default async function handler(req, res) {
       finalPosts = finalRawPosts;
     }
 
-    let postsResponse = finalPosts;
-
-    const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
-    const userMap = {};
-
-    if (uids.length) {
-      const userSnaps = await Promise.all(
-        uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
-      );
-      userSnaps.forEach(s => {
-        if (s.exists) userMap[s.id] = s.data();
-      });
-    }
-
-    postsResponse = postsResponse.map(p => {
-      const u = userMap[p.userId] || {};
-      return {
-        ...p,
-        user: {
-          username: u.username || "User",
-          photoURL: u.photoURL || null,
-          reputation: u.reputation || 0,
-          email: u.email || ""
-        }
-      };
-    });
-
-    /* ===== FINAL DEDUP APPLY ===== */
-    postsResponse = uniqueById(postsResponse, limitReq);
+    /* ===== FINAL DEDUP PALING AKHIR ===== */
+    const postsResponse = uniqueByContent(finalPosts, limitReq);
 
     let nextCursor = null;
     if (snapForCursor && !snapForCursor.empty) {
