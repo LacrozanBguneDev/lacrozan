@@ -27,7 +27,6 @@ const getServiceAccount = () => {
   }
 
   if (!serviceAccount.private_key) throw new Error("Properti 'private_key' tidak ditemukan.");
-  // Fix newline di private key
   serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
 
   return serviceAccount;
@@ -54,7 +53,7 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// Fungsi acak (Shuffle) Fisher-Yates
+// Fungsi Acak Total (Fisher-Yates)
 const shuffle = arr => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -66,7 +65,6 @@ const shuffle = arr => {
 
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
-  // 1. Cek Firestore
   if (!db) {
     return res.status(500).json({
       error: true,
@@ -75,14 +73,9 @@ export default async function handler(req, res) {
     });
   }
 
-  /* ================== VALIDASI API KEY ================== */
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-
   if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({
-      error: true,
-      message: "API key invalid"
-    });
+    return res.status(401).json({ error: true, message: "API key invalid" });
   }
 
   try {
@@ -95,7 +88,6 @@ export default async function handler(req, res) {
     let followingIds = null;
     let isFollowingFallback = false;
 
-    // --- SETUP MODE FOLLOWING ---
     if (mode === "following") {
       if (!viewerId) isFollowingFallback = true;
       else {
@@ -103,29 +95,20 @@ export default async function handler(req, res) {
         if (!viewerSnap.exists) isFollowingFallback = true;
         else {
           const viewerData = viewerSnap.data() || {};
-          followingIds = Array.isArray(viewerData.following) ?
-            viewerData.following.slice(0, 10) : []; 
-          
+          followingIds = Array.isArray(viewerData.following) ? viewerData.following.slice(0, 10) : [];
           if (!followingIds.length) isFollowingFallback = true;
         }
       }
     }
 
-    // --- FILTER QUERY ---
     if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
-    if (mode === "user" && req.query.userId)
-      queryRef = queryRef.where("userId", "==", req.query.userId);
-    
+    if (mode === "user" && req.query.userId) queryRef = queryRef.where("userId", "==", req.query.userId);
     if (mode === "following" && followingIds?.length && !isFollowingFallback) {
       queryRef = queryRef.where("userId", "in", followingIds);
     }
 
-    // --- STRATEGI AGGRESSIVE SAMPLING ---
-    // Kita ambil 3x lipat dari yang diminta user.
-    // Misal user minta 10, kita ambil 30.
-    // 10 kita tampilkan (diacak), 20 sisanya kita "buang" (skip) agar next page langsung fresh beda waktu.
-    const fetchBufferSize = limitReq * 3; 
-    
+    // Ambil sedikit cadangan (misal limit 10 ambil 15) untuk diacak-acak
+    const fetchBufferSize = limitReq + 5; 
     queryRef = queryRef.orderBy("timestamp", "desc");
 
     if (cursorId) {
@@ -134,7 +117,6 @@ export default async function handler(req, res) {
     }
 
     const snap = await queryRef.limit(fetchBufferSize).get();
-
     if (snap.empty && mode !== "following") {
       return res.json({ posts: [], nextCursor: null });
     }
@@ -145,41 +127,15 @@ export default async function handler(req, res) {
       timestamp: safeMillis(d.data()?.timestamp)
     }));
 
-    /* ================== LOGIKA PENGACAKAN (THE MIXER) ================== */
+    /* ================== LOGIKA "FRESH & RANDOM" (ANTI-MONOTON) ================== */
     let finalPosts = [];
+    let postsForCursor = rawPosts.slice(0, limitReq); // Untuk patokan scroll
 
     if (mode === "home" || (mode === "following" && isFollowingFallback)) {
-      
-      const userPostCount = {};
-      const uniquePosts = [];
-
-      // 1. Filter Spam Ketat
-      for (const p of rawPosts) {
-        const uid = p.userId || "anon";
-        const count = userPostCount[uid] || 0;
-        // Hanya izinkan 1 post per user per batch load agar variatif
-        // Kecuali datanya sedikit, baru boleh 2.
-        const maxPerUser = rawPosts.length < 10 ? 2 : 1;
-        
-        if (count < maxPerUser) {
-          uniquePosts.push(p);
-          userPostCount[uid] = count + 1;
-        }
-      }
-
-      // 2. Fresh Boost Strategy
-      // Ambil 3 postingan teratas (Wajib Paling Baru) agar user tau update terkini
-      const freshCount = 3; 
-      
-      const superFresh = uniquePosts.slice(0, freshCount); // Tetap di atas
-      const toShuffle = uniquePosts.slice(freshCount);     // Sisanya
-
-      // Acak total sisa data
-      const shuffledRest = shuffle(toShuffle);
-
-      // Gabungkan
-      finalPosts = [...superFresh, ...shuffledRest];
-
+      // 1. Ambil batch data terbaru (misal 10-15 data teratas)
+      // 2. Acak semuanya tanpa ampun
+      // 3. Efeknya: Setiap refresh, 10 data terbaru ini akan bertukar posisi secara liar
+      finalPosts = shuffle(rawPosts.slice(0, limitReq)); 
     } 
     else if (mode === "popular") {
       finalPosts = shuffle(rawPosts);
@@ -188,21 +144,14 @@ export default async function handler(req, res) {
       finalPosts = rawPosts;
     }
 
-    // Potong sesuai limit request (misal 10)
     let postsResponse = finalPosts.slice(0, limitReq);
-
 
     /* ================== JOIN USER DATA ================== */
     const uids = [...new Set(postsResponse.map(p => p.userId).filter(Boolean))];
     const userMap = {};
-    
     if (uids.length) {
-      const userSnaps = await Promise.all(
-        uids.map(id => db.doc(`${USERS_PATH}/${id}`).get())
-      );
-      userSnaps.forEach(s => {
-        if (s.exists) userMap[s.id] = s.data();
-      });
+      const userSnaps = await Promise.all(uids.map(id => db.doc(`${USERS_PATH}/${id}`).get()));
+      userSnaps.forEach(s => { if (s.exists) userMap[s.id] = s.data(); });
     }
 
     postsResponse = postsResponse.map(p => {
@@ -218,38 +167,32 @@ export default async function handler(req, res) {
       };
     });
 
-    /* ================== EXTERNAL FEED ================== */
+    /* ================== EXTERNAL FEED (DIPERBAIKI) ================== */
     if (CONFIG.FEED_API_URL && CONFIG.FEED_API_KEY) {
       try {
         const extRes = await fetch(`${CONFIG.FEED_API_URL}?key=${CONFIG.FEED_API_KEY}`);
         if (extRes.ok) {
           const extData = await extRes.json();
-          if (Array.isArray(extData.posts)) {
-            // Selipkan data external di posisi acak (index 2 atau 3)
-            const insertIdx = Math.floor(Math.random() * 3) + 1;
-            postsResponse.splice(insertIdx, 0, ...extData.posts.slice(0,2));
-            // Potong lagi biar rapi
+          if (Array.isArray(extData.posts) && extData.posts.length > 0) {
+            // Selipkan di posisi acak agar tidak monoton
+            const randIdx = Math.floor(Math.random() * postsResponse.length);
+            postsResponse.splice(randIdx, 0, extData.posts[0]);
             postsResponse = postsResponse.slice(0, limitReq);
           }
         }
-      } catch (err) {
-        // Silent error
-      }
+      } catch (err) {}
     }
 
-    /* ================== NEXT CURSOR LOGIC (FAST FORWARD) ================== */
-    // KUNCI BIAR GAK MONOTON:
-    // Kita arahkan cursor ke dokumen TERAKHIR dari buffer besar yang kita ambil (fetchBufferSize).
-    // Artinya, saat user minta "Next Page", kita melompati data-data yang tidak terpilih tadi.
-    // Ini membuat timeline bergerak lebih cepat mundur ke belakang (24h -> 2 days ago -> dst).
-    
+    /* ================== NEXT CURSOR (KUNCI TIMELINE) ================== */
     let nextCursor = null;
-    
-    // Cek apakah data dari DB sebenarnya masih ada?
-    if (snap.docs.length >= limitReq) {
-      const lastDocInBuffer = snap.docs[snap.docs.length - 1];
-      nextCursor = lastDocInBuffer ? lastDocInBuffer.id : null;
+    if (postsForCursor.length > 0) {
+      // Kita ambil item terakhir dari urutan waktu ASLI (sebelum diacak)
+      // Ini supaya saat scroll ke bawah, datanya nyambung terus ke masa lalu
+      const lastItem = postsForCursor[postsForCursor.length - 1];
+      nextCursor = lastItem ? lastItem.id : null;
     }
+
+    if (snap.docs.length < limitReq) nextCursor = null;
 
     res.status(200).json({
       posts: postsResponse,
@@ -258,9 +201,6 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error("FEED_ERROR:", e);
-    res.status(500).json({
-      error: true,
-      message: e.message || "Unknown runtime error"
-    });
+    res.status(500).json({ error: true, message: e.message });
   }
 }
