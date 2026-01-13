@@ -73,22 +73,66 @@ const buildPostKey = p => {
 
 /* ===== FINAL GUARD (ID + CONTENT) ===== */
 const uniqueByContent = (posts, limit) => {
-  const seen = new Set();
+  const seenContent = new Set();
+  const seenIds = new Set(); // Tambahan: Guard ID biar gak ada ID kembar
   const result = [];
 
   for (const p of posts) {
-    if (!p) continue;
+    if (!p || !p.id) continue;
 
-    const key = `${p.id}|${buildPostKey(p)}`;
-    if (seen.has(key)) continue;
+    // Cek ID dulu (paling akurat)
+    if (seenIds.has(p.id)) continue;
+    
+    // Cek Konten (antisipasi spam)
+    const contentKey = buildPostKey(p);
+    if (seenContent.has(contentKey)) continue;
 
-    seen.add(key);
+    seenIds.add(p.id);
+    seenContent.add(contentKey);
     result.push(p);
 
     if (result.length >= limit) break;
   }
 
   return result;
+};
+
+/* ===== FETCH USER DATA HELPER (FIX FOTO PROFIL) ===== */
+const enrichPostsWithUsers = async (posts) => {
+  if (!posts || posts.length === 0) return [];
+  
+  // 1. Ambil semua User ID yang unik dari list postingan
+  const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
+  
+  if (userIds.length === 0) return posts;
+
+  // 2. Fetch data user (Batching max 10 untuk 'in' query, atau pakai Promise.all agar aman)
+  // Kita pakai Promise.all get() parallel agar support > 10 user sekaligus tanpa error batasan query
+  const userDocsPromise = userIds.map(uid => 
+    db.collection(USERS_PATH).doc(uid).get()
+      .then(snap => ({ id: uid, data: snap.exists ? snap.data() : null }))
+      .catch(() => ({ id: uid, data: null }))
+  );
+
+  const userResults = await Promise.all(userDocsPromise);
+  
+  // 3. Buat Map untuk akses cepat: userId -> userData
+  const userMap = {};
+  userResults.forEach(res => {
+    if (res.data) userMap[res.id] = res.data;
+  });
+
+  // 4. Tempel data user ke setiap post
+  return posts.map(p => {
+    const author = userMap[p.userId] || {};
+    return {
+      ...p,
+      // Pastikan field foto profil & nama tersedia di object post
+      authorName: author.displayName || author.username || p.authorName || "Anonymous",
+      authorAvatar: author.photoURL || author.avatar || p.authorAvatar || null,
+      authorVerified: author.isVerified || false
+    };
+  });
 };
 
 /* ================== HANDLER UTAMA ================== */
@@ -174,6 +218,7 @@ export default async function handler(req, res) {
         timestamp: safeMillis(d.data()?.timestamp)
       }));
 
+      // Fetch legacy
       const legacySnap = await db
         .collection(POSTS_PATH)
         .orderBy("timestamp", "desc")
@@ -190,7 +235,8 @@ export default async function handler(req, res) {
 
       allLegacy = allLegacy.filter(p => {
         if (freshIds.has(p.id)) return false;
-        if (cursorTimestamp && p.timestamp > cursorTimestamp) return false;
+        // FIX DUPLICATE: Jika cursor ada, pastikan legacy post lebih tua dari cursor
+        if (cursorTimestamp && p.timestamp >= cursorTimestamp) return false;
         return true;
       });
 
@@ -236,8 +282,12 @@ export default async function handler(req, res) {
       finalPosts = finalRawPosts;
     }
 
-    /* ===== FINAL DEDUP PALING AKHIR ===== */
-    const postsResponse = uniqueByContent(finalPosts, limitReq);
+    /* ===== FINAL PROCESS ===== */
+    // 1. Dedup Strict (Content + ID)
+    let processedPosts = uniqueByContent(finalPosts, limitReq);
+
+    // 2. ENRICH WITH USER PROFILES (Foto Profil Fix)
+    processedPosts = await enrichPostsWithUsers(processedPosts);
 
     let nextCursor = null;
     if (snapForCursor && !snapForCursor.empty) {
@@ -246,7 +296,7 @@ export default async function handler(req, res) {
     }
 
     res.status(200).json({
-      posts: postsResponse,
+      posts: processedPosts,
       nextCursor
     });
 
