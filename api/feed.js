@@ -1,5 +1,5 @@
 import admin from "firebase-admin";
-import { CONFIG } from './config.js'; // Import config rahasia backend
+import { CONFIG } from './config.js';
 
 /* ================== KONFIGURASI & INISIALISASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
@@ -7,6 +7,7 @@ const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY
 let db = null;
 let initError = null;
 
+// Path database kamu (JANGAN DIUBAH)
 const POSTS_PATH = "artifacts/default-app-id/public/data/posts";
 const USERS_PATH = "artifacts/default-app-id/public/data/userProfiles";
 
@@ -53,61 +54,27 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-const shuffle = arr => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+/* ===== 1. BERSIHKAN DUPLIKAT BERDASARKAN ID ===== */
+const uniqueById = (posts) => {
+  const seen = new Set();
+  return posts.filter(p => {
+    if (!p || !p.id) return false;
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    return true;
+  });
 };
 
-/* ===== CONTENT SIGNATURE ===== */
-const buildPostKey = p => {
-  const text = (p.text || p.caption || "").trim();
-  const media = Array.isArray(p.media)
-    ? p.media.join(",")
-    : (p.media || p.image || "");
-  return `${p.userId || "anon"}|${text}|${media}`;
-};
-
-/* ===== FINAL GUARD (ID + CONTENT) ===== */
-const uniqueByContent = (posts, limit) => {
-  const seenContent = new Set();
-  const seenIds = new Set(); // Tambahan: Guard ID biar gak ada ID kembar
-  const result = [];
-
-  for (const p of posts) {
-    if (!p || !p.id) continue;
-
-    // Cek ID dulu (paling akurat)
-    if (seenIds.has(p.id)) continue;
-    
-    // Cek Konten (antisipasi spam)
-    const contentKey = buildPostKey(p);
-    if (seenContent.has(contentKey)) continue;
-
-    seenIds.add(p.id);
-    seenContent.add(contentKey);
-    result.push(p);
-
-    if (result.length >= limit) break;
-  }
-
-  return result;
-};
-
-/* ===== FETCH USER DATA HELPER (FIX FOTO PROFIL) ===== */
+/* ===== 2. AMBIL DATA USER (FIX FOTO PROFIL) ===== */
 const enrichPostsWithUsers = async (posts) => {
   if (!posts || posts.length === 0) return [];
-  
-  // 1. Ambil semua User ID yang unik dari list postingan
+
+  // Ambil semua userId unik dari list post
   const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
-  
+
   if (userIds.length === 0) return posts;
 
-  // 2. Fetch data user (Batching max 10 untuk 'in' query, atau pakai Promise.all agar aman)
-  // Kita pakai Promise.all get() parallel agar support > 10 user sekaligus tanpa error batasan query
+  // Fetch data user secara parallel (Cepat)
   const userDocsPromise = userIds.map(uid => 
     db.collection(USERS_PATH).doc(uid).get()
       .then(snap => ({ id: uid, data: snap.exists ? snap.data() : null }))
@@ -116,21 +83,36 @@ const enrichPostsWithUsers = async (posts) => {
 
   const userResults = await Promise.all(userDocsPromise);
   
-  // 3. Buat Map untuk akses cepat: userId -> userData
+  // Buat map: userId -> userData
   const userMap = {};
   userResults.forEach(res => {
     if (res.data) userMap[res.id] = res.data;
   });
 
-  // 4. Tempel data user ke setiap post
+  // Tempel data user ke post
   return posts.map(p => {
-    const author = userMap[p.userId] || {};
+    const user = userMap[p.userId];
+    
+    // Jika user ketemu di DB, pakai datanya. 
+    // Jika tidak, pakai data sisa yang nempel di post (fallback).
+    // Jika tidak ada juga, biarkan null (Frontend yang handle).
+    
+    // Mapping field yang mungkin dipakai frontend
+    const finalName = user?.displayName || user?.username || user?.name || p.authorName || p.userName || null;
+    const finalAvatar = user?.photoURL || user?.avatar || user?.profilePic || p.authorAvatar || p.userAvatar || null;
+    const isVerified = user?.isVerified || p.authorVerified || false;
+
     return {
       ...p,
-      // Pastikan field foto profil & nama tersedia di object post
-      authorName: author.displayName || author.username || p.authorName || "Anonymous",
-      authorAvatar: author.photoURL || author.avatar || p.authorAvatar || null,
-      authorVerified: author.isVerified || false
+      // Standarisasi output ke frontend
+      authorName: finalName, 
+      authorAvatar: finalAvatar, 
+      authorVerified: isVerified,
+      
+      // Simpan field lama jaga-jaga frontend pakai nama lain
+      userAvatar: finalAvatar,
+      userName: finalName,
+      photoURL: finalAvatar
     };
   });
 };
@@ -138,165 +120,93 @@ const enrichPostsWithUsers = async (posts) => {
 /* ================== HANDLER UTAMA ================== */
 export default async function handler(req, res) {
   if (!db) {
-    return res.status(500).json({
-      error: true,
-      message: "Firestore not initialized",
-      details: initError
-    });
+    return res.status(500).json({ error: true, message: "Firestore not initialized" });
   }
 
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
-
   if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
-    return res.status(401).json({
-      error: true,
-      message: "API key invalid"
-    });
+    return res.status(401).json({ error: true, message: "API key invalid" });
   }
 
   try {
     const mode = req.query.mode || "home";
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
-    const viewerId = req.query.viewerId || null;
     const cursorId = req.query.cursor || null;
+    const viewerId = req.query.viewerId || null;
 
-    let cursorTimestamp = null;
+    let queryRef = db.collection(POSTS_PATH);
+    
+    // --- LOGIC FILTERING ---
+    if (mode === "meme") {
+      queryRef = queryRef.where("category", "==", "meme");
+    } 
+    else if (mode === "user" && req.query.userId) {
+      queryRef = queryRef.where("userId", "==", req.query.userId);
+    }
+    else if (mode === "following") {
+      // Logic Following sederhana
+      let followingIds = [];
+      if (viewerId) {
+        const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+        if (viewerSnap.exists) {
+          const vData = viewerSnap.data();
+          followingIds = Array.isArray(vData.following) ? vData.following.slice(0, 10) : [];
+        }
+      }
+      
+      if (followingIds.length > 0) {
+        queryRef = queryRef.where("userId", "in", followingIds);
+      } else {
+        // Fallback: Jika tidak follow siapa-siapa, kembalikan ke mode home biasa
+        // Tidak perlu filter where
+      }
+    }
 
+    // --- LOGIC UTAMA (ANTI DUPLIKAT & ANTI NYANGKUT) ---
+    // Gunakan murni Timestamp Descending.
+    // Ini menjamin postingan baru muncul duluan, dan saat scroll urutannya konsisten.
+    
+    let mainQuery = queryRef.orderBy("timestamp", "desc");
+
+    // Pagination Logic
     if (cursorId) {
       const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
       if (cursorDoc.exists) {
-        cursorTimestamp = safeMillis(cursorDoc.data()?.timestamp);
+        mainQuery = mainQuery.startAfter(cursorDoc);
+      } else {
+        // Jika cursor tidak valid (misal postingan dihapus), reset cursor (start from top)
+        // atau return kosong. Di sini kita return kosong agar frontend stop loading.
+        return res.status(200).json({ posts: [], nextCursor: null });
       }
     }
 
-    let queryRef = db.collection(POSTS_PATH);
-    let followingIds = null;
-    let isFollowingFallback = false;
+    // Eksekusi Query
+    const snapshot = await mainQuery.limit(limitReq).get();
 
-    if (mode === "following") {
-      if (!viewerId) isFollowingFallback = true;
-      else {
-        const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
-        if (!viewerSnap.exists) isFollowingFallback = true;
-        else {
-          const viewerData = viewerSnap.data() || {};
-          followingIds = Array.isArray(viewerData.following)
-            ? viewerData.following.slice(0, 10)
-            : [];
-          if (!followingIds.length) isFollowingFallback = true;
-        }
-      }
-    }
+    // Mapping awal data dari Firestore
+    let rawPosts = snapshot.docs.map(d => ({
+      ...d.data(),
+      id: d.id,
+      timestamp: safeMillis(d.data()?.timestamp)
+    }));
 
-    if (mode === "meme") queryRef = queryRef.where("category", "==", "meme");
-    if (mode === "user" && req.query.userId)
-      queryRef = queryRef.where("userId", "==", req.query.userId);
+    // --- FINAL PROCESSING ---
 
-    if (mode === "following" && followingIds?.length && !isFollowingFallback) {
-      queryRef = queryRef.where("userId", "in", followingIds);
-    }
+    // 1. Bersihkan Duplikat (Jaga-jaga)
+    let finalPosts = uniqueById(rawPosts);
 
-    const freshLimit = Math.ceil(limitReq / 2);
-    const legacyLimit = limitReq - freshLimit;
+    // 2. Tempel Data User (Foto Profil)
+    finalPosts = await enrichPostsWithUsers(finalPosts);
 
-    let finalRawPosts = [];
-    let snapForCursor = null;
-
-    if (mode === "home" || (mode === "following" && isFollowingFallback)) {
-      let freshQuery = queryRef.orderBy("timestamp", "desc");
-      if (cursorId) {
-        const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
-        if (cursorDoc.exists) freshQuery = freshQuery.startAfter(cursorDoc);
-      }
-
-      const freshSnap = await freshQuery.limit(freshLimit).get();
-      snapForCursor = freshSnap;
-
-      const freshPosts = freshSnap.docs.map(d => ({
-        ...d.data(),
-        id: d.id,
-        timestamp: safeMillis(d.data()?.timestamp)
-      }));
-
-      // Fetch legacy
-      const legacySnap = await db
-        .collection(POSTS_PATH)
-        .orderBy("timestamp", "desc")
-        .limit(100)
-        .get();
-
-      let allLegacy = legacySnap.docs.map(d => ({
-        ...d.data(),
-        id: d.id,
-        timestamp: safeMillis(d.data()?.timestamp)
-      }));
-
-      const freshIds = new Set(freshPosts.map(p => p.id));
-
-      allLegacy = allLegacy.filter(p => {
-        if (freshIds.has(p.id)) return false;
-        // FIX DUPLICATE: Jika cursor ada, pastikan legacy post lebih tua dari cursor
-        if (cursorTimestamp && p.timestamp >= cursorTimestamp) return false;
-        return true;
-      });
-
-      const randomLegacy = shuffle(allLegacy).slice(0, legacyLimit);
-
-      finalRawPosts = [...freshPosts, ...randomLegacy];
-    } else {
-      let normalQuery = queryRef.orderBy("timestamp", "desc");
-      if (cursorId) {
-        const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
-        if (cursorDoc.exists) normalQuery = normalQuery.startAfter(cursorDoc);
-      }
-
-      const normalSnap = await normalQuery.limit(limitReq).get();
-      snapForCursor = normalSnap;
-
-      finalRawPosts = normalSnap.docs.map(d => ({
-        ...d.data(),
-        id: d.id,
-        timestamp: safeMillis(d.data()?.timestamp)
-      }));
-    }
-
-    let finalPosts = [];
-
-    if (mode === "home" || (mode === "following" && isFollowingFallback)) {
-      const userPostCount = {};
-      const uniquePosts = [];
-
-      for (const p of finalRawPosts) {
-        const uid = p.userId || "anon";
-        const count = userPostCount[uid] || 0;
-        if (count < 2 || finalRawPosts.length < 5) {
-          uniquePosts.push(p);
-          userPostCount[uid] = count + 1;
-        }
-      }
-
-      finalPosts = shuffle(uniquePosts);
-    } else if (mode === "popular") {
-      finalPosts = shuffle(finalRawPosts);
-    } else {
-      finalPosts = finalRawPosts;
-    }
-
-    /* ===== FINAL PROCESS ===== */
-    // 1. Dedup Strict (Content + ID)
-    let processedPosts = uniqueByContent(finalPosts, limitReq);
-
-    // 2. ENRICH WITH USER PROFILES (Foto Profil Fix)
-    processedPosts = await enrichPostsWithUsers(processedPosts);
-
+    // 3. Set Next Cursor
     let nextCursor = null;
-    if (snapForCursor && !snapForCursor.empty) {
-      const lastDocInBatch = snapForCursor.docs[snapForCursor.docs.length - 1];
-      nextCursor = lastDocInBatch ? lastDocInBatch.id : null;
+    if (snapshot.docs.length > 0) {
+      // Ambil ID dokumen terakhir sebagai cursor berikutnya
+      nextCursor = snapshot.docs[snapshot.docs.length - 1].id;
     }
 
     res.status(200).json({
-      posts: processedPosts,
+      posts: finalPosts,
       nextCursor
     });
 
