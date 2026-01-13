@@ -46,7 +46,9 @@ try {
   initError = err.message || "Unknown Initialization Error";
 }
 
-/* ================== UTILITAS ================== */
+/* ================== UTILITAS (HELPER) ================== */
+
+// 1. Format Waktu Aman
 const safeMillis = ts => {
   if (!ts) return Date.now();
   if (typeof ts.toMillis === "function") return ts.toMillis();
@@ -54,7 +56,16 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-/* ===== 1. BERSIHKAN DUPLIKAT BERDASARKAN ID ===== */
+// 2. Acak Array (Shuffle) - Biar feed tidak membosankan
+const shuffleArray = (array) => {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+};
+
+// 3. Bersihkan Duplikat ID
 const uniqueById = (posts) => {
   const seen = new Set();
   return posts.filter(p => {
@@ -65,7 +76,22 @@ const uniqueById = (posts) => {
   });
 };
 
-/* ===== 2. AMBIL DATA USER (FIX FOTO PROFIL) ===== */
+// 4. Filter Spam User (Membatasi max postingan per user dalam 1 batch)
+const filterSpamUsers = (posts, maxPerUser = 2) => {
+  const userCount = {};
+  return posts.filter(p => {
+    const uid = p.userId || "anon";
+    if (!userCount[uid]) userCount[uid] = 0;
+    
+    if (userCount[uid] >= maxPerUser) {
+      return false; // Skip jika user ini sudah muncul terlalu sering di batch ini
+    }
+    userCount[uid]++;
+    return true;
+  });
+};
+
+/* ===== FUNGSI KRUSIAL: UPDATE FOTO PROFIL & DATA USER ===== */
 const enrichPostsWithUsers = async (posts) => {
   if (!posts || posts.length === 0) return [];
 
@@ -74,45 +100,46 @@ const enrichPostsWithUsers = async (posts) => {
 
   if (userIds.length === 0) return posts;
 
-  // Fetch data user secara parallel (Cepat)
-  const userDocsPromise = userIds.map(uid => 
+  // Fetch data user TERBARU dari database userProfiles
+  // Ini kunci agar foto profil selalu update walau postingan lama
+  const fetchPromises = userIds.map(uid => 
     db.collection(USERS_PATH).doc(uid).get()
       .then(snap => ({ id: uid, data: snap.exists ? snap.data() : null }))
       .catch(() => ({ id: uid, data: null }))
   );
 
-  const userResults = await Promise.all(userDocsPromise);
+  const userResults = await Promise.all(fetchPromises);
   
-  // Buat map: userId -> userData
+  // Buat kamus data user
   const userMap = {};
   userResults.forEach(res => {
     if (res.data) userMap[res.id] = res.data;
   });
 
-  // Tempel data user ke post
+  // Gabungkan ke postingan
   return posts.map(p => {
-    const user = userMap[p.userId];
+    const freshUser = userMap[p.userId];
     
-    // Jika user ketemu di DB, pakai datanya. 
-    // Jika tidak, pakai data sisa yang nempel di post (fallback).
-    // Jika tidak ada juga, biarkan null (Frontend yang handle).
+    // Logika Prioritas: Data Terbaru DB > Data Lama di Post > Default Null
+    const finalName = freshUser?.displayName || freshUser?.username || freshUser?.name || p.authorName || "User";
     
-    // Mapping field yang mungkin dipakai frontend
-    const finalName = user?.displayName || user?.username || user?.name || p.authorName || p.userName || null;
-    const finalAvatar = user?.photoURL || user?.avatar || user?.profilePic || p.authorAvatar || p.userAvatar || null;
-    const isVerified = user?.isVerified || p.authorVerified || false;
+    // Cek berbagai kemungkinan nama field foto di database kamu
+    const finalAvatar = freshUser?.photoURL || freshUser?.avatar || freshUser?.profilePic || freshUser?.image || p.authorAvatar || p.userAvatar || null;
+    
+    const isVerified = freshUser?.isVerified ?? p.authorVerified ?? false;
 
     return {
       ...p,
-      // Standarisasi output ke frontend
+      // Timpa data lama dengan data segar
       authorName: finalName, 
-      authorAvatar: finalAvatar, 
-      authorVerified: isVerified,
+      userName: finalName,      // Untuk kompatibilitas frontend
       
-      // Simpan field lama jaga-jaga frontend pakai nama lain
-      userAvatar: finalAvatar,
-      userName: finalName,
-      photoURL: finalAvatar
+      authorAvatar: finalAvatar, 
+      userAvatar: finalAvatar,  // Untuk kompatibilitas frontend
+      photoURL: finalAvatar,    // Untuk kompatibilitas frontend
+      
+      authorVerified: isVerified,
+      isVerified: isVerified
     };
   });
 };
@@ -123,6 +150,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: true, message: "Firestore not initialized" });
   }
 
+  // Cek API Key
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
@@ -130,84 +158,126 @@ export default async function handler(req, res) {
 
   try {
     const mode = req.query.mode || "home";
+    const searchQuery = req.query.q || req.query.search || null;
+    // Ambil limit, default 10. Kita akan tarik lebih banyak untuk dicampur.
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const cursorId = req.query.cursor || null;
     const viewerId = req.query.viewerId || null;
 
-    let queryRef = db.collection(POSTS_PATH);
-    
-    // --- LOGIC FILTERING ---
-    if (mode === "meme") {
-      queryRef = queryRef.where("category", "==", "meme");
-    } 
-    else if (mode === "user" && req.query.userId) {
-      queryRef = queryRef.where("userId", "==", req.query.userId);
-    }
-    else if (mode === "following") {
-      // Logic Following sederhana
-      let followingIds = [];
-      if (viewerId) {
-        const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
-        if (viewerSnap.exists) {
-          const vData = viewerSnap.data();
-          followingIds = Array.isArray(vData.following) ? vData.following.slice(0, 10) : [];
-        }
-      }
-      
-      if (followingIds.length > 0) {
-        queryRef = queryRef.where("userId", "in", followingIds);
-      } else {
-        // Fallback: Jika tidak follow siapa-siapa, kembalikan ke mode home biasa
-        // Tidak perlu filter where
-      }
-    }
-
-    // --- LOGIC UTAMA (ANTI DUPLIKAT & ANTI NYANGKUT) ---
-    // Gunakan murni Timestamp Descending.
-    // Ini menjamin postingan baru muncul duluan, dan saat scroll urutannya konsisten.
-    
-    let mainQuery = queryRef.orderBy("timestamp", "desc");
-
-    // Pagination Logic
-    if (cursorId) {
-      const cursorDoc = await db.collection(POSTS_PATH).doc(cursorId).get();
-      if (cursorDoc.exists) {
-        mainQuery = mainQuery.startAfter(cursorDoc);
-      } else {
-        // Jika cursor tidak valid (misal postingan dihapus), reset cursor (start from top)
-        // atau return kosong. Di sini kita return kosong agar frontend stop loading.
-        return res.status(200).json({ posts: [], nextCursor: null });
-      }
-    }
-
-    // Eksekusi Query
-    const snapshot = await mainQuery.limit(limitReq).get();
-
-    // Mapping awal data dari Firestore
-    let rawPosts = snapshot.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      timestamp: safeMillis(d.data()?.timestamp)
-    }));
-
-    // --- FINAL PROCESSING ---
-
-    // 1. Bersihkan Duplikat (Jaga-jaga)
-    let finalPosts = uniqueById(rawPosts);
-
-    // 2. Tempel Data User (Foto Profil)
-    finalPosts = await enrichPostsWithUsers(finalPosts);
-
-    // 3. Set Next Cursor
+    let postsCollection = db.collection(POSTS_PATH);
+    let rawPosts = [];
     let nextCursor = null;
-    if (snapshot.docs.length > 0) {
-      // Ambil ID dokumen terakhir sebagai cursor berikutnya
-      nextCursor = snapshot.docs[snapshot.docs.length - 1].id;
+
+    // --- MODE 1: PENCARIAN (SEARCH DIPERKUAT) ---
+    if (searchQuery) {
+        // Karena Firestore tidak support full-text search native yang kuat,
+        // Kita gunakan trik "keywords" array jika ada, atau pencarian text field
+        // Alternatif: Tarik data agak banyak lalu filter manual (mahal tapi akurat)
+        
+        // Coba cari berdasarkan text/caption
+        const searchSnapshot = await postsCollection
+            .where('text', '>=', searchQuery)
+            .where('text', '<=', searchQuery + '\uf8ff')
+            .limit(limitReq)
+            .get();
+            
+        // Jika DB punya field 'keywords' (array), bisa pakai 'array-contains'
+        // const keywordSnapshot = await postsCollection.where('keywords', 'array-contains', searchQuery).get();
+
+        rawPosts = searchSnapshot.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
     }
 
+    // --- MODE 2: USER PROFILE / MEME / FOLLOWING (LOGIC BIASA) ---
+    else if (mode === "user" || mode === "meme" || mode === "following") {
+        let query = postsCollection.orderBy("timestamp", "desc");
+
+        if (mode === "meme") query = query.where("category", "==", "meme");
+        if (mode === "user" && req.query.userId) query = query.where("userId", "==", req.query.userId);
+        
+        if (mode === "following" && viewerId) {
+            const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
+            const following = viewerSnap.exists ? (viewerSnap.data().following || []) : [];
+            // Batas Firestore "IN" query adalah 10, ambil 10 terakhir
+            if (following.length > 0) {
+                query = query.where("userId", "in", following.slice(0, 10));
+            } else {
+                // Kalau gak follow siapa2, return kosong
+                return res.status(200).json({ posts: [], nextCursor: null });
+            }
+        }
+
+        if (cursorId) {
+            const doc = await postsCollection.doc(cursorId).get();
+            if (doc.exists) query = query.startAfter(doc);
+        }
+
+        const snap = await query.limit(limitReq).get();
+        rawPosts = snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
+        if (snap.docs.length > 0) nextCursor = snap.docs[snap.docs.length - 1].id;
+    }
+
+    // --- MODE 3: HOME FEED (VARIASI BARU + LAMA + ACAK) ---
+    else {
+        // Strategi: Tarik 2 Jenis Data
+        // 1. Data Terbaru (Sequential untuk pagination) -> 60% dari limit
+        // 2. Data Random/Lama (Untuk variasi) -> 40% dari limit
+        
+        const freshLimit = Math.ceil(limitReq * 0.6); 
+        const randomLimit = Math.floor(limitReq * 0.4);
+
+        // A. Query Terbaru (Fresh)
+        let freshQuery = postsCollection.orderBy("timestamp", "desc");
+        if (cursorId) {
+            const doc = await postsCollection.doc(cursorId).get();
+            if (doc.exists) freshQuery = freshQuery.startAfter(doc);
+        }
+        const freshSnap = await freshQuery.limit(freshLimit).get();
+        
+        // Simpan cursor HANYA berdasarkan postingan fresh agar scroll tidak loncat
+        if (freshSnap.docs.length > 0) {
+            nextCursor = freshSnap.docs[freshSnap.docs.length - 1].id;
+        }
+
+        // B. Query Random/Lama (Untuk variasi biar ga bosan)
+        // Kita ambil postingan sebelum waktu acak dalam 1 tahun terakhir
+        const randomTimeOffset = Math.floor(Math.random() * 31536000000); // 1 Tahun dalam milidetik
+        const randomTimestamp = Date.now() - randomTimeOffset;
+        
+        const randomSnap = await postsCollection
+            .where("timestamp", "<", randomTimestamp)
+            .orderBy("timestamp", "desc")
+            .limit(randomLimit)
+            .get();
+
+        // Gabungkan Hasil A + B
+        const freshPosts = freshSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
+        const randomPosts = randomSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
+
+        rawPosts = [...freshPosts, ...randomPosts];
+
+        // LOGIKA PENGACAKAN:
+        // Kita acak posisinya biar user merasa "Fresh" dan tidak monoton
+        rawPosts = shuffleArray(rawPosts);
+    }
+
+    /* ================== PROCESSING AKHIR (CLEANING) ================== */
+
+    // 1. Buang Duplikat (Wajib, karena gabungan query bisa saja tumpang tindih)
+    let processedPosts = uniqueById(rawPosts);
+
+    // 2. Filter Spam (Max 2 postingan per user per tarikan)
+    // Biar feed tidak isinya orang itu-itu saja
+    processedPosts = filterSpamUsers(processedPosts, 2);
+
+    // 3. ENRICH: Perbaiki Foto Profil & Data User (INTI MASALAH PERTAMA)
+    // Ini akan mengambil foto profil TERBARU langsung dari userProfiles
+    processedPosts = await enrichPostsWithUsers(processedPosts);
+
+    // Kembalikan Response
     res.status(200).json({
-      posts: finalPosts,
-      nextCursor
+      posts: processedPosts,
+      nextCursor: nextCursor, // Cursor tetap mengarah ke flow postingan baru
+      count: processedPosts.length
     });
 
   } catch (e) {
