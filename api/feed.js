@@ -4,6 +4,9 @@ import { CONFIG } from './config.js';
 /* ================== KONFIGURASI & INISIALISASI ================== */
 const REQUIRED_API_KEY = process.env.FEED_API_KEY?.trim() || CONFIG.FEED_API_KEY || null;
 
+// URL Default jika user tidak punya foto / error (Gambar User Polos Abu-abu)
+const DEFAULT_AVATAR = "https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_1280.png";
+
 let db = null;
 let initError = null;
 
@@ -56,7 +59,7 @@ const safeMillis = ts => {
   return Number(ts) || Date.now();
 };
 
-// 2. Acak Array (Shuffle) - Biar feed tidak membosankan
+// 2. Acak Array (Shuffle) - Biar feed variatif
 const shuffleArray = (array) => {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -76,7 +79,7 @@ const uniqueById = (posts) => {
   });
 };
 
-// 4. Filter Spam User (Membatasi max postingan per user dalam 1 batch)
+// 4. Filter Spam User (Max 2 post per user per batch)
 const filterSpamUsers = (posts, maxPerUser = 2) => {
   const userCount = {};
   return posts.filter(p => {
@@ -84,24 +87,21 @@ const filterSpamUsers = (posts, maxPerUser = 2) => {
     if (!userCount[uid]) userCount[uid] = 0;
     
     if (userCount[uid] >= maxPerUser) {
-      return false; // Skip jika user ini sudah muncul terlalu sering di batch ini
+      return false; // Skip
     }
     userCount[uid]++;
     return true;
   });
 };
 
-/* ===== FUNGSI KRUSIAL: UPDATE FOTO PROFIL & DATA USER ===== */
+/* ===== FUNGSI INTI: FORCE UPDATE DATA USER ===== */
 const enrichPostsWithUsers = async (posts) => {
   if (!posts || posts.length === 0) return [];
 
-  // Ambil semua userId unik dari list post
   const userIds = [...new Set(posts.map(p => p.userId).filter(Boolean))];
-
   if (userIds.length === 0) return posts;
 
-  // Fetch data user TERBARU dari database userProfiles
-  // Ini kunci agar foto profil selalu update walau postingan lama
+  // Fetch data user TERBARU
   const fetchPromises = userIds.map(uid => 
     db.collection(USERS_PATH).doc(uid).get()
       .then(snap => ({ id: uid, data: snap.exists ? snap.data() : null }))
@@ -109,38 +109,69 @@ const enrichPostsWithUsers = async (posts) => {
   );
 
   const userResults = await Promise.all(fetchPromises);
-  
-  // Buat kamus data user
   const userMap = {};
   userResults.forEach(res => {
     if (res.data) userMap[res.id] = res.data;
   });
 
-  // Gabungkan ke postingan
   return posts.map(p => {
     const freshUser = userMap[p.userId];
     
-    // Logika Prioritas: Data Terbaru DB > Data Lama di Post > Default Null
-    const finalName = freshUser?.displayName || freshUser?.username || freshUser?.name || p.authorName || "User";
+    // 1. Ambil Nama (Prioritas: DB Terbaru > Postingan Lama > Default)
+    const finalName = freshUser?.displayName || freshUser?.username || freshUser?.name || p.authorName || p.userName || "Unknown User";
     
-    // Cek berbagai kemungkinan nama field foto di database kamu
-    const finalAvatar = freshUser?.photoURL || freshUser?.avatar || freshUser?.profilePic || freshUser?.image || p.authorAvatar || p.userAvatar || null;
+    // 2. Ambil Foto (Prioritas: DB Terbaru > Postingan Lama > DEFAULT AVATAR)
+    // Kita cek semua kemungkinan key di database
+    let rawAvatar = freshUser?.photoURL || freshUser?.avatar || freshUser?.profilePic || freshUser?.image || freshUser?.profileImage || p.authorAvatar || p.userAvatar;
     
+    // Jika masih kosong/null, PAKSA pakai Default Avatar
+    const finalAvatar = rawAvatar ? rawAvatar : DEFAULT_AVATAR;
+
     const isVerified = freshUser?.isVerified ?? p.authorVerified ?? false;
 
-    return {
+    // 3. KONSTRUKSI OBJEK BARU
+    // Kita timpa di level ROOT dan level OBJECT (author/user) agar frontend pasti membacanya
+    
+    // Copy postingan asli
+    const updatedPost = { 
       ...p,
-      // Timpa data lama dengan data segar
-      authorName: finalName, 
-      userName: finalName,      // Untuk kompatibilitas frontend
+      // Update Root Fields (Standar Umum)
+      authorName: finalName,
+      userName: finalName,
+      displayName: finalName,
       
-      authorAvatar: finalAvatar, 
-      userAvatar: finalAvatar,  // Untuk kompatibilitas frontend
-      photoURL: finalAvatar,    // Untuk kompatibilitas frontend
+      authorAvatar: finalAvatar,
+      userAvatar: finalAvatar,
+      photoURL: finalAvatar,
+      avatar: finalAvatar,       // Sering dipakai frontend simple
       
       authorVerified: isVerified,
       isVerified: isVerified
     };
+
+    // Update Nested Objects (Jika frontend membaca post.author.avatar)
+    if (!updatedPost.author) updatedPost.author = {};
+    updatedPost.author = {
+        ...updatedPost.author,
+        name: finalName,
+        displayName: finalName,
+        avatar: finalAvatar,
+        photoURL: finalAvatar,
+        isVerified: isVerified
+    };
+
+    // Update Nested Objects (Jika frontend membaca post.user.avatar)
+    if (!updatedPost.user) updatedPost.user = {};
+    updatedPost.user = {
+        ...updatedPost.user,
+        name: finalName,
+        displayName: finalName,
+        avatar: finalAvatar,
+        photoURL: finalAvatar,
+        isVerified: isVerified
+    };
+
+    return updatedPost;
   });
 };
 
@@ -150,7 +181,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: true, message: "Firestore not initialized" });
   }
 
-  // Cek API Key
   const apiKey = String(req.headers["x-api-key"] || req.query.apiKey || "").trim();
   if (REQUIRED_API_KEY && apiKey && apiKey !== REQUIRED_API_KEY) {
     return res.status(401).json({ error: true, message: "API key invalid" });
@@ -159,7 +189,6 @@ export default async function handler(req, res) {
   try {
     const mode = req.query.mode || "home";
     const searchQuery = req.query.q || req.query.search || null;
-    // Ambil limit, default 10. Kita akan tarik lebih banyak untuk dicampur.
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
     const cursorId = req.query.cursor || null;
     const viewerId = req.query.viewerId || null;
@@ -168,64 +197,45 @@ export default async function handler(req, res) {
     let rawPosts = [];
     let nextCursor = null;
 
-    // --- MODE 1: PENCARIAN (SEARCH DIPERKUAT) ---
+    // --- MODE SEARCH ---
     if (searchQuery) {
-        // Karena Firestore tidak support full-text search native yang kuat,
-        // Kita gunakan trik "keywords" array jika ada, atau pencarian text field
-        // Alternatif: Tarik data agak banyak lalu filter manual (mahal tapi akurat)
-        
-        // Coba cari berdasarkan text/caption
         const searchSnapshot = await postsCollection
             .where('text', '>=', searchQuery)
             .where('text', '<=', searchQuery + '\uf8ff')
             .limit(limitReq)
             .get();
-            
-        // Jika DB punya field 'keywords' (array), bisa pakai 'array-contains'
-        // const keywordSnapshot = await postsCollection.where('keywords', 'array-contains', searchQuery).get();
-
         rawPosts = searchSnapshot.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
     }
 
-    // --- MODE 2: USER PROFILE / MEME / FOLLOWING (LOGIC BIASA) ---
+    // --- MODE USER / MEME / FOLLOWING ---
     else if (mode === "user" || mode === "meme" || mode === "following") {
         let query = postsCollection.orderBy("timestamp", "desc");
-
         if (mode === "meme") query = query.where("category", "==", "meme");
         if (mode === "user" && req.query.userId) query = query.where("userId", "==", req.query.userId);
-        
         if (mode === "following" && viewerId) {
             const viewerSnap = await db.doc(`${USERS_PATH}/${viewerId}`).get();
             const following = viewerSnap.exists ? (viewerSnap.data().following || []) : [];
-            // Batas Firestore "IN" query adalah 10, ambil 10 terakhir
             if (following.length > 0) {
                 query = query.where("userId", "in", following.slice(0, 10));
             } else {
-                // Kalau gak follow siapa2, return kosong
                 return res.status(200).json({ posts: [], nextCursor: null });
             }
         }
-
         if (cursorId) {
             const doc = await postsCollection.doc(cursorId).get();
             if (doc.exists) query = query.startAfter(doc);
         }
-
         const snap = await query.limit(limitReq).get();
         rawPosts = snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
         if (snap.docs.length > 0) nextCursor = snap.docs[snap.docs.length - 1].id;
     }
 
-    // --- MODE 3: HOME FEED (VARIASI BARU + LAMA + ACAK) ---
+    // --- MODE HOME (VARIASI MIXED: 60% BARU / 40% RANDOM LAMA) ---
     else {
-        // Strategi: Tarik 2 Jenis Data
-        // 1. Data Terbaru (Sequential untuk pagination) -> 60% dari limit
-        // 2. Data Random/Lama (Untuk variasi) -> 40% dari limit
-        
         const freshLimit = Math.ceil(limitReq * 0.6); 
         const randomLimit = Math.floor(limitReq * 0.4);
 
-        // A. Query Terbaru (Fresh)
+        // 1. Ambil Postingan FRESH (Terbaru)
         let freshQuery = postsCollection.orderBy("timestamp", "desc");
         if (cursorId) {
             const doc = await postsCollection.doc(cursorId).get();
@@ -233,50 +243,43 @@ export default async function handler(req, res) {
         }
         const freshSnap = await freshQuery.limit(freshLimit).get();
         
-        // Simpan cursor HANYA berdasarkan postingan fresh agar scroll tidak loncat
+        // Simpan cursor dari yang fresh
         if (freshSnap.docs.length > 0) {
             nextCursor = freshSnap.docs[freshSnap.docs.length - 1].id;
         }
 
-        // B. Query Random/Lama (Untuk variasi biar ga bosan)
-        // Kita ambil postingan sebelum waktu acak dalam 1 tahun terakhir
-        const randomTimeOffset = Math.floor(Math.random() * 31536000000); // 1 Tahun dalam milidetik
+        // 2. Ambil Postingan RANDOM (Lama)
+        const randomTimeOffset = Math.floor(Math.random() * 31536000000); 
         const randomTimestamp = Date.now() - randomTimeOffset;
-        
         const randomSnap = await postsCollection
             .where("timestamp", "<", randomTimestamp)
             .orderBy("timestamp", "desc")
             .limit(randomLimit)
             .get();
 
-        // Gabungkan Hasil A + B
         const freshPosts = freshSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
         const randomPosts = randomSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: safeMillis(d.data()?.timestamp) }));
 
+        // Gabung & Acak
         rawPosts = [...freshPosts, ...randomPosts];
-
-        // LOGIKA PENGACAKAN:
-        // Kita acak posisinya biar user merasa "Fresh" dan tidak monoton
         rawPosts = shuffleArray(rawPosts);
     }
 
-    /* ================== PROCESSING AKHIR (CLEANING) ================== */
+    /* ================== PROCESSING AKHIR ================== */
 
-    // 1. Buang Duplikat (Wajib, karena gabungan query bisa saja tumpang tindih)
+    // 1. Hapus Duplikat
     let processedPosts = uniqueById(rawPosts);
 
-    // 2. Filter Spam (Max 2 postingan per user per tarikan)
-    // Biar feed tidak isinya orang itu-itu saja
+    // 2. Anti Spam (Max 2 post per user)
     processedPosts = filterSpamUsers(processedPosts, 2);
 
-    // 3. ENRICH: Perbaiki Foto Profil & Data User (INTI MASALAH PERTAMA)
-    // Ini akan mengambil foto profil TERBARU langsung dari userProfiles
+    // 3. FIX PROFILE PICTURE (SUPER UPDATE)
+    // Memastikan setiap postingan punya data user terbaru dan foto default jika kosong
     processedPosts = await enrichPostsWithUsers(processedPosts);
 
-    // Kembalikan Response
     res.status(200).json({
       posts: processedPosts,
-      nextCursor: nextCursor, // Cursor tetap mengarah ke flow postingan baru
+      nextCursor: nextCursor,
       count: processedPosts.length
     });
 
