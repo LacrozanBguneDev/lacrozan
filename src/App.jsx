@@ -53,7 +53,7 @@ import {
     Hash, Tag, Wifi, Smartphone, Radio, ImageOff, Music, Mic, Play, Pause, Volume2, Minimize2,
     Scale, FileText, ChevronLeft, CornerDownRight, Reply, Ban, UserX, WifiOff, Signal, Gift as GiftIcon,
     Bug, ArrowUp, Move, ChevronDown, ChevronUp, MinusCircle, RefreshCcw, LayoutGrid, TimerReset,
-    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical
+    WifiHigh, Menu, MessageCircle, FileCheck, MapPin, Check as CheckIcon, Copy, Plus, MoreVertical, AtSign
 } from 'lucide-react';
 
 // DEBUGGING: Matikan silent mode agar error firebase terlihat di console
@@ -180,6 +180,9 @@ const CONFIG = {
   DEV_PHOTO: "https://c.termai.cc/i6/EAb.jpg",
   API_ENDPOINT: "/api/feed"
 };
+
+// URL GAMBAR KREATA ROOM (SESUAI REQUEST)
+const KREATA_ROOM_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
 // Mutable Globals (untuk kompatibilitas dengan kode lama)
 let APP_NAME = CONFIG.APP_NAME;
@@ -374,6 +377,49 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
     } catch (error) { console.error("Gagal mengirim notifikasi:", error); }
 };
 
+// HELPER: Proses Mentions (@User) untuk Notifikasi
+const processMentions = async (text, currentUser, postId, type = 'mention') => {
+    if (!text || !currentUser || !db) return;
+    
+    // Regex untuk menangkap @username
+    const mentionRegex = /@(\w+)/g;
+    const matches = text.match(mentionRegex);
+    
+    if (!matches) return;
+    
+    // Keamanan Anti-Spam: Batas Maksimal 5 Mention per Post/Komen
+    const uniqueMentions = [...new Set(matches)].slice(0, 5);
+    
+    for (const mention of uniqueMentions) {
+        const username = mention.substring(1); // Hilangkan @
+        
+        try {
+            // Cari user berdasarkan username (perlu query karena kita cuma punya username)
+            const usersRef = collection(db, getPublicCollection('userProfiles'));
+            const q = query(usersRef, where('username', '==', username), limit(1));
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+                const targetUserDoc = querySnapshot.docs[0];
+                const targetUserId = targetUserDoc.id;
+                
+                // Jangan notifikasi diri sendiri
+                if (targetUserId !== currentUser.uid) {
+                    await sendNotification(
+                        targetUserId, 
+                        type, 
+                        `menandai Anda dalam sebuah ${type === 'mention_comment' ? 'komentar' : 'postingan'}.`, 
+                        currentUser, 
+                        postId
+                    );
+                }
+            }
+        } catch (e) {
+            console.error("Gagal memproses mention:", e);
+        }
+    }
+};
+
 // FIX: Format Waktu Relatif (Update 2025)
 const formatTimeAgo = (timestamp) => {
     if (!timestamp) return { relative: 'Baru saja', full: '' };
@@ -488,6 +534,9 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
                     <div className="text-[10px] font-bold text-gray-400 px-4 mb-2 uppercase tracking-wider">Navigasi Utama</div>
                     <SidebarItem icon={Home} label="Beranda" onClick={() => { setPage('home'); onClose(); }} />
+                    {/* FITUR BARU: Kreata Room di Sidebar */}
+                    <SidebarItem icon={Gamepad2} label="Kreata Room" onClick={() => { setPage('kreata'); onClose(); }} />
+                    
                     <SidebarItem icon={User} label="Profil Saya" onClick={() => { setPage('profile'); onClose(); }} />
                     <SidebarItem icon={Trophy} label="Top Followers" onClick={() => { setPage('leaderboard'); onClose(); }} />
                     
@@ -1306,7 +1355,7 @@ const ModernVideoPlayer = ({ src }) => {
 const SplashScreen = () => (
     <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[url('https://c.termai.cc/i120/womQPBg.jpg')] bg-cover bg-center">
         {/* Overlay Blur & Color */}
-        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm"></div>
+        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-md"></div>
         
         <div className="relative z-10 flex flex-col items-center">
             <div className="relative mb-8 animate-bounce-slow">
@@ -1390,14 +1439,18 @@ const renderMarkdown = (text, onHashtagClick) => {
     
     // 4. Hashtags
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
+    
+    // 5. Mentions (@username) - Link ke profil (Kosmetik/Navigasi)
+    html = html.replace(/@(\w+)/g, '<span class="text-sky-600 font-bold cursor-pointer hover:underline">@$1</span>');
+    
     html = html.replace(/\n/g, '<br>');
 
-    // 5. Kembalikan MD Links dari token
+    // 6. Kembalikan MD Links dari token
     linkTokens.forEach(item => {
         html = html.replace(item.token, item.value);
     });
 
-    // 6. Sanitasi Akhir dengan DOMPurify (Hapus XSS)
+    // 7. Sanitasi Akhir dengan DOMPurify (Hapus XSS)
     const cleanHtml = DOMPurify.sanitize(html, {
         ADD_ATTR: ['target', 'class', 'data-tag'], 
         ADD_TAGS: ['svg', 'path', 'polyline', 'line'], 
@@ -1766,6 +1819,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     const isDeveloper = post.user?.email === DEVELOPER_EMAIL; 
     const isMeme = post.category === 'meme';
+    
+    // FITUR BARU: Kreata Room Logic
+    const isKreata = post.content && post.content.toLowerCase().includes('#kreata');
+
     const isFollowing = profile ? (profile.following || []).includes(post.userId) : false;
     const isFollowedByTarget = profile ? (profile.followers || []).includes(post.userId) : false;
     const isFriend = isFollowing && isFollowedByTarget;
@@ -1826,6 +1883,9 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             await addDoc(collection(db, getPublicCollection('comments')), commentData);
             await updateDoc(doc(db, getPublicCollection('posts'), post.id), { commentsCount: increment(1) });
             
+            // FITUR BARU: Process Mention Notif di Komentar
+            await processMentions(newComment, profile, post.id, 'mention_comment');
+
             // Optimistic update
             if(onUpdate) { onUpdate(post.id, { commentsCount: (post.commentsCount || 0) + 1 }); }
 
@@ -1865,7 +1925,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             <div className="flex flex-col">
                 <div className={`p-3 rounded-xl text-xs flex flex-col group transition ${isReply ? 'ml-8 bg-gray-100 dark:bg-gray-800 border-l-2 border-sky-300 mb-2' : 'bg-gray-50 dark:bg-gray-900'}`}>
                     <div className="flex justify-between items-start">
-                        <div className="flex-1"><div className="flex items-center gap-2 mb-1"><span className="font-bold text-gray-800 dark:text-gray-200">{c.username || 'User'}</span>{c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}</div><span className="text-gray-600 dark:text-gray-400 leading-relaxed block">{c.text}</span></div>
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-gray-800 dark:text-gray-200">{c.username || 'User'}</span>
+                                {c.replyToUsername && isReply && <span className="flex items-center text-sky-600 text-[10px]"><CornerDownRight size={10} className="mr-0.5"/> {c.replyToUsername}</span>}
+                            </div>
+                            {/* FIX: Render text komentar dengan markdown agar mention bisa diklik */}
+                            <div className="text-gray-600 dark:text-gray-400 leading-relaxed block">
+                                {renderMarkdown(c.text, onHashtagClick)}
+                            </div>
+                        </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">{!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div>
                     </div>
                 </div>
@@ -1877,21 +1946,47 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 
     // UI REDESIGN: Modern Feed Style (Facebook/Threads)
     return (
-        <div className="bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors">
+        <div className={`bg-white dark:bg-gray-800 md:rounded-2xl md:shadow-sm md:border md:border-gray-100 md:dark:border-gray-700 md:mb-4 border-b border-gray-100 dark:border-gray-800 p-4 mb-2 animate-in fade-in transition-colors ${isKreata ? 'border-2 border-[#25D366] shadow-[0_0_15px_rgba(37,211,102,0.15)] rounded-2xl' : ''}`}>
             {post.isShort && <div className="mb-2"><span className="bg-black text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center w-fit"><Zap size={8} className="mr-1 text-yellow-400"/> SHORT</span></div>}
             
             <div className="flex justify-between items-start mb-3">
                 <div className="flex gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer" onClick={() => goToProfile(post.userId)}>
-                        {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong */}
-                        <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
-                    </div>
-                    <div>
-                        <div className="flex items-center gap-1">
-                            <h4 className="font-bold text-sm text-gray-900 dark:text-white cursor-pointer hover:underline" onClick={() => goToProfile(post.userId)}>{post.user?.username || 'User'}</h4>
-                            <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
+                    {/* AVATAR LOGIC: Handle Kreata Room Double Avatar */}
+                    {isKreata ? (
+                        <div className="relative cursor-pointer" onClick={() => goToProfile(post.userId)}>
+                            <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden border-2 border-white dark:border-gray-800 shadow-sm relative z-10">
+                                <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
+                            </div>
+                            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full overflow-hidden border-2 border-white dark:border-gray-800 shadow-md z-20 bg-white">
+                                <img src={KREATA_ROOM_IMG} className="w-full h-full object-cover"/>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                    ) : (
+                        <div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden cursor-pointer" onClick={() => goToProfile(post.userId)}>
+                            {/* FIX: Profil selalu muncul, fallback ke "?" jika kosong */}
+                            <Avatar src={post.user?.photoURL} fallbackText={post.user?.username || "?"} className="w-full h-full object-cover"/>
+                        </div>
+                    )}
+
+                    <div>
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-1">
+                                <h4 className="font-bold text-sm text-gray-900 dark:text-white cursor-pointer hover:underline" onClick={() => goToProfile(post.userId)}>{post.user?.username || 'User'}</h4>
+                                <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
+                            </div>
+                            
+                            {/* KREATA ROOM SUBTITLE */}
+                            {isKreata && (
+                                <button 
+                                    onClick={() => onHashtagClick('kreata')}
+                                    className="text-[10px] text-gray-500 hover:text-[#25D366] hover:underline text-left -mt-0.5 mb-0.5 font-medium flex items-center gap-1"
+                                >
+                                    postingan ini berada di Kreata Room <ChevronRight size={10}/>
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-0.5">
                              {userBadge && (
                                 <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold ${userBadge.color}`}>{userBadge.label}</span>
                              )}
@@ -1968,7 +2063,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
                     <div className="flex items-center justify-between mb-4"><h5 className="font-bold text-sm">Komentar</h5><button onClick={()=>setShowComments(false)}><X size={16}/></button></div>
                     <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar max-h-[300px]">{comments.length === 0 ? ( <p className="text-xs text-center text-gray-400 py-4">Belum ada komentar.</p> ) : ( <CommentList commentList={rootComments} /> )}</div>
-                    <form onSubmit={handleComment} className="relative mt-auto">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>...</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2"><input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Tulis..." disabled={isGuest || !profile} className={`flex-1 bg-gray-50 dark:bg-gray-900 dark:text-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-100 border border-gray-200 dark:border-gray-700 ${replyTo ? 'rounded-b-xl' : 'rounded-full'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button></div></form>
+                    <form onSubmit={handleComment} className="relative mt-auto">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>...</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2"><input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Tulis (Gunakan @user untuk tag)..." disabled={isGuest || !profile} className={`flex-1 bg-gray-50 dark:bg-gray-900 dark:text-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-100 border border-gray-200 dark:border-gray-700 ${replyTo ? 'rounded-b-xl' : 'rounded-full'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button></div></form>
                 </div>
             )}
             {lightboxOpen && <Lightbox images={mediaList} initialIndex={lightboxIndex} onClose={() => setLightboxOpen(false)} />}
@@ -2039,6 +2134,10 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
                 user: { username, uid: userId, photoURL: userPhoto } // <-- FIX DISINI
             });
             
+            // FITUR BARU: Process Mention Notif
+            // Kita pass current user object dummy untuk keperluan notifikasi
+            await processMentions(form.content, { uid: userId, username: username, photoURL: userPhoto }, ref.id);
+
             // Removed reputation increment
             await updateDoc(doc(db, getPublicCollection('userProfiles'), userId), { lastPostTime: Date.now() }); 
             setProg(100); setTimeout(()=>onSuccess(ref.id, false), 500);
@@ -2073,7 +2172,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
                 
                 <form onSubmit={submit} className="space-y-4">
                     <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul (Opsional)" className="w-full p-3 bg-transparent border-b border-gray-200 dark:border-gray-700 dark:text-white font-bold text-lg outline-none focus:border-sky-500 transition placeholder-gray-400"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Apa yang Anda pikirkan?" rows="8" maxLength={2000} className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
+                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Apa yang Anda pikirkan? (Gunakan @user untuk tag teman)" rows="8" maxLength={2000} className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
                     
                     <div className="flex gap-2 text-xs mb-4"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 font-bold">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 italic font-serif">I</button><button type="button" onClick={insertLink} className="bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 px-3 py-1.5 rounded-full hover:bg-sky-100 flex items-center gap-1 font-bold"><LinkIcon size={12}/> Link</button></div>
                     
@@ -2464,8 +2563,8 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
                             <div key={n.id} onClick={()=>handleClick(n)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm flex items-center gap-4 cursor-pointer hover:bg-sky-50 dark:hover:bg-gray-700 transition">
                                 <div className="relative">
                                     <img src={n.fromPhoto||APP_LOGO} className="w-12 h-12 rounded-full object-cover"/>
-                                    <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':'bg-sky-500'}`}>
-                                        {n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:<UserPlus size={10}/>}
+                                    <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] ${n.type==='like'?'bg-rose-500':n.type==='comment'?'bg-blue-500':n.type==='mention'?'bg-purple-500':'bg-sky-500'}`}>
+                                        {n.type==='like'?<Heart size={10} fill="white"/>:n.type==='comment'?<MessageSquare size={10} fill="white"/>:n.type==='mention'?<AtSign size={10} fill="white"/>:<UserPlus size={10}/>}
                                     </div>
                                 </div>
                                 <div className="flex-1">
@@ -2921,6 +3020,16 @@ const MainAppContent = () => {
                         {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
                         {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />}
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
+                        
+                        {/* Placeholder untuk Halaman Kreata (Belum Dibuat) */}
+                        {page==='kreata' && (
+                            <div className="flex flex-col items-center justify-center min-h-[70vh] text-center p-6">
+                                <Gamepad2 size={64} className="text-emerald-500 mb-4 animate-bounce"/>
+                                <h2 className="text-2xl font-black text-gray-800 dark:text-white">Kreata Room</h2>
+                                <p className="text-gray-500 mt-2 max-w-xs">Halaman ini sedang dalam pengembangan. Nantikan update selanjutnya!</p>
+                                <button onClick={() => setPage('home')} className="mt-6 bg-sky-500 text-white px-6 py-2 rounded-full font-bold">Kembali ke Beranda</button>
+                            </div>
+                        )}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
