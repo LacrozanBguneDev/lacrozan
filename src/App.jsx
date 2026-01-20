@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
 import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah diinstall)
 
+// ... import lainnya ...
+import React, { useState, useEffect, ... } from 'react';
+import KreataRoom from './KreataRoom'; // <--- TAMBAHKAN INI
+// ... kode lainnya ...
+
+
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
 // ==========================================
@@ -181,7 +187,7 @@ const CONFIG = {
   API_ENDPOINT: "/api/feed"
 };
 
-// URL GAMBAR KREATA ROOM (SESUAI REQUEST)
+// URL GAMBAR  ROOM (SESUAI REQUEST)
 const KREATA_ROOM_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
 // Mutable Globals (untuk kompatibilitas dengan kode lama)
@@ -3022,14 +3028,13 @@ const MainAppContent = () => {
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
                         
                         {/* Placeholder untuk Halaman Kreata (Belum Dibuat) */}
-                        {page==='kreata' && (
-                            <div className="flex flex-col items-center justify-center min-h-[70vh] text-center p-6">
-                                <Gamepad2 size={64} className="text-emerald-500 mb-4 animate-bounce"/>
-                                <h2 className="text-2xl font-black text-gray-800 dark:text-white">Kreata Room</h2>
-                                <p className="text-gray-500 mt-2 max-w-xs">Halaman ini sedang dalam pengembangan. Nantikan update selanjutnya!</p>
-                                <button onClick={() => setPage('home')} className="mt-6 bg-sky-500 text-white px-6 py-2 rounded-full font-bold">Kembali ke Beranda</button>
-                            </div>
-                        )}
+                   {page === 'kreata' && (
+    <KreataRoom 
+        user={user} 
+        setPage={setPage} 
+        isGuest={isGuest} 
+    />
+)}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
