@@ -1,104 +1,182 @@
-// File: KreataRoom.jsx
-import React from 'react';
-import { ArrowLeft, Gamepad2, Users, Star, MessageCircle, Play } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Users, Loader2, Heart, MessageSquare, ExternalLink, Zap } from 'lucide-react';
 
-// Kamu bisa import fungsi format angka atau utility lain jika perlu
-// import { formatNumber } from './utils'; // (Opsional jika punya file utils)
+const KREATA_ROOM_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
-const KreataRoom = ({ user, setPage, isGuest }) => {
-    
-    // Data Dummy untuk konten Kreata (Nanti bisa diganti data dari Firebase)
-    const featuredRooms = [
-        { id: 1, title: "Mabar Mobile Legends", host: "Ryzen", viewers: 120, tag: "Game" },
-        { id: 2, title: "Diskusi Coding React", host: "DevMaster", viewers: 85, tag: "Tech" },
-        { id: 3, title: "Nobar Film Horor", host: "MovieManiac", viewers: 210, tag: "Movie" },
-    ];
+const KreataRoom = ({ setPage, user, onPostClick }) => {
+    const [posts, setPosts] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    // Fetch Data Khusus Tag #kreata
+    useEffect(() => {
+        const fetchKreataPosts = async () => {
+            try {
+                // Endpoint sesuai request
+                const response = await fetch('/api/feed?mode=hashtag&tag=kreata&limit=10');
+                const data = await response.json();
+                
+                // Pastikan format data array (tergantung respon API Anda, biasanya data.posts atau data)
+                const postData = Array.isArray(data.posts) ? data.posts : (Array.isArray(data) ? data : []);
+                setPosts(postData);
+            } catch (error) {
+                console.error("Gagal memuat Kreata feed:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchKreataPosts();
+    }, []);
 
     return (
-        <div className="min-h-screen bg-[#F0F4F8] dark:bg-gray-900 pb-24 pt-20">
+        <div className="min-h-screen bg-[#F8FAFC] dark:bg-gray-900 pb-20 animate-in fade-in duration-500">
             
-            {/* Header Khusus Kreata */}
-            <div className="fixed top-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center px-4 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm">
+            {/* --- HERO SECTION --- */}
+            <div className="relative h-64 md:h-80 w-full overflow-hidden">
+                {/* Tombol Back Floating */}
                 <button 
                     onClick={() => setPage('home')} 
-                    className="p-2 mr-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition"
+                    className="absolute top-6 left-6 z-20 bg-black/30 hover:bg-black/50 backdrop-blur-md text-white p-2.5 rounded-full transition"
                 >
-                    <ArrowLeft size={20} className="text-gray-700 dark:text-white"/>
+                    <ArrowLeft size={20} />
                 </button>
-                <div className="flex items-center gap-2">
-                    <Gamepad2 className="text-emerald-500" size={24} />
-                    <h1 className="text-xl font-black text-gray-800 dark:text-white tracking-tight">
-                        Kreata <span className="text-emerald-500">Room</span>
+
+                {/* Gambar Background */}
+                <img 
+                    src={KREATA_ROOM_IMG} 
+                    alt="Kreata Room" 
+                    className="w-full h-full object-cover object-center"
+                />
+                
+                {/* Overlay Gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-[#F8FAFC] dark:from-gray-900 via-transparent to-black/40"></div>
+                
+                <div className="absolute bottom-0 left-0 p-6 z-10">
+                    <span className="bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider mb-2 inline-block">
+                        Official Partner
+                    </span>
+                    <h1 className="text-3xl md:text-4xl font-black text-gray-800 dark:text-white leading-tight drop-shadow-sm">
+                        KREATA <span className="text-emerald-500">ROOM</span>
                     </h1>
                 </div>
             </div>
 
-            {/* Content Area */}
-            <div className="max-w-2xl mx-auto px-4">
-                
-                {/* Banner Welcome */}
-                <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-3xl p-6 text-white shadow-lg shadow-emerald-500/20 mb-6 relative overflow-hidden">
-                    <div className="relative z-10">
-                        <h2 className="text-2xl font-black mb-2">Selamat Datang di Kreata!</h2>
-                        <p className="text-emerald-100 text-sm max-w-xs mb-4">
-                            Ruang interaksi real-time, mabar game, dan diskusi komunitas eksklusif.
-                        </p>
-                        <button className="bg-white text-emerald-600 px-4 py-2 rounded-xl font-bold text-xs shadow-md hover:bg-gray-100 transition">
-                            Buat Room Baru
-                        </button>
-                    </div>
-                    {/* Hiasan Background */}
-                    <Gamepad2 size={120} className="absolute -right-6 -bottom-6 text-white opacity-20 rotate-12"/>
-                </div>
-
-                {/* Categories */}
-                <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar mb-2">
-                    {['Semua', 'Gaming', 'Musik', 'Curhat', 'Horor'].map((cat, i) => (
-                        <button key={i} className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition ${i === 0 ? 'bg-emerald-500 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-500 border border-gray-200 dark:border-gray-700'}`}>
-                            {cat}
-                        </button>
-                    ))}
-                </div>
-
-                {/* List Rooms */}
-                <div className="space-y-4">
-                    <h3 className="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                        <Star size={18} className="text-yellow-500 fill-yellow-500"/> Sedang Live
-                    </h3>
-                    
-                    {featuredRooms.map((room) => (
-                        <div key={room.id} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 hover:border-emerald-500 transition cursor-pointer group">
-                            <div className="flex justify-between items-start mb-2">
-                                <div className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
-                                    <span className="w-1.5 h-1.5 bg-white rounded-full"></span> LIVE
-                                </div>
-                                <span className="text-[10px] font-bold text-gray-400 uppercase">{room.tag}</span>
-                            </div>
-                            <h3 className="font-bold text-lg text-gray-800 dark:text-white mb-1 group-hover:text-emerald-500 transition">
-                                {room.title}
-                            </h3>
-                            <div className="flex items-center justify-between mt-3">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 bg-gray-200 rounded-full"></div>
-                                    <span className="text-xs font-medium text-gray-500">{room.host}</span>
-                                </div>
-                                <div className="flex items-center gap-3 text-gray-400">
-                                    <span className="flex items-center gap-1 text-xs"><Users size={14}/> {room.viewers}</span>
-                                    <button className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 p-1.5 rounded-full">
-                                        <Play size={14} fill="currentColor"/>
-                                    </button>
-                                </div>
-                            </div>
+            {/* --- INFO SECTION --- */}
+            <div className="max-w-4xl mx-auto px-4 -mt-6 relative z-10">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-700 p-6 md:p-8">
+                    <div className="flex items-start gap-4">
+                        <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl hidden md:block">
+                            <Users className="text-emerald-600" size={24} />
                         </div>
-                    ))}
+                        <div className="space-y-4 text-sm leading-relaxed text-gray-600 dark:text-gray-300 text-justify">
+                            <p>
+                                <strong>Kreata Community</strong> adalah wadah kolaborasi yang menaungi beberapa komunitas, yaitu 
+                                <span className="text-emerald-600 font-bold"> Koloxe, Amethyst, dan McCreata</span>, yang disatukan dalam satu ekosistem komunitas. 
+                                Kreata Community dibentuk sebagai ruang bersama untuk berinteraksi, berkreasi, serta mengembangkan aktivitas komunitas secara terarah dan berkelanjutan.
+                            </p>
+                            <p>
+                                Kerja sama antara <strong>Kreata Community</strong> dan <strong>BguneNet</strong> dilakukan melalui penyediaan ruang komunitas digital 
+                                di platform BguneNet sebagai sarana pendukung aktivitas komunitas. Melalui kerja sama ini, tercipta ekosistem sosial media berbasis komunitas yang saling menguntungkan.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* --- FEED GRID (DESAIN BERBEDA) --- */}
+            <div className="max-w-4xl mx-auto px-4 mt-8">
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="font-bold text-lg text-gray-800 dark:text-white flex items-center gap-2">
+                        <Zap size={20} className="text-yellow-500 fill-yellow-500" /> 
+                        Sorotan Komunitas
+                    </h3>
+                    <span className="text-xs text-emerald-600 font-bold bg-emerald-50 px-3 py-1 rounded-full">
+                        #kreata
+                    </span>
                 </div>
 
-                {/* Placeholder jika belum ada fitur */}
-                <div className="mt-8 text-center p-6 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-3xl">
-                    <MessageCircle size={32} className="mx-auto text-gray-300 mb-2"/>
-                    <p className="text-gray-400 text-sm font-bold">Fitur lengkap segera hadir!</p>
+                {loading ? (
+                    <div className="flex justify-center py-20">
+                        <Loader2 className="animate-spin text-emerald-500" size={32} />
+                    </div>
+                ) : posts.length === 0 ? (
+                    <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300">
+                        <p className="text-gray-400">Belum ada postingan di Kreata Room.</p>
+                    </div>
+                ) : (
+                    // GRID LAYOUT (MASONRY STYLE)
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {posts.map((post) => (
+                            <KreataCard 
+                                key={post.id} 
+                                post={post} 
+                                onClick={() => onPostClick && onPostClick(post.id)} 
+                            />
+                        ))}
+                    </div>
+                )}
+                
+                <div className="mt-8 text-center">
+                    <p className="text-xs text-gray-400">Menampilkan 10 postingan teratas</p>
                 </div>
+            </div>
+        </div>
+    );
+};
 
+// Sub-Component: Kartu Desain Khusus
+const KreataCard = ({ post, onClick }) => {
+    // Cek media
+    const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0);
+    const mediaSrc = post.mediaUrl || (post.mediaUrls ? post.mediaUrls[0] : null);
+    
+    // Potong teks jika terlalu panjang
+    const excerpt = post.content ? (post.content.length > 100 ? post.content.substring(0, 100) + "..." : post.content) : "";
+
+    return (
+        <div 
+            onClick={onClick}
+            className="group bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col h-full"
+        >
+            {/* Header User (Minimalis) */}
+            <div className="p-3 flex items-center gap-2 border-b border-gray-50 dark:border-gray-700/50">
+                <div className="w-6 h-6 rounded-full bg-gray-200 overflow-hidden">
+                    <img src={post.user?.photoURL || "https://c.termai.cc/i150/VrL65.png"} className="w-full h-full object-cover"/>
+                </div>
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{post.user?.username || 'User'}</span>
+            </div>
+
+            {/* Media Area (Aspect Ratio Video/Square) */}
+            {hasMedia && (
+                <div className="relative w-full aspect-video bg-black overflow-hidden">
+                    {post.mediaType === 'video' ? (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                            <span className="text-white text-xs font-bold flex items-center gap-1"><ExternalLink size={12}/> VIDEO</span>
+                        </div>
+                    ) : (
+                        <img src={mediaSrc} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
+                    )}
+                </div>
+            )}
+
+            {/* Content Body */}
+            <div className="p-4 flex-1 flex flex-col">
+                {post.title && <h4 className="font-bold text-gray-900 dark:text-white mb-1 line-clamp-1">{post.title}</h4>}
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 flex-1 leading-relaxed">
+                    {excerpt}
+                </p>
+                
+                {/* Footer Stats */}
+                <div className="flex items-center gap-4 text-gray-400 text-xs mt-auto pt-3 border-t border-gray-50 dark:border-gray-700">
+                    <div className="flex items-center gap-1">
+                        <Heart size={14} className={post.likes?.length > 0 ? "text-rose-500 fill-rose-500" : ""} />
+                        <span>{post.likes?.length || 0}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <MessageSquare size={14} />
+                        <span>{post.commentsCount || 0}</span>
+                    </div>
+                </div>
             </div>
         </div>
     );
