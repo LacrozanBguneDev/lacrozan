@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah 
 
 // ... import lainnya ...
 
-import KreataRoom from './KreataRoom'; // <--- TAMBAHKAN INI
+import KreataRoom from './KreataRoom'; // <--- TAMBAHKAN INI (Asumsi file ada, atau logic akan dihandle di App)
 // ... kode lainnya ...
 
 
@@ -560,7 +560,7 @@ const ModernSidebar = ({ isOpen, onClose, setPage, user, onLogout, handleFriends
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800 text-center">
                     <p className="text-xs font-bold text-gray-800 dark:text-gray-200">{APP_NAME}</p>
                     <p className="text-[10px] text-gray-500 mt-1">di bawah naungan Bgune Digital</p>
-                    <p className="text-[10px] text-gray-400 mt-2">v2.5.4 (Lite Edition)</p>
+                    <p className="text-[10px] text-gray-400 mt-2">v2.5.5 (Lite Edition + Kreata)</p>
                 </div>
             </div>
         </>
@@ -1797,6 +1797,39 @@ const LeaderboardScreen = ({ allUsers, currentUser }) => {
 // BAGIAN 6: KOMPONEN UTAMA APLIKASI
 // ==========================================
 
+// NEW COMPONENT: MENTION LIST
+const MentionList = ({ query, users, onSelect }) => {
+    if (!query) return null;
+    const lowerQuery = query.toLowerCase();
+    const filtered = users.filter(u => 
+        (u.username || "").toLowerCase().includes(lowerQuery) || 
+        (u.email || "").toLowerCase().includes(lowerQuery)
+    ).slice(0, 5);
+
+    if (filtered.length === 0) return null;
+
+    return (
+        <div className="absolute z-50 bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+            <div className="p-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Saran Mention</span>
+            </div>
+            {filtered.map(u => (
+                <button 
+                    key={u.uid} 
+                    onClick={() => onSelect(u.username)}
+                    className="w-full flex items-center gap-3 p-3 hover:bg-sky-50 dark:hover:bg-gray-700 text-left transition"
+                >
+                    <Avatar src={u.photoURL} className="w-8 h-8 rounded-full"/>
+                    <div className="overflow-hidden">
+                        <p className="font-bold text-sm text-gray-800 dark:text-gray-200 truncate">{u.username}</p>
+                        <p className="text-[10px] text-gray-400 truncate">@{u.username}</p>
+                    </div>
+                </button>
+            ))}
+        </div>
+    );
+};
+
 const MediaGrid = ({ mediaUrls, onImageClick }) => {
     const count = mediaUrls.length;
     if (count === 0) return null;
@@ -1804,7 +1837,7 @@ const MediaGrid = ({ mediaUrls, onImageClick }) => {
     return ( <div className={`mb-4 grid ${count === 2 ? 'grid-cols-2' : 'grid-cols-3'} gap-0.5 rounded-xl overflow-hidden`}>{mediaUrls.slice(0, 9).map((url, i) => ( <div key={i} className="relative aspect-square cursor-pointer overflow-hidden group" onClick={() => onImageClick(i)}><img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />{i === 8 && count > 9 && ( <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-xl backdrop-blur-sm">+{count - 9}</div> )}</div> ))}</div> );
 };
 
-const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, onUpdate }) => {
+const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, onUpdate, users, onNavigate }) => {
     const { showConfirm, showAlert } = useCustomAlert();
     const [liked, setLiked] = useState(false);
     const [likeCount, setLikeCount] = useState(post.likes?.length || 0);
@@ -1820,6 +1853,10 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     const [showHeartOverlay, setShowHeartOverlay] = useState(false);
     const [lightboxOpen, setLightboxOpen] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState(0);
+    
+    // MENTION STATE
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [showMentionList, setShowMentionList] = useState(false);
 
     const isOwner = currentUserId && post.userId === currentUserId;
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
@@ -1842,6 +1879,27 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
         if (currentUserId) { setLiked(post.likes?.includes(currentUserId)); setIsSaved(profile?.savedPosts?.includes(post.id)); } else { setLiked(false); setIsSaved(false); }
         setLikeCount(post.likes?.length || 0);
     }, [post, currentUserId, profile?.savedPosts]);
+
+    // Handle typing in comment box to detect mentions
+    const handleCommentInput = (e) => {
+        const val = e.target.value;
+        setNewComment(val);
+        
+        // Simple regex to find word starting with @ at the end
+        const match = val.match(/@(\w*)$/);
+        if (match) {
+            setMentionQuery(match[1]);
+            setShowMentionList(true);
+        } else {
+            setShowMentionList(false);
+        }
+    };
+
+    const insertMention = (username) => {
+        const newVal = newComment.replace(/@(\w*)$/, `@${username} `);
+        setNewComment(newVal);
+        setShowMentionList(false);
+    };
 
     const handleLike = async () => {
         if (isGuest) { onRequestLogin(); return; }
@@ -1981,13 +2039,16 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                                 <span className="text-gray-400 text-[10px] ml-1">• {formatTimeAgo(post.timestamp).relative}</span>
                             </div>
                             
-                            {/* KREATA ROOM SUBTITLE */}
+                            {/* KREATA ROOM SUBTITLE (CLICKABLE) */}
                             {isKreata && (
                                 <button 
-                                    onClick={() => onHashtagClick('kreata')}
-                                    className="text-[10px] text-gray-500 hover:text-[#25D366] hover:underline text-left -mt-0.5 mb-0.5 font-medium flex items-center gap-1"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onNavigate) onNavigate('kreata');
+                                    }}
+                                    className="text-[10px] text-[#25D366] font-bold hover:underline text-left -mt-0.5 mb-0.5 flex items-center gap-1"
                                 >
-                                    postingan ini berada di Kreata Room <ChevronRight size={10}/>
+                                    Postingan berada dalam Kreata Room <ChevronRight size={10}/>
                                 </button>
                             )}
                         </div>
@@ -2069,7 +2130,12 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                 <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 animate-in fade-in">
                     <div className="flex items-center justify-between mb-4"><h5 className="font-bold text-sm">Komentar</h5><button onClick={()=>setShowComments(false)}><X size={16}/></button></div>
                     <div className="flex-1 overflow-y-auto space-y-3 mb-4 custom-scrollbar max-h-[300px]">{comments.length === 0 ? ( <p className="text-xs text-center text-gray-400 py-4">Belum ada komentar.</p> ) : ( <CommentList commentList={rootComments} /> )}</div>
-                    <form onSubmit={handleComment} className="relative mt-auto">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>...</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2"><input value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Tulis (Gunakan @user untuk tag)..." disabled={isGuest || !profile} className={`flex-1 bg-gray-50 dark:bg-gray-900 dark:text-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-100 border border-gray-200 dark:border-gray-700 ${replyTo ? 'rounded-b-xl' : 'rounded-full'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button></div></form>
+                    <form onSubmit={handleComment} className="relative mt-auto">{replyTo && ( <div className="flex items-center justify-between text-[10px] bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-2 rounded-t-lg"><span>Membalas <b>{replyTo.username}</b>...</span><button type="button" onClick={()=>setReplyTo(null)}><X size={12}/></button></div> )}<div className="flex gap-2 relative">
+                        {/* MENTION SUGGESTIONS POPUP */}
+                        {showMentionList && (
+                             <MentionList query={mentionQuery} users={users || []} onSelect={insertMention}/>
+                        )}
+                        <input value={newComment} onChange={handleCommentInput} placeholder="Tulis (Gunakan @user untuk tag)..." disabled={isGuest || !profile} className={`flex-1 bg-gray-50 dark:bg-gray-900 dark:text-white px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-sky-100 border border-gray-200 dark:border-gray-700 ${replyTo ? 'rounded-b-xl' : 'rounded-full'}`}/><button type="submit" disabled={!newComment.trim() || isGuest} className="p-2.5 bg-sky-500 text-white rounded-full shadow-md hover:bg-sky-600 disabled:opacity-50 h-fit self-end"><Send size={16}/></button></div></form>
                 </div>
             )}
             {lightboxOpen && <Lightbox images={mediaList} initialIndex={lightboxIndex} onClose={() => setLightboxOpen(false)} />}
@@ -2078,11 +2144,15 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
 };
 
 // FIX: Tambahkan prop userPhoto agar foto profil muncul instan saat baru post
-const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
+const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess, users }) => {
     const { showAlert } = useCustomAlert();
     const [form, setForm] = useState({ title: '', content: '', files: [], url: '', isShort: false, isAudio: false });
     const [loading, setLoading] = useState(false); const [prog, setProg] = useState(0);
     const [loadingText, setLoadingText] = useState(""); // UI: Fun Loading Text
+    
+    // MENTION LOGIC
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [showMentionList, setShowMentionList] = useState(false);
 
     // Fun loading text logic
     const funTexts = ["Menghubungi satelit...", "Memasak postingan...", "Mengirim sinyal ke Mars...", "Sabar ya, lagi loading...", "Menyusun pixel...", "Mengupload kenangan...", "Hampir siap..."];
@@ -2095,6 +2165,26 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
             return () => clearInterval(interval);
         }
     }, [loading]);
+
+    const handleContentChange = (e) => {
+        const val = e.target.value;
+        setForm({...form, content: val});
+        
+        // Simple regex to find word starting with @ at the end
+        const match = val.match(/@(\w*)$/);
+        if (match) {
+            setMentionQuery(match[1]);
+            setShowMentionList(true);
+        } else {
+            setShowMentionList(false);
+        }
+    };
+
+    const insertMention = (username) => {
+        const newVal = form.content.replace(/@(\w*)$/, `@${username} `);
+        setForm({...form, content: newVal});
+        setShowMentionList(false);
+    };
 
     const insertLink = () => { setForm({ ...form, content: form.content + " [Judul Link](https://...)" }); };
     const handleFileChange = (e) => { const selectedFiles = Array.from(e.target.files); if (selectedFiles.length > 0) { const isAudio = selectedFiles[0].type.startsWith('audio'); const isVideo = selectedFiles[0].type.startsWith('video'); setForm({ ...form, files: selectedFiles, isShort: isVideo, isAudio: isAudio, url: '' }); } };
@@ -2178,7 +2268,14 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
                 
                 <form onSubmit={submit} className="space-y-4">
                     <input value={form.title} onChange={e=>setForm({...form, title:e.target.value})} placeholder="Judul (Opsional)" className="w-full p-3 bg-transparent border-b border-gray-200 dark:border-gray-700 dark:text-white font-bold text-lg outline-none focus:border-sky-500 transition placeholder-gray-400"/>
-                    <textarea value={form.content} onChange={e=>setForm({...form, content:e.target.value})} placeholder="Apa yang Anda pikirkan? (Gunakan @user untuk tag teman)" rows="8" maxLength={2000} className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
+                    
+                    <div className="relative">
+                        {/* MENTION LIST */}
+                        {showMentionList && (
+                             <MentionList query={mentionQuery} users={users || []} onSelect={insertMention}/>
+                        )}
+                        <textarea value={form.content} onChange={handleContentChange} placeholder="Apa yang Anda pikirkan? (Gunakan @user untuk tag teman)" rows="8" maxLength={2000} className="w-full p-3 bg-transparent dark:text-white text-base outline-none resize-none placeholder-gray-400"/>
+                    </div>
                     
                     <div className="flex gap-2 text-xs mb-4"><button type="button" onClick={()=>setForm({...form, content: form.content + "**Tebal**"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 font-bold">B</button><button type="button" onClick={()=>setForm({...form, content: form.content + "*Miring*"})} className="bg-gray-100 dark:bg-gray-700 dark:text-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-200 italic font-serif">I</button><button type="button" onClick={insertLink} className="bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 px-3 py-1.5 rounded-full hover:bg-sky-100 flex items-center gap-1 font-bold"><LinkIcon size={12}/> Link</button></div>
                     
@@ -2199,7 +2296,7 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess }) => {
     );
 };
 
-const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers }) => {
+const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isGuest, allUsers, onNavigate, users }) => {
     // FIX CRASH: Gunakan Safe Navigation Operator (?.) dan Default Value
     const { showAlert } = useCustomAlert();
     const [edit, setEdit] = useState(false); 
@@ -2211,38 +2308,57 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const [mood, setMood] = useState(profileData?.mood || ''); 
     const [isEditingMood, setIsEditingMood] = useState(false);
     
+    // PAGINATION LOGIC
     const [localPosts, setLocalPosts] = useState([]);
     const [loadingLocal, setLoadingLocal] = useState(true);
+    const [nextCursor, setNextCursor] = useState(null);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
 
     const viewerUid = viewerProfile ? viewerProfile.uid : null;
     const isSelf = viewerUid === profileData?.uid; 
     const DEVELOPER_EMAIL = "irhamdika00@gmail.com";
     const isDev = profileData?.email === DEVELOPER_EMAIL;
 
+    const fetchUserPosts = async (isLoadMore = false) => {
+        if (isLoadMore) {
+            if (!nextCursor) return;
+            setIsLoadingMore(true);
+        } else {
+            setLoadingLocal(true);
+            setLocalPosts([]); 
+        }
+
+        try {
+            const data = await fetchFeedData({
+                mode: 'user',
+                userId: profileData?.uid, 
+                limit: 10, // FIX: Batasi 10 per load, agar tidak berat
+                cursor: isLoadMore ? nextCursor : null
+            });
+            const enrichedPosts = data.posts.map(p => ({
+                ...p,
+                user: profileData
+            }));
+            
+            setLocalPosts(prev => isLoadMore ? [...prev, ...enrichedPosts] : enrichedPosts);
+            setNextCursor(data.nextCursor);
+        } catch (e) { 
+            console.error("Profile Fetch Error:", e); 
+        } finally { 
+            setLoadingLocal(false);
+            setIsLoadingMore(false);
+        }
+    };
+
     useEffect(() => {
-        setLoadingLocal(true);
-        setLocalPosts([]); 
-        
-        const fetchUserPosts = async () => {
-            try {
-                const data = await fetchFeedData({
-                    mode: 'user',
-                    userId: profileData?.uid, 
-                    limit: 20
-                });
-                const enrichedPosts = data.posts.map(p => ({
-                    ...p,
-                    user: profileData
-                }));
-                setLocalPosts(enrichedPosts);
-            } catch (e) { console.error("Profile Fetch Error:", e); } finally { setLoadingLocal(false); }
-        };
-        if (profileData?.uid) { fetchUserPosts(); }
+        if (profileData?.uid) { 
+            fetchUserPosts(false); 
+        }
     }, [profileData?.uid]); 
     
     // FIX: Share Profile
     const handleShareProfile = async () => {
-        const url = `${window.location.origin}?user=${profileData.uid}`;
+        const url = `${window.location.origin}?page=other-profile&user=${profileData.uid}`;
         try {
             await navigator.clipboard.writeText(url);
             showAlert('Link profil berhasil disalin! Sebarkan ke temanmu.', 'success');
@@ -2308,13 +2424,25 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
                     loadingLocal ? <SkeletonPost /> :
                     localPosts.length > 0 ? (
                         <div className="space-y-0"> 
-                            {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                            {localPosts.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} onNavigate={onNavigate} users={allUsers}/>)}
+                            
+                            {/* PAGINATION BUTTON */}
+                            {nextCursor && (
+                                <button 
+                                    onClick={() => fetchUserPosts(true)} 
+                                    disabled={isLoadingMore}
+                                    className="w-full py-3 mt-4 bg-sky-50 text-sky-600 rounded-xl font-bold text-sm hover:bg-sky-100 transition flex items-center justify-center gap-2"
+                                >
+                                    {isLoadingMore ? <Loader2 className="animate-spin" size={16}/> : <ArrowUp size={16}/>}
+                                    {isLoadingMore ? "Memuat..." : "Muat Lebih Banyak"}
+                                </button>
+                            )}
                         </div>
                     ) : <div className="text-center text-gray-400 py-10">Belum ada postingan.</div>
                 ) : ( 
                     savedPostsData.length > 0 ? (
                         <div className="space-y-0">
-                             {savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}}/>)}
+                             {savedPostsData.map(p=><PostItem key={p.id} post={p} currentUserId={viewerUid} profile={viewerProfile} handleFollow={handleFollow} goToProfile={()=>{}} onNavigate={onNavigate} users={allUsers}/>)}
                         </div>
                     ) : <div className="text-center text-gray-400 py-10">Belum ada postingan yang disimpan.</div>
                 )}
@@ -2329,7 +2457,7 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
 // ==========================================
 
 const HomeScreen = ({ 
-    currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, homeFeedState, setHomeFeedState, handlePostUpdate
+    currentUserId, profile, allPosts, handleFollow, goToProfile, newPostId, clearNewPost, isMeDeveloper, isGuest, onRequestLogin, onHashtagClick, homeFeedState, setHomeFeedState, handlePostUpdate, onNavigate, users
 }) => {
     const { posts: feedPosts, cursor: nextCursor, sortType, hasLoaded } = homeFeedState;
     const [loading, setLoading] = useState(false);
@@ -2401,7 +2529,7 @@ const HomeScreen = ({
                     {finalPosts.map(p => (
                         <div key={p.id} className={`${p.id === newPostId ? "animate-in slide-in-from-top-10 duration-700" : ""}`}>
                             {p.id === newPostId && <div className="bg-emerald-100 text-emerald-700 text-xs font-bold text-center py-2 mb-2 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-sm mx-4"><CheckCircle size={14}/> Postingan Baru Disematkan</div>}
-                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />
+                            <PostItem post={p} currentUserId={currentUserId} currentUserEmail={profile?.email} profile={profile} handleFollow={handleFollow} goToProfile={goToProfile} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} onNavigate={onNavigate} users={users} />
                         </div>
                     ))}
                 </div>
@@ -2586,7 +2714,7 @@ const NotificationScreen = ({ userId, setPage, setTargetPostId, setTargetProfile
     );
 };
 
-const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
+const SinglePostView = ({ postId, allPosts, goBack, onNavigate, users, ...props }) => {
     const cachedPost = allPosts.find(p => p.id === postId);
     const [fetchedPost, setFetchedPost] = useState(cachedPost || null);
     const [loading, setLoading] = useState(!cachedPost);
@@ -2616,7 +2744,7 @@ const SinglePostView = ({ postId, allPosts, goBack, ...props }) => {
     return (
         <div className="max-w-md md:max-w-xl mx-auto p-4 pb-40 pt-24">
             <button onClick={handleBack} className="mb-6 flex items-center font-bold text-gray-600 hover:text-sky-600 bg-white dark:bg-gray-800 dark:text-gray-200 px-4 py-2 rounded-xl shadow-sm w-fit"><ArrowLeft size={18} className="mr-2"/> Kembali</button>
-            <PostItem post={fetchedPost} {...props}/>
+            <PostItem post={fetchedPost} onNavigate={onNavigate} users={users} {...props}/>
             <div className="mt-8 text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 text-gray-400 text-sm font-bold flex flex-col items-center justify-center gap-2"><Coffee size={24} className="opacity-50"/> Akhir dari postingan ini</div>
         </div>
     );
@@ -2772,6 +2900,18 @@ const MainAppContent = () => {
     const [homeFeedState, setHomeFeedState] = useState({ posts: [], cursor: null, sortType: 'home', hasLoaded: false, scrollPos: 0 });
     const lastNotifTimeRef = useRef(0); // Debounce notif
 
+    // FIX: URL HANDLER WRAPPER
+    const updateURL = (newPage, params = {}) => {
+        const url = new URL(window.location);
+        url.searchParams.set('page', newPage);
+        Object.keys(params).forEach(key => {
+            if (params[key]) url.searchParams.set(key, params[key]);
+            else url.searchParams.delete(key);
+        });
+        window.history.pushState({}, '', url);
+        setPage(newPage);
+    };
+
     // FIX: REALTIME UI STATE UPDATE
     const handlePostUpdate = (postId, newData) => {
         if (!newData) {
@@ -2828,20 +2968,23 @@ const MainAppContent = () => {
         if(user) checkAutoReset();
     }, [user]);
 
-    const handleLogout = async () => { const ok = await showConfirm("Yakin ingin keluar akun?"); if(ok) { await signOut(auth); setPage('home'); setSidebarOpen(false); } };
+    const handleLogout = async () => { const ok = await showConfirm("Yakin ingin keluar akun?"); if(ok) { await signOut(auth); updateURL('home'); setSidebarOpen(false); } };
 
-    // FIX: URL Parsing untuk Deep Link Profile & Post
+    // FIX: URL Parsing untuk Deep Link Profile & Post & Page
     useEffect(() => { 
         const params = new URLSearchParams(window.location.search);
         const p = params.get('post');
         const u = params.get('user'); // New Param for Profile Sharing
+        const pg = params.get('page'); // New Param for Page
         
         if (p) { 
             setTargetPid(p); 
             setPage('view_post'); 
-        } else if (u) {
+        } else if (u && pg === 'other-profile') {
             setTargetUid(u);
             setPage('other-profile');
+        } else if (pg) {
+            setPage(pg);
         }
     }, []);
 
@@ -2964,14 +3107,14 @@ const MainAppContent = () => {
                     <ModernSidebar 
                         isOpen={sidebarOpen} 
                         onClose={() => setSidebarOpen(false)} 
-                        setPage={setPage} 
+                        setPage={updateURL} // USE UPDATE URL
                         user={profile} 
                         onLogout={handleLogout} 
                         setShowAuthModal={setShowAuthModal}
-                        chatUnreadCount={chatUnreadCount} // FIX: Pass prop
+                        chatUnreadCount={chatUnreadCount} 
                         handleFriendsClick={() => {
                             setHomeFeedState(prev => ({ ...prev, sortType: 'friends', posts: [], cursor: null, hasLoaded: false }));
-                            setPage('home');
+                            updateURL('home');
                         }}
                     />
 
@@ -2980,7 +3123,7 @@ const MainAppContent = () => {
                         <header className="fixed top-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md h-16 flex items-center justify-between px-4 z-40 border-b border-gray-100 dark:border-gray-800 shadow-sm transition-colors duration-300">
                             {/* Left: Hamburger & Logo */}
                             <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setPage('home')}>
+                                <div className="flex items-center gap-2 cursor-pointer" onClick={()=>updateURL('home')}>
                                     <img src={APP_LOGO} className="w-8 h-8 object-contain"/>
                                     <span className="font-black text-xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-sky-600 to-purple-600">{APP_NAME}</span>
                                 </div>
@@ -2988,19 +3131,19 @@ const MainAppContent = () => {
 
                             {/* Center: Desktop Navigation (Pindah dari bawah) */}
                             <div className="hidden md:flex items-center gap-6 absolute left-1/2 transform -translate-x-1/2">
-                                <NavBtnDesktop icon={Home} active={page==='home'} onClick={()=>setPage('home')} label="Beranda" />
-                                <NavBtnDesktop icon={Search} active={page==='search'} onClick={()=>setPage('search')} label="Cari" />
-                                <NavBtnDesktop icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')} label="Top" />
-                                <button onClick={() => isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-white border-2 border-sky-500 text-sky-500 p-2 rounded-full hover:bg-sky-50 transition">
+                                <NavBtnDesktop icon={Home} active={page==='home'} onClick={()=>updateURL('home')} label="Beranda" />
+                                <NavBtnDesktop icon={Search} active={page==='search'} onClick={()=>updateURL('search')} label="Cari" />
+                                <NavBtnDesktop icon={Trophy} active={page==='leaderboard'} onClick={()=>updateURL('leaderboard')} label="Top" />
+                                <button onClick={() => isGuest ? setShowAuthModal(true) : updateURL('create')} className="bg-white border-2 border-sky-500 text-sky-500 p-2 rounded-full hover:bg-sky-50 transition">
                                     <Plus size={20} strokeWidth={3} />
                                 </button>
-                                <NavBtnDesktop icon={User} active={page==='profile'} onClick={()=> isGuest ? setShowAuthModal(true) : setPage('profile')} label="Saya" />
+                                <NavBtnDesktop icon={User} active={page==='profile'} onClick={()=> isGuest ? setShowAuthModal(true) : updateURL('profile')} label="Saya" />
                             </div>
 
                             {/* Right: Notifications & Actions */}
                             <div className="flex gap-2 items-center">
                                 {!isGuest && (
-                                     <button onClick={()=>setPage('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition relative border border-gray-100 dark:border-gray-700">
+                                     <button onClick={()=>updateURL('notifications')} className="p-2 bg-white dark:bg-gray-800 rounded-full text-gray-500 hover:text-sky-600 transition relative border border-gray-100 dark:border-gray-700">
                                          <Bell size={20}/>
                                          {notifCount>0 && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                      </button>
@@ -3015,30 +3158,30 @@ const MainAppContent = () => {
                     )}
 
                     <main className={showHeader ? 'pt-16 md:pt-20' : ''}>
-                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} /></> )}
+                        {page==='home' && ( <><HomeScreen currentUserId={user?.uid} profile={profile} allPosts={posts} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); updateURL('other-profile', {user: uid})}} newPostId={newPostId} clearNewPost={()=>setNewPostId(null)} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); updateURL('search');}} isLoadingFeed={isLoadingFeed} feedError={feedError} retryFeed={()=>setRefreshTrigger(p=>p+1)} homeFeedState={homeFeedState} setHomeFeedState={setHomeFeedState} handlePostUpdate={handlePostUpdate} onNavigate={updateURL} users={users} /></> )}
                         {/* FIX: Kirim userPhoto ke CreatePost */}
-                        {page==='create' && <CreatePost setPage={setPage} userId={user?.uid} username={profile?.username} userPhoto={profile?.photoURL} onSuccess={(id,short)=>{if(!short)setNewPostId(id); setPage('home')}}/>}
-                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={setPage} setTargetPostId={setTargetPid} />}
+                        {page==='create' && <CreatePost setPage={updateURL} userId={user?.uid} username={profile?.username} userPhoto={profile?.photoURL} onSuccess={(id,short)=>{if(!short)setNewPostId(id); updateURL('home')}} users={users}/>}
+                        {page==='search' && <SearchScreen allUsers={users} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); updateURL('other-profile', {user: uid})}} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} initialQuery={searchQuery} setPage={updateURL} setTargetPostId={(pid) => {setTargetPid(pid); updateURL('view_post', {post: pid})}} />}
                         {page==='leaderboard' && <LeaderboardScreen allUsers={users} currentUser={user} />}
-                        {page==='legal' && <LegalPage onBack={()=>setPage('home')} />}
-                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={setPage} setTargetPostId={setTargetPid} setTargetProfileId={(uid)=>{setTargetUid(uid); setPage('other-profile')}}/>}
-                        {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} />}
-                        {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} />}
-                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); setPage('other-profile')}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); setPage('search');}} onUpdate={handlePostUpdate} />}
-                        {page==='chat' && <ChatSystem currentUser={user} onBack={() => setPage('home')} />}
+                        {page==='legal' && <LegalPage onBack={()=>updateURL('home')} />}
+                        {page==='notifications' && <NotificationScreen userId={user?.uid} setPage={updateURL} setTargetPostId={(pid) => {setTargetPid(pid); updateURL('view_post', {post: pid})}} setTargetProfileId={(uid)=>{setTargetUid(uid); updateURL('other-profile', {user: uid})}}/>}
+                        {page==='profile' && <ProfileScreen viewerProfile={profile} profileData={profile} allPosts={posts} handleFollow={handleFollow} isGuest={false} allUsers={users} onNavigate={updateURL} users={users}/>}
+                        {page==='other-profile' && targetUser && <ProfileScreen viewerProfile={profile} profileData={targetUser} allPosts={posts} handleFollow={handleFollow} isGuest={isGuest} allUsers={users} onNavigate={updateURL} users={users}/>}
+                        {page==='view_post' && <SinglePostView postId={targetPid} allPosts={posts} goBack={handleGoBack} currentUserId={user?.uid} profile={profile} handleFollow={handleFollow} goToProfile={(uid)=>{setTargetUid(uid); updateURL('other-profile', {user: uid})}} isMeDeveloper={isMeDeveloper} isGuest={isGuest} onRequestLogin={()=>setShowAuthModal(true)} onHashtagClick={(tag)=>{setSearchQuery(tag); updateURL('search');}} onUpdate={handlePostUpdate} onNavigate={updateURL} users={users}/>}
+                        {page==='chat' && <ChatSystem currentUser={user} onBack={() => updateURL('home')} />}
                         
-                        {/* Placeholder untuk Halaman Kreata (Belum Dibuat) */}
-                   {page === 'kreata' && (
-    <KreataRoom 
-        user={user} 
-        setPage={setPage} 
-        isGuest={isGuest} 
-    />
-)}
+                        {/* Halaman Kreata */}
+                        {page === 'kreata' && (
+                            <KreataRoom 
+                                user={user} 
+                                setPage={updateURL} 
+                                isGuest={isGuest} 
+                            />
+                        )}
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
-                    {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>setPage('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>setPage('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : setPage('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>setPage('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>setPage('profile')}/> )}</nav> )}
+                    {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>updateURL('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>updateURL('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : updateURL('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>updateURL('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>updateURL('profile')}/> )}</nav> )}
                     
                    
 {showAuthModal && (
