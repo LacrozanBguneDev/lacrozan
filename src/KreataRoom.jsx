@@ -1,6 +1,6 @@
 // FILE: KreataRoom.jsx
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Users, Loader2, Heart, MessageSquare, ExternalLink, Zap, Info } from 'lucide-react'; // Tambah 'Info'
+import { ArrowLeft, Users, Loader2, Heart, MessageSquare, ExternalLink, Zap, Info } from 'lucide-react';
 import { 
     collection, 
     query, 
@@ -13,6 +13,11 @@ import {
 
 const KREATA_ROOM_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
+// --- HELPER UNTUK JALUR DATABASE (Sama seperti di main file) ---
+// Jika App ID Anda berbeda, ubah 'default-app-id' di bawah ini
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const getPublicCollection = (collectionName) => `artifacts/${appId}/public/data/${collectionName}`;
+
 const KreataRoom = ({ setPage, db, onPostClick }) => {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -22,8 +27,11 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
             if (!db) return;
             setLoading(true);
             try {
-                // Ambil 50 post terakhir untuk disaring di sisi klien
-                const postsRef = collection(db, 'artifacts/default-app-id/public/data/posts');
+                // Gunakan helper getPublicCollection agar path sesuai dengan file utama
+                const postsPath = getPublicCollection('posts');
+                const postsRef = collection(db, postsPath);
+                
+                // Ambil 50 post terbaru untuk di-scan
                 const q = query(postsRef, orderBy('timestamp', 'desc'), limit(50));
                 
                 const querySnapshot = await getDocs(q);
@@ -37,16 +45,22 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                     }
                 });
 
-                // Perkaya data dengan info user
+                // Fetch data user agar foto profil muncul
                 const enrichedPosts = await Promise.all(rawPosts.map(async (p) => {
+                    // Jika data user sudah ada di post, pakai itu
                     if (p.user && p.user.photoURL) return p; 
+                    
                     try {
-                        const userSnap = await getDoc(doc(db, 'artifacts/default-app-id/public/data/userProfiles', p.userId));
+                        // Jika tidak, ambil dari collection userProfiles
+                        const userRef = doc(db, getPublicCollection('userProfiles'), p.userId);
+                        const userSnap = await getDoc(userRef);
                         if (userSnap.exists()) {
                             return { ...p, user: userSnap.data() };
                         }
-                    } catch (e) { console.log(e); }
-                    return p;
+                    } catch (e) { console.log("User fetch error:", e); }
+                    
+                    // Fallback jika gagal fetch user
+                    return { ...p, user: p.user || { username: 'User', photoURL: '' } };
                 }));
 
                 setPosts(enrichedPosts);
@@ -81,7 +95,7 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                 </div>
             </div>
 
-            {/* --- INFO SECTION (DESKRIPSI) --- */}
+            {/* --- INFO SECTION (FULL TEXT) --- */}
             <div className="max-w-4xl mx-auto px-4 -mt-6 relative z-10">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-700 p-6 md:p-8">
                     <div className="flex items-start gap-4">
@@ -89,13 +103,23 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                             <Users className="text-emerald-600" size={24} />
                         </div>
                         <div className="space-y-4 text-sm leading-relaxed text-gray-600 dark:text-gray-300 text-justify">
-                            <p><strong>Kreata Community</strong> adalah wadah kolaborasi yang menaungi beberapa komunitas, yaitu <span className="text-emerald-600 font-bold">Koloxe, Amethyst, dan McCreata</span>...</p>
+                            <p>
+                                <strong>Kreata Community</strong> adalah wadah kolaborasi yang menaungi beberapa komunitas, yaitu 
+                                <span className="text-emerald-600 font-bold"> Koloxe, Amethyst, dan McCreata</span>, yang disatukan dalam satu ekosistem komunitas. 
+                                Kreata Community dibentuk sebagai ruang bersama untuk berinteraksi, berkreasi, serta mengembangkan aktivitas komunitas secara terarah dan berkelanjutan, baik secara offline maupun digital.
+                            </p>
+                            <p>
+                                Kerja sama antara <strong>Kreata Community</strong> dan <strong>BguneNet</strong> dilakukan melalui penyediaan ruang komunitas digital 
+                                di platform BguneNet sebagai sarana pendukung aktivitas komunitas. Melalui kerja sama ini, Kreata Community dapat mengelola interaksi, 
+                                membagikan konten, dan meningkatkan partisipasi anggota, sementara BguneNet memperoleh kontribusi berupa kehadiran komunitas yang aktif 
+                                sehingga tercipta ekosistem sosial media berbasis komunitas yang saling menguntungkan.
+                            </p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* --- INSTRUKSI / CARA POSTING (BARU DITAMBAHKAN) --- */}
+            {/* --- INSTRUKSI / CARA POSTING --- */}
             <div className="max-w-4xl mx-auto px-4 mt-6">
                 <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 shadow-sm">
                     <div className="bg-white dark:bg-emerald-900 p-2.5 rounded-full text-emerald-600 dark:text-emerald-400 shadow-sm shrink-0">
