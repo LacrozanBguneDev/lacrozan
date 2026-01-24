@@ -1,9 +1,9 @@
 // FILE: KreataRoom.jsx (ULTIMATE VERSION - NO ERROR - FULL FEATURES)
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-    ArrowLeft, Zap, MessageCircle, Gamepad2, Sparkles, 
-    Rocket, ShieldCheck, Volume2, UserPlus, 
-    Check, Target, Share2, Info, Bell, Handshake, Globe
+  ArrowLeft, Zap, MessageCircle, Gamepad2, Sparkles, 
+  Rocket, ShieldCheck, Volume2, UserPlus, 
+  Check, Target, Share2, Info, Bell, HeartHandshake, Globe
 } from 'lucide-react';
 
 const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
