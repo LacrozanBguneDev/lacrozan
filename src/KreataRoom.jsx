@@ -1,199 +1,383 @@
-// FILE: KreataRoom.jsx
-import React, { useState, useEffect } from 'react';
+// FILE: KreataRoom.jsx (KREATA CYBER-HUB v5.0 - THE ECOSYSTEM PLAYGROUND)
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-    ArrowLeft, Users, Zap, MessageCircle, 
-    ChevronDown, ChevronUp, Gamepad2, Trophy, 
-    Sparkles, Rocket, Star, Heart
+    ArrowLeft, Users, Zap, MessageCircle, ChevronDown, ChevronUp, 
+    Gamepad2, Trophy, Sparkles, Rocket, Star, Heart, ShieldCheck, 
+    ShieldAlert, Fingerprint, Volume2, UserPlus, Check, Activity, Target,
+    Share2, Lightbulb, TrendingUp, Atom, Layers, Globe, XCircle, CheckCircle
 } from 'lucide-react';
+import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 
 const KREATA_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
-const WA_CHANNEL = "https://whatsapp.com/channel/0029VaJi0RuHFxOubage052j";
-const WA_GROUP = "https://chat.whatsapp.com/FFrhElhRj4bFLCy0HZszss";
+const WA_GROUP_LINK = "https://chat.whatsapp.com/FFrhElhRj4bFLCy0HZszss";
+const WA_CHANNEL_LINK = "https://whatsapp.com/channel/0029VaJi0RuHFxOubage052j";
 
-const KreataRoom = ({ setPage }) => {
-    const [showFullInfo, setShowFullInfo] = useState(false);
-    const [clicks, setClicks] = useState(0);
-    const [isPulsing, setIsPulsing] = useState(false);
+const KreataRoom = ({ setPage, db, currentUser }) => {
+    const [isFollowed, setIsFollowed] = useState(false);
+    const [memberCount, setMemberCount] = useState(0);
+    const [activeTab, setActiveTab] = useState('hub');
+    const [isMuted, setIsMuted] = useState(false);
 
-    // Efek sederhana untuk game clicker
-    const handlePowerUp = () => {
-        setClicks(prev => prev + 1);
-        setIsPulsing(true);
-        setTimeout(() => setIsPulsing(false), 200);
+    // Game States
+    const [gameClicks, setGameClicks] = useState(0); // For Reflex Trainer
+    const [hashHuntScore, setHashHuntScore] = useState(0);
+    const [currentHash, setCurrentHash] = useState('');
+    const [hashInput, setHashInput] = useState('');
+    const [hashGameMsg, setHashGameMsg] = useState('');
+    const [correctHashes, setCorrectHashes] = useState(['#kreata', '#koloxe', '#amethyst', '#mccreata']);
+
+    // Simulasi Upload State
+    const [simulatedPostContent, setSimulatedPostContent] = useState('');
+    const [isSimulatingUpload, setIsSimulatingUpload] = useState(false);
+    const [simulationResult, setSimulationResult] = useState(null); // 'success', 'fail'
+
+    // Audio Engine
+    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'));
+    const audioSuccess = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'));
+    const audioError = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2068/2068-preview.mp3'));
+    const audioPop = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2650/2650-preview.mp3')); // New distinct pop sound
+
+    useEffect(() => {
+        if (!db) return;
+
+        // Auto-Initialize & Listen Global Member Count
+        const globalRef = doc(db, "artifacts/default-app-id/public/data/stats", "kreata_room");
+        const unsub = onSnapshot(globalRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setMemberCount(docSnap.data().totalMembers || 0);
+            } else {
+                setDoc(globalRef, { totalMembers: 500, lastUpdate: Date.now() }); 
+            }
+        });
+
+        // Check User Status for Membership
+        if (currentUser) {
+            const userRef = doc(db, `artifacts/default-app-id/public/data/userProfiles/${currentUser.uid}/private/kreata_status`);
+            getDoc(userRef).then(snap => {
+                if (snap.exists()) setIsFollowed(true);
+            });
+        }
+
+        // Initialize Hash-Hunt Game
+        startHashHunt();
+
+        return () => unsub();
+    }, [db, currentUser]);
+
+    const playSound = (sound) => {
+        if (isMuted) return;
+        sound.current.currentTime = 0;
+        sound.current.play().catch(() => {});
+    };
+
+    // --- Membership Logic ---
+    const handleJoin = async () => {
+        if (!currentUser) {
+            playSound(audioError);
+            alert("⚠️ Kamu harus Login dulu untuk bergabung!");
+            return;
+        }
+        if (isFollowed) return;
+
+        playSound(audioSuccess);
+        setIsFollowed(true);
+
+        try {
+            const userRef = doc(db, `artifacts/default-app-id/public/data/userProfiles/${currentUser.uid}/private/kreata_status`);
+            await setDoc(userRef, { joinedAt: Date.now(), verified: true });
+            const globalRef = doc(db, "artifacts/default-app-id/public/data/stats", "kreata_room");
+            await updateDoc(globalRef, { totalMembers: increment(1) });
+        } catch (e) {
+            console.error("Join Room Failed:", e);
+        }
+    };
+
+    // --- Hash-Hunt Game Logic ---
+    const startHashHunt = () => {
+        const randomIndex = Math.floor(Math.random() * correctHashes.length);
+        setCurrentHash(correctHashes[randomIndex]);
+        setHashInput('');
+        setHashGameMsg('');
+    };
+
+    const submitHash = () => {
+        playSound(audioPop);
+        if (hashInput.toLowerCase().trim() === currentHash.toLowerCase()) {
+            setHashHuntScore(prev => prev + 100);
+            setHashGameMsg('✅ Tepat! Kamu Hebat!');
+            setTimeout(startHashHunt, 1000);
+        } else {
+            setHashGameMsg('❌ Salah! Coba lagi.');
+            setHashHuntScore(prev => Math.max(0, prev - 50));
+        }
+        setHashInput('');
+    };
+
+    // --- Simulasi Upload Logic ---
+    const simulatePost = () => {
+        playSound(audioClick);
+        setIsSimulatingUpload(true);
+        setSimulationResult(null);
+
+        setTimeout(() => {
+            const hasKreata = simulatedPostContent.toLowerCase().includes('#kreata');
+            const isSpammy = simulatedPostContent.length < 20 || simulatedPostContent.includes('free money'); // Simple spam check
+
+            if (hasKreata && !isSpammy) {
+                setSimulationResult('success');
+                playSound(audioSuccess);
+            } else {
+                setSimulationResult('fail');
+                playSound(audioError);
+            }
+            setIsSimulatingUpload(false);
+        }, 2000);
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-gray-900 pb-20 overflow-x-hidden relative">
-            {/* ANIMASI BACKGROUND (Floating Stars) */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
-                {[...Array(10)].map((_, i) => (
+        <div className="min-h-screen bg-[#020617] text-slate-100 pb-24 overflow-x-hidden font-sans relative">
+            
+            {/* --- BACKGROUND ANIMATION: PARTICLES --- */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-40">
+                {[...Array(30)].map((_, i) => (
                     <div 
-                        key={i}
-                        className="absolute animate-bounce"
+                        key={i} 
+                        className="absolute bg-emerald-400 rounded-full mix-blend-screen animate-particle-float" 
                         style={{
-                            top: `${Math.random() * 100}%`,
+                            width: `${Math.random() * 5 + 2}px`,
+                            height: `${Math.random() * 5 + 2}px`,
                             left: `${Math.random() * 100}%`,
-                            animationDuration: `${2 + Math.random() * 4}s`,
-                            animationDelay: `${Math.random() * 2}s`
+                            top: `${Math.random() * 100}%`,
+                            animationDuration: `${10 + Math.random() * 15}s`,
+                            animationDelay: `${Math.random() * 5}s`,
+                            boxShadow: `0 0 ${Math.random() * 10 + 5}px rgba(16, 185, 129, 0.7)`
                         }}
-                    >
-                        <Star className="text-emerald-400" size={Math.random() * 20 + 10} />
-                    </div>
+                    ></div>
                 ))}
             </div>
 
-            {/* HERO SECTION */}
-            <div className="relative h-80 overflow-hidden">
-                <button 
-                    onClick={() => setPage('home')} 
-                    className="absolute top-6 left-6 z-30 bg-black/40 backdrop-blur-md p-2.5 rounded-full text-white hover:scale-110 transition-all"
-                >
-                    <ArrowLeft size={20} />
-                </button>
-                <img src={KREATA_IMG} className="w-full h-full object-cover scale-110" alt="Hero" />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-50 dark:from-gray-900 via-black/20" />
+            {/* --- CYBER HEADER --- */}
+            <div className="relative h-[450px] w-full">
+                <div className="absolute inset-0 bg-emerald-500/10 z-10 animate-pulse" />
+                <img src={KREATA_IMG} className="w-full h-full object-cover brightness-[0.2] contrast-125" alt="Banner" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#020617] via-transparent z-20" />
                 
-                <div className="absolute bottom-10 left-6 right-6">
-                    <div className="flex items-center gap-2 mb-3">
-                        <span className="bg-emerald-500 text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg animate-pulse">
+                <button onClick={() => { playSound(audioClick); setPage('home'); }} className="absolute top-8 left-6 z-50 bg-white/5 backdrop-blur-xl p-4 rounded-[24px] border border-white/10 hover:bg-emerald-500 hover:text-black transition-all shadow-2xl">
+                    <ArrowLeft size={24} />
+                </button>
+                <button onClick={() => setIsMuted(!isMuted)} className="absolute top-8 right-6 z-50 bg-white/5 backdrop-blur-xl p-4 rounded-[24px] border border-white/10 text-emerald-400">
+                    {isMuted ? <Volume2 className="opacity-30" size={24} /> : <Volume2 size={24} className="animate-bounce" />}
+                </button>
+
+                <div className="absolute bottom-12 left-8 right-8 z-30">
+                    <div className="flex flex-wrap items-center gap-3 mb-6">
+                        <span className="bg-emerald-500 text-black text-[10px] font-black px-4 py-1.5 rounded-full shadow-[0_0_30px_rgba(16,185,129,0.5)] tracking-[0.2em]">
                             OFFICIAL PARTNER
                         </span>
-                        <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-bold px-3 py-1 rounded-full border border-white/20">
-                            v2.0 HUB
-                        </span>
+                        <div className="bg-white/5 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 flex items-center gap-2">
+                            <Activity size={12} className="text-emerald-400 animate-pulse" />
+                            <span className="text-[10px] font-black">{memberCount} MEMBERS</span>
+                        </div>
                     </div>
-                    <h1 className="text-5xl font-black text-gray-900 dark:text-white tracking-tighter italic">
-                        KREATA <span className="text-emerald-500">ROOM</span>
-                    </h1>
+                    <h1 className="text-7xl font-black italic tracking-tighter leading-[0.8] mb-4">KREATA<br/><span className="text-emerald-500">ROOM</span></h1>
+                    <p className="text-slate-400 text-sm max-w-xs font-medium leading-relaxed italic border-l-2 border-emerald-500 pl-4">
+                        Wadah kolaborasi aman, terverifikasi, dan anti-spam.
+                    </p>
                 </div>
             </div>
 
-            <div className="max-w-4xl mx-auto px-5 -mt-6 relative z-10">
+            <div className="max-w-4xl mx-auto px-6 -mt-10 relative z-40">
                 
-                {/* 1. COMMUNITY MAIN INFO */}
-                <div className="bg-white dark:bg-gray-800 rounded-[32px] shadow-2xl border border-gray-100 dark:border-gray-700 p-8 mb-8 group hover:border-emerald-500/50 transition-all duration-500">
-                    <div className="flex flex-col md:flex-row gap-8 items-center">
-                        <div className="flex-1 text-center md:text-left">
-                            <h3 className="text-2xl font-black text-gray-800 dark:text-white mb-3 tracking-tight flex items-center justify-center md:justify-start gap-2">
-                                <Users className="text-emerald-500" /> KREATA ECOSYSTEM
-                            </h3>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-                                Sinergi tanpa batas antara <span className="text-emerald-500 font-bold">Koloxe, Amethyst, dan McCreata</span>. 
-                                Di sini, kreativitas adalah mata uang utama.
-                            </p>
-                            
-                            {showFullInfo && (
-                                <div className="mt-4 p-4 bg-slate-50 dark:bg-gray-900 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 animate-in fade-in zoom-in duration-300">
-                                    <p className="text-xs text-gray-500 leading-relaxed italic">
-                                        Kreata Room berfungsi sebagai titik temu digital (Digital Hub) yang didukung penuh oleh infrastruktur BguneNet. 
-                                        Setiap anggota memiliki akses ke fitur-fitur eksklusif kolaborasi.
-                                    </p>
-                                </div>
-                            )}
-
-                            <button 
-                                onClick={() => setShowFullInfo(!showFullInfo)}
-                                className="mt-4 inline-flex items-center gap-2 text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:text-emerald-400 transition"
-                            >
-                                {showFullInfo ? <><ChevronUp size={14}/> Less Info</> : <><ChevronDown size={14}/> More Info</>}
-                            </button>
-                        </div>
-
-                        <div className="w-px h-20 bg-gray-100 dark:bg-gray-700 hidden md:block"></div>
-
-                        <div className="flex flex-col gap-3 w-full md:w-64">
-                            <a href={WA_CHANNEL} target="_blank" rel="noreferrer" className="group/btn relative overflow-hidden bg-emerald-600 text-white py-4 rounded-2xl text-center text-xs font-black uppercase tracking-widest transition-all hover:shadow-[0_0_20px_rgba(16,185,129,0.4)]">
-                                <div className="relative z-10 flex items-center justify-center gap-2">
-                                    <Zap size={16} fill="white" /> Join Saluran
-                                </div>
-                            </a>
-                            <a href={WA_GROUP} target="_blank" rel="noreferrer" className="border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 py-4 rounded-2xl text-center text-xs font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-white transition-all">
-                                Grup Komunitas
-                            </a>
-                        </div>
-                    </div>
+                {/* --- CYBER NAV --- */}
+                <div className="flex gap-2 p-2 bg-slate-900/80 backdrop-blur-3xl rounded-[32px] border border-white/5 mb-10 shadow-2xl">
+                    {['hub', 'games', 'collab', 'security'].map((t) => (
+                        <button key={t} onClick={() => { playSound(audioClick); setActiveTab(t); }}
+                            className={`flex-1 py-5 rounded-[24px] text-[11px] font-black uppercase tracking-[0.2em] transition-all ${
+                                activeTab === t ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:bg-white/5'
+                            }`}>
+                            {t}
+                        </button>
+                    ))}
                 </div>
 
-                {/* 2. MINI GAME SECTION (INOVASI PENGGANTI) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                    
-                    {/* GAME: POWER CLICKER */}
-                    <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-[32px] p-8 text-white relative overflow-hidden shadow-xl">
-                        <Rocket className="absolute -bottom-4 -right-4 text-white/10" size={120} />
-                        <div className="relative z-10">
-                            <h4 className="font-black text-xl mb-1 flex items-center gap-2 italic">
-                                <Gamepad2 /> COMMUNITY POWER
-                            </h4>
-                            <p className="text-white/70 text-[10px] uppercase tracking-widest mb-6 font-bold">Tap to boost community energy!</p>
-                            
-                            <div className="flex flex-col items-center py-4">
-                                <div className={`text-6xl font-black mb-4 ${isPulsing ? 'scale-125' : 'scale-100'} transition-transform duration-100`}>
-                                    {clicks}
-                                </div>
-                                <button 
-                                    onClick={handlePowerUp}
-                                    className="bg-white text-indigo-600 px-8 py-3 rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition"
-                                >
-                                    BOOST POWER!
+                {/* --- HUB SECTION --- */}
+                {activeTab === 'hub' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-10 duration-700">
+                        {/* JOIN CARD */}
+                        <div className="bg-gradient-to-br from-emerald-600 to-teal-900 p-10 rounded-[48px] shadow-2xl relative overflow-hidden group">
+                            <Sparkles className="absolute top-4 right-4 text-white/10 group-hover:animate-spin" size={60} />
+                            <div className="relative z-10">
+                                <h2 className="text-3xl font-black italic mb-2 tracking-tight">THE MEMBERSHIP</h2>
+                                <p className="text-emerald-100/60 text-[10px] mb-10 font-bold uppercase tracking-widest leading-loose">
+                                    Klik sekali untuk verifikasi permanen di dalam Room.
+                                </p>
+                                
+                                <button onClick={handleJoin}
+                                    className={`w-full py-6 rounded-[28px] font-black text-sm uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 ${
+                                        isFollowed ? 'bg-black/30 text-emerald-400 border border-emerald-400/30' : 'bg-white text-black hover:shadow-2xl active:scale-95'
+                                    }`}>
+                                    {isFollowed ? <><Check size={20}/> Verified Member</> : <><UserPlus size={20}/> Gabung Room</>}
                                 </button>
                             </div>
                         </div>
-                    </div>
 
-                    {/* INTERACTIVE STATS */}
-                    <div className="bg-white dark:bg-gray-800 rounded-[32px] p-8 border border-gray-100 dark:border-gray-700 shadow-xl">
-                        <h4 className="font-black text-xl mb-6 flex items-center gap-2 dark:text-white italic tracking-tight">
-                            <Trophy className="text-yellow-500" /> ACHIEVEMENT
-                        </h4>
-                        
-                        <div className="space-y-5">
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Innovation</span>
-                                <div className="h-2 w-32 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-500 w-[90%]"></div>
-                                </div>
+                        {/* WA LINKS */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <a href={WA_GROUP_LINK} target="_blank" rel="noopener noreferrer" className="p-8 bg-slate-900/50 rounded-[40px] border border-white/5 hover:border-emerald-500/50 transition-all group">
+                                <MessageCircle className="text-emerald-500 mb-4 group-hover:scale-110 transition-transform" size={40} />
+                                <h4 className="text-lg font-black italic uppercase">Chat Group</h4>
+                                <p className="text-slate-500 text-[10px] font-bold mt-1 uppercase tracking-widest">Ruang diskusi kreator</p>
+                            </a>
+                            <a href={WA_CHANNEL_LINK} target="_blank" rel="noopener noreferrer" className="p-8 bg-slate-900/50 rounded-[40px] border border-white/5 hover:border-emerald-500/50 transition-all group">
+                                <Zap className="text-yellow-500 mb-4 group-hover:scale-110 transition-transform" size={40} />
+                                <h4 className="text-lg font-black italic uppercase">News Hub</h4>
+                                <p className="text-slate-500 text-[10px] font-bold mt-1 uppercase tracking-widest">Informasi Terkini</p>
+                            </a>
+                        </div>
+                    </div>
+                )}
+
+                {/* --- GAMES SECTION --- */}
+                {activeTab === 'games' && (
+                    <div className="space-y-8 animate-in zoom-in duration-500">
+                        {/* Reflex Trainer */}
+                        <div className="bg-slate-900/50 p-12 rounded-[50px] border border-white/5 text-center">
+                            <Target className="mx-auto text-emerald-500 mb-6 animate-pulse" size={50} />
+                            <h2 className="text-3xl font-black italic uppercase mb-2">Reflex Training</h2>
+                            <p className="text-slate-500 text-[10px] font-black uppercase mb-10 tracking-widest">Uji kecepatan tanganmu di markas</p>
+                            <div className="text-8xl font-black text-white mb-10 italic drop-shadow-2xl">{gameClicks}</div>
+                            <button onClick={() => { playSound(audioPop); setGameClicks(c => c + 1); }}
+                                className="w-32 h-32 bg-emerald-500 rounded-full mx-auto flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.4)] active:scale-90 transition-all">
+                                <Zap size={40} fill="black" />
+                            </button>
+                        </div>
+
+                        {/* Hash-Hunt Game */}
+                        <div className="bg-slate-900/50 p-12 rounded-[50px] border border-white/5 text-center">
+                            <Lightbulb className="mx-auto text-yellow-400 mb-6 animate-bounce" size={50} />
+                            <h2 className="text-3xl font-black italic uppercase mb-2">Hash-Hunt Challenge</h2>
+                            <p className="text-slate-500 text-[10px] font-black uppercase mb-6 tracking-widest">Ketik hashtag yang benar!</p>
+                            
+                            <div className="mb-8 p-6 bg-white/5 rounded-3xl flex flex-col items-center">
+                                <p className="text-slate-400 text-sm font-bold uppercase mb-4">Temukan ini:</p>
+                                <span className="text-4xl font-black text-emerald-400 italic mb-4">{currentHash}</span>
+                                <input 
+                                    type="text"
+                                    value={hashInput}
+                                    onChange={(e) => setHashInput(e.target.value)}
+                                    placeholder="Ketik hashtag di sini..."
+                                    className="w-full max-w-xs bg-slate-800 border border-emerald-500/50 rounded-xl py-3 px-4 text-white text-sm focus:ring-2 focus:ring-emerald-500 transition"
+                                />
+                                <button onClick={submitHash} className="mt-4 bg-emerald-500 text-black py-3 px-6 rounded-xl font-bold text-xs uppercase hover:bg-emerald-400 transition">
+                                    Submit
+                                </button>
+                                {hashGameMsg && (
+                                    <p className={`mt-4 text-sm font-bold ${hashGameMsg.includes('✅') ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {hashGameMsg}
+                                    </p>
+                                )}
                             </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Collaboration</span>
-                                <div className="h-2 w-32 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-blue-500 w-[85%]"></div>
+                            <p className="text-xl font-black text-white italic">SKOR: {hashHuntScore}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* --- COLLABORATION SECTION --- */}
+                {activeTab === 'collab' && (
+                    <div className="space-y-8 animate-in slide-in-from-left-10 duration-700">
+                        {/* Simulasi Upload Sehat */}
+                        <div className="bg-gradient-to-br from-blue-700 to-indigo-900 p-10 rounded-[48px] shadow-2xl relative overflow-hidden">
+                            <Share2 className="absolute top-6 right-6 text-white/10" size={60} />
+                            <h3 className="text-3xl font-black italic mb-2 tracking-tight">Simulasi Post Sehat</h3>
+                            <p className="text-blue-100/60 text-[10px] mb-8 font-bold uppercase tracking-widest">Pelajari cara posting yang benar & aman.</p>
+                            
+                            <textarea 
+                                value={simulatedPostContent}
+                                onChange={(e) => setSimulatedPostContent(e.target.value)}
+                                placeholder="Tulis konten postinganmu di sini... (wajib #kreata!)"
+                                className="w-full h-32 bg-blue-900/50 border border-blue-500/50 rounded-2xl p-5 text-white text-sm focus:ring-2 focus:ring-blue-500 transition resize-none mb-4"
+                            ></textarea>
+                            
+                            <button onClick={simulatePost} disabled={isSimulatingUpload}
+                                className="w-full py-5 rounded-[28px] font-black text-sm uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 bg-white text-blue-950 hover:shadow-2xl active:scale-95">
+                                {isSimulatingUpload ? <><Atom className="animate-spin"/> Menganalisis...</> : <><Share2 size={20}/> Simulasi Upload</>}
+                            </button>
+
+                            {simulationResult && (
+                                <div className={`mt-6 p-4 rounded-2xl flex items-center gap-3 ${
+                                    simulationResult === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                                } animate-in fade-in`}>
+                                    {simulationResult === 'success' ? <CheckCircle size={24}/> : <XCircle size={24}/>}
+                                    <span className="text-sm font-bold">
+                                        {simulationResult === 'success' 
+                                            ? 'Berhasil! Postinganmu terverifikasi #kreata dan bersih.' 
+                                            : 'Gagal! Pastikan ada #kreata dan bukan spam.'}
+                                    </span>
                                 </div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Growth</span>
-                                <div className="h-2 w-32 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-amber-500 w-[70%]"></div>
+                            )}
+                        </div>
+
+                        {/* Kolaborator Aktif (Dummy) */}
+                        <div className="bg-slate-900/50 p-10 rounded-[48px] border border-white/5">
+                            <Layers className="text-purple-500 mb-4" size={40} />
+                            <h3 className="text-2xl font-black italic uppercase mb-6 tracking-tight">Ecosystem Growth</h3>
+                            
+                            <div className="space-y-4">
+                                <div className="p-4 bg-white/5 rounded-2xl flex justify-between items-center">
+                                    <span className="text-sm font-bold text-slate-300">Total Projects</span>
+                                    <span className="text-emerald-400 text-xl font-black">150+</span>
+                                </div>
+                                <div className="p-4 bg-white/5 rounded-2xl flex justify-between items-center">
+                                    <span className="text-sm font-bold text-slate-300">Active Collaborators</span>
+                                    <span className="text-blue-400 text-xl font-black">75</span>
+                                </div>
+                                <div className="p-4 bg-white/5 rounded-2xl flex justify-between items-center">
+                                    <span className="text-sm font-bold text-slate-300">Community Reach</span>
+                                    <span className="text-yellow-400 text-xl font-black"><Globe size={20} className="inline-block mr-2" /> Global</span>
                                 </div>
                             </div>
                         </div>
+                    </div>
+                )}
 
-                        <div className="mt-8 flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl border border-emerald-100 dark:border-emerald-800">
-                            <Sparkles className="text-emerald-500" size={18} />
-                            <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold leading-tight">
-                                Karya kamu muncul otomatis di feed utama sebagai Partner Kolaborasi!
-                            </p>
+                {/* --- SECURITY SECTION --- */}
+                {activeTab === 'security' && (
+                    <div className="space-y-4 animate-in slide-in-from-right-10 duration-700">
+                        <div className="bg-emerald-500/5 p-10 rounded-[48px] border border-emerald-500/10 relative overflow-hidden">
+                            <ShieldCheck className="text-emerald-500 mb-6 animate-bounce" size={40} />
+                            <h3 className="text-2xl font-black italic uppercase mb-8">System Analysis</h3>
+                            
+                            <div className="space-y-6">
+                                <div className="p-6 bg-white/5 rounded-3xl border border-white/5 relative overflow-hidden">
+                                    <div className="flex justify-between text-[10px] font-black uppercase mb-3">
+                                        <span>Spam Protection</span>
+                                        <span className="text-emerald-400">Online</span>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500 w-[99%]"></div>
+                                    </div>
+                                    <p className="text-[9px] text-slate-500 mt-4 leading-relaxed font-bold uppercase tracking-widest">
+                                        Seluruh postingan wajib menggunakan hashtag <span className="text-emerald-400">#kreata</span> untuk verifikasi keamanan real-time.
+                                    </p>
+                                </div>
+                                <div className="p-5 bg-white/5 rounded-3xl flex items-center gap-4">
+                                    <Fingerprint size={24} className="text-emerald-500" />
+                                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">Authentication Required</span>
+                                </div>
+                                <div className="p-5 bg-white/5 rounded-3xl flex items-center gap-4">
+                                    <TrendingUp size={24} className="text-blue-500" />
+                                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">Live Threat Monitoring</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
 
-                {/* 3. MANTRA KOMUNITAS */}
-                <div className="text-center py-10">
-                    <Heart className="mx-auto text-rose-500 animate-pulse mb-4" fill="currentColor" />
-                    <h2 className="text-2xl font-black text-gray-800 dark:text-white italic tracking-tighter">
-                        "CREATING BEYOND LIMITS"
-                    </h2>
-                    <p className="text-gray-400 text-[10px] uppercase tracking-[0.3em] mt-2">Together as One Kreata Family</p>
+                <div className="mt-24 text-center">
+                    <h4 className="text-slate-600 font-black italic tracking-[0.6em] text-[10px] uppercase">
+                        Secure • Creative • United
+                    </h4>
                 </div>
-            </div>
-
-            {/* FLOATING ACTION */}
-            <div className="fixed bottom-6 right-6">
-                <a 
-                    href={WA_GROUP} 
-                    className="w-14 h-14 bg-emerald-500 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition animate-bounce"
-                >
-                    <MessageCircle size={28} />
-                </a>
             </div>
         </div>
     );
