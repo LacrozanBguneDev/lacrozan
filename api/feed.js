@@ -119,20 +119,71 @@ export default async function handler(req, res) {
     const cursorId = req.query.cursor || null;
     const viewerId = req.query.viewerId || null;
     const tagRaw = req.query.tag || null;
+    const searchQuery = req.query.q || req.query.query || null; // Param untuk search
 
     const postsCollection = db.collection(POSTS_PATH);
     let rawPosts = [];
     let nextCursor = null;
 
-    /* ========== MODE HASHTAG (BARU) ========== */
-    if (mode === "hashtag" && tagRaw) {
+    /* ========== MODE SEARCH (BARU & AKURAT) ========== */
+    if (mode === "search" && searchQuery) {
+      const needle = searchQuery.toLowerCase().trim();
+      let results = [];
+      let lastDoc = null;
+      
+      // Jika ada cursor, load doc referensinya dulu
+      if (cursorId) {
+        const cDoc = await postsCollection.doc(cursorId).get();
+        if (cDoc.exists) lastDoc = cDoc;
+      }
+
+      // Loop scan untuk mencari kecocokan teks (Deep Search)
+      // Loop dibatasi agar tidak timeout (max 5 kali fetch @ 100 docs)
+      let safetyLoop = 0; 
+      while (results.length < limitReq && safetyLoop < 10) {
+        let q = postsCollection.orderBy("timestamp", "desc").limit(100);
+        if (lastDoc) q = q.startAfter(lastDoc);
+
+        const snap = await q.get();
+        if (snap.empty) break;
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+
+        for (const d of snap.docs) {
+          const data = d.data();
+          const text = (data.text || "").toLowerCase();
+          // Cek apakah text mengandung query pencarian
+          if (text.includes(needle)) {
+            results.push({
+              ...data,
+              id: d.id,
+              timestamp: safeMillis(data.timestamp)
+            });
+            if (results.length >= limitReq) break;
+          }
+        }
+        safetyLoop++;
+      }
+
+      rawPosts = results;
+      nextCursor = lastDoc?.id || null;
+    }
+
+    /* ========== MODE HASHTAG ========== */
+    else if (mode === "hashtag" && tagRaw) {
       const tag = tagRaw.toLowerCase().replace("#", "");
       const needle = `#${tag}`;
 
       let results = [];
       let lastDoc = null;
+      
+      if (cursorId) {
+        const cDoc = await postsCollection.doc(cursorId).get();
+        if (cDoc.exists) lastDoc = cDoc;
+      }
 
-      while (results.length < limitReq) {
+      let safetyLoop = 0;
+      while (results.length < limitReq && safetyLoop < 10) {
         let q = postsCollection.orderBy("timestamp", "desc").limit(100);
         if (lastDoc) q = q.startAfter(lastDoc);
 
@@ -152,6 +203,7 @@ export default async function handler(req, res) {
             if (results.length >= limitReq) break;
           }
         }
+        safetyLoop++;
       }
 
       rawPosts = results;
@@ -217,8 +269,12 @@ export default async function handler(req, res) {
       })));
     }
 
+    /* ========== FINAL PROCESSING ========== */
     let posts = uniqueById(rawPosts);
-    posts = filterSpamUsers(posts, 2);
+    // Filter spam hanya jika bukan mode pencarian user spesifik
+    if (mode !== 'user') {
+      posts = filterSpamUsers(posts, 2);
+    }
     posts = await enrichPostsWithUsers(posts);
 
     res.json({ posts, nextCursor, count: posts.length });
