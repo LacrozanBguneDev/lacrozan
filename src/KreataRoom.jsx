@@ -8,7 +8,8 @@ import {
     limit,
     getDocs,
     getDoc,
-    doc
+    doc,
+    orderBy // Import orderBy
 } from 'firebase/firestore';
 
 // --- KONFIGURASI HARDCODED ---
@@ -23,12 +24,10 @@ const WA_GROUP_URL = "https://chat.whatsapp.com/FFrhElhRj4bFLCy0HZszss?mode=wwt"
 const KreataRoom = ({ setPage, db, onPostClick }) => {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [showFullInfo, setShowFullInfo] = useState(false); // State untuk tombol Baca Selengkapnya
+    const [showFullInfo, setShowFullInfo] = useState(false);
 
     useEffect(() => {
         const fetchKreataPosts = async () => {
-            // 1. CEK KONEKSI DB DULU
-            // Jika db belum siap, matikan loading agar tidak muter terus
             if (!db) {
                 console.log("Database belum terhubung.");
                 setLoading(false);
@@ -36,46 +35,60 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
             }
 
             setLoading(true);
-            console.log("Memulai pencarian #kreata...");
-
+            
             try {
-                // 2. AMBIL 100 DATA TERBARU DARI DATABASE
+                // 1. QUERY LEBIH BANYAK & CARI DI SEMUA FIELD
+                // Kita ambil 300 data untuk memperbesar peluang ketemu postingan lama yang ada tag #kreata
+                // Jika error "Missing Index", hapus bagian orderBy('timestamp', 'desc') dan biarkan limit saja.
                 const postsRef = collection(db, FIXED_POSTS_PATH);
                 
-                // Ambil 100 data mentah (tanpa orderBy di query agar tidak kena error index)
-                const q = query(postsRef, limit(100));
+                // Coba urutkan dari yang terbaru (semoga tidak error index)
+                // Jika error index muncul di console, ganti baris bawah jadi: const q = query(postsRef, limit(300));
+                let q;
+                try {
+                     q = query(postsRef, orderBy('timestamp', 'desc'), limit(200));
+                } catch (e) {
+                     // Fallback jika tidak ada index
+                     q = query(postsRef, limit(300));
+                }
                 
                 const querySnapshot = await getDocs(q);
-                console.log(`Mengambil ${querySnapshot.size} data mentah untuk dicek.`);
+                console.log(`Mengambil ${querySnapshot.size} data mentah.`);
 
                 const rawPosts = [];
 
-                // 3. FILTERING (CARI #kreata)
                 querySnapshot.forEach((doc) => {
                     const data = doc.data();
                     
-                    // Pastikan string aman (tidak error jika null)
-                    const content = (data.content || "").toLowerCase();
-                    const title = (data.title || "").toLowerCase();
+                    // --- PERBAIKAN LOGIKA PENCARIAN ---
+                    // Gabungkan semua kemungkinan nama field menjadi satu string panjang
+                    // Ini mengantisipasi jika datamu pakai 'caption' bukan 'content'
+                    const allText = [
+                        data.title, 
+                        data.content, 
+                        data.caption, 
+                        data.description, 
+                        data.text,
+                        data.body
+                    ].map(val => (val || "").toLowerCase()).join(" "); // Gabung jadi satu string huruf kecil
 
-                    // Cek apakah ada #kreata di Judul ATAU Deskripsi
-                    if (content.includes('#kreata') || title.includes('#kreata')) {
+                    // Cek #kreata di string gabungan tersebut
+                    if (allText.includes('#kreata') || allText.includes('kreata room')) {
                         rawPosts.push({ id: doc.id, ...data });
                     }
                 });
 
-                console.log(`Lolos filter #kreata: ${rawPosts.length} postingan.`);
+                console.log(`Ditemukan: ${rawPosts.length} postingan #kreata.`);
 
-                // 4. SORTING MANUAL (Terbaru di atas berdasarkan timestamp)
+                // Sortir ulang di sisi klien (jaga-jaga jika fallback query yang jalan)
                 rawPosts.sort((a, b) => {
                     const timeA = a.timestamp?.seconds || 0;
                     const timeB = b.timestamp?.seconds || 0;
                     return timeB - timeA;
                 });
 
-                // 5. AMBIL DATA USER (FOTO PROFIL DLL)
+                // --- AMBIL DATA USER ---
                 const enrichedPosts = await Promise.all(rawPosts.map(async (p) => {
-                    // Jika data user sudah lengkap di post, pakai itu
                     if (p.user && p.user.photoURL) return p;
 
                     try {
@@ -88,26 +101,22 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                             return { ...p, user: userSnap.data() };
                         }
                     } catch (e) {
-                        console.log("Skip user info error:", p.id);
+                        // Silent error
                     }
-
-                    // Fallback jika user tidak ketemu
                     return { ...p, user: p.user || { username: 'User', photoURL: '' } };
                 }));
 
                 setPosts(enrichedPosts);
 
             } catch (error) {
-                console.error("ERROR Mengambil data:", error);
-                // Biarkan array posts kosong agar UI menampilkan pesan "Tidak ada data"
+                console.error("ERROR Fetch:", error);
             } finally {
-                // 6. WAJIB: MATIKAN LOADING APAPUN YANG TERJADI
                 setLoading(false);
             }
         };
 
         fetchKreataPosts();
-    }, [db]); // Efek jalan ulang kalau objek db berubah
+    }, [db]);
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] dark:bg-gray-900 pb-20 animate-in fade-in duration-500">
@@ -123,7 +132,7 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                 </div>
             </div>
 
-            {/* INFO SECTION (DENGAN BACA SELENGKAPNYA & TOMBOL WA) */}
+            {/* INFO SECTION */}
             <div className="max-w-4xl mx-auto px-4 -mt-6 relative z-10">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-700 p-6 md:p-8">
                     <div className="flex items-start gap-4">
@@ -133,51 +142,31 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                         <div className="flex-1">
                             <h3 className="font-bold text-gray-900 dark:text-white mb-2 md:hidden">Tentang Komunitas</h3>
 
-                            {/* TEXT CONTENT DENGAN LOGIKA TAMPIL/SEMBUNYI */}
                             <div className="space-y-4 text-sm leading-relaxed text-gray-600 dark:text-gray-300 text-justify">
-                                <p><strong>Kreata Community</strong> adalah wadah kolaborasi yang menaungi beberapa komunitas, yaitu <span className="text-emerald-600 font-bold"> Koloxe, Amethyst, dan McCreata</span>, yang disatukan dalam satu ekosistem komunitas. Kreata Community dibentuk sebagai ruang bersama untuk berinteraksi, berkreasi, serta mengembangkan aktivitas komunitas secara terarah dan berkelanjutan, baik secara offline maupun digital.</p>
+                                <p><strong>Kreata Community</strong> adalah wadah kolaborasi yang menaungi beberapa komunitas, yaitu <span className="text-emerald-600 font-bold"> Koloxe, Amethyst, dan McCreata</span>, yang disatukan dalam satu ekosistem komunitas.</p>
 
-                                {/* Bagian yang muncul hanya jika showFullInfo === true */}
                                 {showFullInfo && (
                                     <p className="animate-in fade-in slide-in-from-top-2 duration-300 pt-2 border-t border-dashed border-gray-200 dark:border-gray-700">
-                                        Kerja sama antara <strong>Kreata Community</strong> dan <strong>BguneNet</strong> dilakukan melalui penyediaan ruang komunitas digital di platform BguneNet sebagai sarana pendukung aktivitas komunitas. Melalui kerja sama ini, Kreata Community dapat mengelola interaksi, membagikan konten, dan meningkatkan partisipasi anggota, sementara BguneNet memperoleh kontribusi berupa kehadiran komunitas yang aktif sehingga tercipta ekosistem sosial media berbasis komunitas yang saling menguntungkan.
+                                        Kerja sama antara <strong>Kreata Community</strong> dan <strong>BguneNet</strong> dilakukan melalui penyediaan ruang komunitas digital di platform BguneNet sebagai sarana pendukung aktivitas komunitas.
                                     </p>
                                 )}
                             </div>
 
-                            {/* TOMBOL BACA SELENGKAPNYA */}
                             <button
                                 onClick={() => setShowFullInfo(!showFullInfo)}
                                 className="mt-3 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-1 hover:underline focus:outline-none"
                             >
-                                {showFullInfo ? (
-                                    <>Tutup Penjelasan <ChevronUp size={14} /></>
-                                ) : (
-                                    <>Baca Selengkapnya <ChevronDown size={14} /></>
-                                )}
+                                {showFullInfo ? (<>Tutup Penjelasan <ChevronUp size={14} /></>) : (<>Baca Selengkapnya <ChevronDown size={14} /></>)}
                             </button>
 
                             <div className="my-6 border-b border-gray-100 dark:border-gray-700 w-full"></div>
 
-                            {/* TOMBOL WHATSAPP */}
                             <div className="flex flex-col sm:flex-row gap-3">
-                                <a
-                                    href={WA_CHANNEL_URL}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-emerald-500 text-emerald-600 dark:bg-transparent dark:text-emerald-400 py-2.5 px-4 rounded-xl text-sm font-bold transition hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
-                                >
-                                    <Zap size={18} />
-                                    Join Saluran WA
+                                <a href={WA_CHANNEL_URL} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-emerald-500 text-emerald-600 dark:bg-transparent dark:text-emerald-400 py-2.5 px-4 rounded-xl text-sm font-bold transition hover:bg-emerald-50 dark:hover:bg-emerald-900/30">
+                                    <Zap size={18} /> Join Saluran WA
                                 </a>
-                                <a
-                                    href={WA_GROUP_URL}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-sm font-bold transition shadow-lg shadow-emerald-200 dark:shadow-none"
-                                >
-                                    <MessageCircle size={18} />
-                                    Gabung Grup WA
+                                <a href={WA_GROUP_URL} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-sm font-bold transition shadow-lg shadow-emerald-200 dark:shadow-none">
+                                    <MessageCircle size={18} /> Gabung Grup WA
                                 </a>
                             </div>
 
@@ -192,7 +181,7 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                     <div className="bg-white dark:bg-emerald-900 p-2.5 rounded-full text-emerald-600 dark:text-emerald-400 shadow-sm shrink-0"><Info size={20} /></div>
                     <div className="flex-1">
                         <h4 className="font-bold text-emerald-900 dark:text-emerald-300 text-sm">Ingin Karyamu Muncul di Sini?</h4>
-                        <p className="text-emerald-800/80 dark:text-emerald-400/80 text-xs mt-1 leading-relaxed">Cukup buat postingan baru dan sertakan hashtag <span className="font-bold bg-white dark:bg-black/30 px-1.5 py-0.5 rounded text-emerald-700 border border-emerald-200 dark:border-emerald-800 mx-1">#kreata</span> di caption atau judulmu.</p>
+                        <p className="text-emerald-800/80 dark:text-emerald-400/80 text-xs mt-1 leading-relaxed">Cukup buat postingan baru dan sertakan hashtag <span className="font-bold bg-white dark:bg-black/30 px-1.5 py-0.5 rounded text-emerald-700 border border-emerald-200 dark:border-emerald-800 mx-1">#kreata</span> di caption, judul, atau deskripsi.</p>
                     </div>
                 </div>
             </div>
@@ -207,20 +196,18 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-20 gap-3">
                         <Loader2 className="animate-spin text-emerald-500" size={32} />
-                        <p className="text-xs text-gray-400">Sedang memindai 100 postingan terbaru...</p>
+                        <p className="text-xs text-gray-400">Sedang mencari #kreata di seluruh data...</p>
                     </div>
                 ) : posts.length === 0 ? (
-                    // TAMPILAN JIKA KOSONG / ERROR (TIDAK LOADING TERUS)
                     <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 mx-auto max-w-md">
                         <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
                             <Info size={32} />
                         </div>
-                        <h4 className="font-bold text-gray-800 dark:text-white mb-1">Tidak ada postingan #kreata</h4>
-                        <p className="text-gray-500 text-sm mb-4 px-6">Kami sudah mengecek 100 postingan terbaru tapi tidak menemukan hashtag tersebut di judul atau caption.</p>
-                        <p className="text-emerald-500 text-xs font-bold bg-emerald-50 dark:bg-emerald-900/20 py-2 px-4 rounded-full inline-block">Jadilah yang pertama memposting!</p>
+                        <h4 className="font-bold text-gray-800 dark:text-white mb-1">Tidak ditemukan</h4>
+                        <p className="text-gray-500 text-sm mb-4 px-6">Kami sudah mengecek caption, judul, dan deskripsi dari 200 data terbaru.</p>
+                        <p className="text-xs text-red-400 bg-red-50 p-2 rounded mb-4">Tips: Pastikan hashtag #kreata tertulis benar (tanpa spasi di tengah).</p>
                     </div>
                 ) : (
-                    // TAMPILAN JIKA ADA DATA
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {posts.map((post) => (<KreataCard key={post.id} post={post} onClick={() => onPostClick && onPostClick(post.id)} />))}
                     </div>
@@ -231,11 +218,15 @@ const KreataRoom = ({ setPage, db, onPostClick }) => {
     );
 };
 
-// COMPONENT CARD (TIDAK ADA YANG DIHAPUS, TETAP SAMA)
+// COMPONENT CARD
 const KreataCard = ({ post, onClick }) => {
-    const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0);
-    const mediaSrc = post.mediaUrl || (post.mediaUrls ? post.mediaUrls[0] : null);
-    const excerpt = post.content ? (post.content.length > 100 ? post.content.substring(0, 100) + "..." : post.content) : "";
+    // Coba ambil gambar dari berbagai kemungkinan field
+    const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0) || post.image || post.thumbnail;
+    const mediaSrc = post.mediaUrl || (post.mediaUrls ? post.mediaUrls[0] : null) || post.image || post.thumbnail;
+    
+    // Coba ambil konten dari berbagai kemungkinan field
+    const rawContent = post.content || post.caption || post.description || post.text || "";
+    const excerpt = rawContent.length > 100 ? rawContent.substring(0, 100) + "..." : rawContent;
 
     return (
         <div onClick={onClick} className="group bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col h-full">
