@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah 
 
 import KreataRoom from './KreataRoom'; // <--- TAMBAHKAN INI (Asumsi file ada, atau logic akan dihandle di App)
 // ... kode lainnya ...
-KreataRoom
+
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
