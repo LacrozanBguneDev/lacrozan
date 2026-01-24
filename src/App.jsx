@@ -3171,13 +3171,14 @@ const MainAppContent = () => {
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => updateURL('home')} />}
                         
                         {/* Halaman Kreata */}
-                        {page === 'kreata' && (
-                            <KreataRoom 
-                                user={user} 
-                                setPage={updateURL} 
-                                isGuest={isGuest} 
-                            />
+  <KreataRoom 
+  setPage={setPage} 
+  user={user} 
+  onLike={handleLike} 
+  onComment={handleOpenCommentModal} 
+/>
                         )}
+
                     </main>
                     
                     {/* BOTTOM NAV (MOBILE ONLY) - HIDDEN ON SPECIFIC PAGES */}
