@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer utilities {
+  @keyframes particle-float {
+    0% { transform: translate(0, 0) scale(1); opacity: 0; }
+    25% { opacity: 0.8; }
+    50% { transform: translate(var(--tw-translate-x, 0), var(--tw-translate-y, 0)) scale(var(--tw-scale-x, 1)); opacity: 0.6; }
+    75% { opacity: 0.8; }
+    100% { transform: translate(0, 0) scale(1); opacity: 0; }
+  }
+
+  .animate-particle-float {
+    animation-name: particle-float;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out; /* Tambahan agar gerakan lebih smooth */
+    --tw-translate-x: calc(var(--random-x, 0) * 100px);
+    --tw-translate-y: calc(var(--random-y, 0) * 100px);
+    --tw-scale-x: calc(1 + var(--random-scale, 0));
+    --tw-scale-y: calc(1 + var(--random-scale, 0));
+  }
+}
