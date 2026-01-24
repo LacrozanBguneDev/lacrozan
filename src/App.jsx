@@ -5,7 +5,7 @@ import DOMPurify from 'dompurify'; // LIBRARY KEAMANAN ANTI-XSS (Pastikan sudah 
 
 import KreataRoom from './KreataRoom'; // <--- TAMBAHKAN INI (Asumsi file ada, atau logic akan dihandle di App)
 // ... kode lainnya ...
-
+KreataRoom
 
 // ==========================================
 // BAGIAN 1: IMPORT LIBRARIES & KONFIGURASI
@@ -3171,12 +3171,37 @@ const MainAppContent = () => {
                         {page==='chat' && <ChatSystem currentUser={user} onBack={() => updateURL('home')} />}
                         
                         {/* Halaman Kreata */}
-  <KreataRoom 
-  setPage={setPage} 
-  user={user} 
-  onLike={handleLike} 
-  onComment={handleOpenCommentModal} 
-/>
+  
+{/* GANTI BAGIAN RENDER KREATA ROOM DI App.jsx DENGAN INI */}
+{page === 'kreata' && (
+    <KreataRoom 
+        setPage={setPage} 
+        user={user} 
+        // Karena di App.jsx tidak ada fungsi global handleLike, 
+        // kita buat fungsi sederhana untuk dikirim ke KreataRoom
+        onLike={async (postId) => {
+            if (!user) {
+                setShowAuthModal(true);
+                return;
+            }
+            // Logika Like manual jika fungsi global tidak tersedia
+            const postRef = doc(db, `artifacts/${appId}/public/data/posts`, postId);
+            try {
+                await updateDoc(postRef, {
+                    likes: arrayUnion(user.uid)
+                });
+            } catch (e) {
+                console.error("Gagal Like dari KreataRoom", e);
+            }
+        }}
+        onComment={(post) => {
+            // Karena App.jsx kamu menggunakan state showComments di dalam PostItem, 
+            // Untuk sementara kita arahkan user ke post tersebut atau tampilkan alert
+            alert("Fitur komentar sedang dihubungkan...");
+        }}
+    />
+)}
+
                         )}
 
                     </main>
