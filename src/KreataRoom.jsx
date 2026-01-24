@@ -1,9 +1,9 @@
-// FILE: KreataRoom.jsx (ULTIMATE VERSION - NO ERROR - FULL FEATURES)
+// FILE: KreataRoom.jsx (ULTIMATE VERSION - FIXED BUILD ERROR - FULL FEATURES)
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  ArrowLeft, Zap, MessageCircle, Gamepad2, Sparkles, 
-  Rocket, ShieldCheck, Volume2, UserPlus, 
-  Check, Target, Share2, Info, Bell, HeartHandshake, Globe
+    ArrowLeft, Zap, MessageCircle, Gamepad2, Sparkles, 
+    Rocket, ShieldCheck, Volume2, UserPlus, 
+    Check, Target, Share2, Info, Bell, Users, Globe, Shield
 } from 'lucide-react';
 
 const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
@@ -16,12 +16,11 @@ const KreataRoom = ({ setPage }) => {
     const [simResult, setSimResult] = useState(null);
     const [isMuted, setIsMuted] = useState(false);
 
-    // Audio Refs (Menggunakan link publik stabil)
+    // Audio Refs
     const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'));
     const audioSuccess = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'));
 
     useEffect(() => {
-        // Cek status join di Local Storage HP User (Anti Error Database)
         const status = localStorage.getItem('kreata_member_status');
         if (status === 'joined') setIsFollowed(true);
     }, []);
@@ -29,7 +28,7 @@ const KreataRoom = ({ setPage }) => {
     const playSound = (sound) => {
         if (isMuted) return;
         sound.current.currentTime = 0;
-        sound.current.play().catch(() => {}); // Catch block untuk handle browser policy
+        sound.current.play().catch(() => {});
     };
 
     const handleJoin = () => {
@@ -56,19 +55,17 @@ const KreataRoom = ({ setPage }) => {
             <div className="relative h-80 w-full flex flex-col items-center justify-center overflow-hidden border-b border-white/5">
                 <div className="absolute inset-0 bg-emerald-500/10 animate-pulse" />
                 
-                {/* Back Button */}
                 <button onClick={() => { playSound(audioClick); setPage('home'); }} 
                     className="absolute top-6 left-6 z-50 bg-white/5 p-4 rounded-3xl border border-white/10 hover:bg-emerald-500 transition-all">
                     <ArrowLeft size={20} />
                 </button>
 
-                {/* Sound Button */}
                 <button onClick={() => setIsMuted(!isMuted)} 
                     className="absolute top-6 right-6 z-50 bg-white/5 p-4 rounded-3xl border border-white/10">
                     {isMuted ? <Volume2 className="opacity-20" size={20} /> : <Volume2 className="text-emerald-400" size={20} />}
                 </button>
                 
-                <div className="relative z-20 flex flex-col items-center">
+                <div className="relative z-20 flex flex-col items-center text-center">
                     <img src={KREATA_LOGO} className="w-28 h-28 rounded-[35px] border-4 border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.4)] object-cover" alt="Logo" />
                     <h1 className="mt-4 text-4xl font-black italic tracking-tighter text-white uppercase">KREATA <span className="text-emerald-500">ROOM</span></h1>
                     <p className="text-[10px] font-black tracking-[0.3em] text-emerald-400/60 uppercase">Partner Official BguneNet</p>
@@ -80,20 +77,22 @@ const KreataRoom = ({ setPage }) => {
                 {/* --- 2. INFORMASI KOMUNITAS (ABOUT) --- */}
                 <section className="bg-white/5 rounded-[40px] p-8 border border-white/10 shadow-2xl">
                     <div className="flex items-center gap-3 mb-6 text-emerald-400">
-                        <Handshake size={24}/>
+                        <Users size={24}/>
                         <h2 className="text-xl font-black italic uppercase">The Ecosystem</h2>
                     </div>
-                    <div className="space-y-4 text-sm text-slate-300 leading-relaxed font-medium">
+                    <div className="space-y-4 text-sm text-slate-300 leading-relaxed font-medium text-justify">
                         <p>
-                            <span className="text-white font-black underline decoration-emerald-500">KREATA</span> adalah ekosistem kolaborasi kreatif untuk para editor dan kreator digital di bawah naungan <span className="text-emerald-400 font-black">BguneNet</span>.
+                            <span className="text-white font-black underline decoration-emerald-500 text-base">Apa itu KREATA?</span><br/>
+                            Kreata adalah ekosistem kolaborasi kreatif untuk para editor, kreator digital, dan inovator visual. Di sini, setiap karya dihargai sebagai aset berharga.
                         </p>
                         <p>
-                            Kemitraan ini dibangun agar setiap karya memiliki standar keamanan tinggi dan bebas dari gangguan spam. BguneNet memberikan dukungan teknologi, sementara Kreata fokus pada inovasi konten tanpa batas.
+                            <span className="text-white font-black underline decoration-emerald-500 text-base">Kenapa Partner BguneNet?</span><br/>
+                            Kemitraan ini dibangun karena kreativitas butuh **Keamanan**. BguneNet memberikan perlindungan sistem dan infrastruktur database, sehingga member Kreata bisa berfokus penuh pada karya tanpa gangguan spam atau ancaman keamanan.
                         </p>
                     </div>
                 </section>
 
-                {/* --- 3. AKSES LINK KOMUNITAS (ASLI) --- */}
+                {/* --- 3. AKSES LINK KOMUNITAS (WHATSAPP) --- */}
                 <section className="space-y-4">
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 ml-4">Direct Connection</h3>
                     <div className="grid grid-cols-1 gap-4">
@@ -127,7 +126,7 @@ const KreataRoom = ({ setPage }) => {
                 <section className="bg-gradient-to-br from-emerald-600 to-teal-900 p-10 rounded-[45px] shadow-2xl relative overflow-hidden text-center">
                     <Sparkles className="absolute -top-4 -right-4 text-white/10" size={100} />
                     <h3 className="text-2xl font-black italic uppercase text-white mb-2 tracking-tighter">Registration</h3>
-                    <p className="text-emerald-100/60 text-[10px] font-bold uppercase mb-8 tracking-widest">Verifikasi Status Member Perangkat Kamu.</p>
+                    <p className="text-emerald-100/60 text-[10px] font-bold uppercase mb-8 tracking-widest leading-relaxed">Verifikasi Status Member Perangkat Kamu.</p>
                     
                     <button onClick={handleJoin}
                         className={`w-full py-6 rounded-[28px] font-black text-sm uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 ${
@@ -137,7 +136,7 @@ const KreataRoom = ({ setPage }) => {
                         }`}>
                         {isFollowed ? <><Check size={22}/> Verified Member</> : <><UserPlus size={22}/> Join Hub Now</>}
                     </button>
-                    <p className="mt-4 text-[8px] text-emerald-200/40 font-black uppercase italic tracking-widest">Data Aman & Tersimpan di LocalStorage HP.</p>
+                    <p className="mt-4 text-[8px] text-emerald-200/40 font-black uppercase italic tracking-widest">Tersimpan Permanen di Perangkat Ini.</p>
                 </section>
 
                 {/* --- 5. INTERAKTIF ZONE (GAMES & SIMULASI) --- */}
@@ -145,8 +144,8 @@ const KreataRoom = ({ setPage }) => {
                     <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 text-center">Interactive Tools</h3>
                     
                     {/* Reflex Game */}
-                    <div className="bg-slate-900 p-10 rounded-[45px] border border-white/5 text-center shadow-xl">
-                        <Target className="mx-auto text-emerald-500 mb-4" />
+                    <div className="bg-slate-900 p-10 rounded-[45px] border border-white/5 text-center shadow-xl group">
+                        <Target className="mx-auto text-emerald-500 mb-4 group-hover:rotate-12 transition-transform" size={40} />
                         <h4 className="text-lg font-black italic uppercase mb-2 tracking-tighter">Reflex Trainer</h4>
                         <div className="text-8xl font-black text-white mb-10 italic">{gameClicks}</div>
                         <button onClick={() => { playSound(audioClick); setGameClicks(c => c + 1); }}
