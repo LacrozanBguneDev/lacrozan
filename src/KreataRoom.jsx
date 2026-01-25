@@ -60,7 +60,7 @@ const KreataRoom = ({ setPage }) => {
     const fetchKreataPosts = async () => {
         try {
             setLoading(true);
-            const res = await fetch('https://app.bgunenet.my.id/api/feed?mode=search&q=%23kreata&limit=20');
+            const res = await fetch('https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=20');
             const data = await res.json();
             
             const sanitizedPosts = (data.posts || []).map(post => {
@@ -182,7 +182,7 @@ const KreataRoom = ({ setPage }) => {
                         <img src={KREATA_LOGO} className="w-12 h-12 rounded-xl shadow-lg" alt="Icon" />
                         <div>
                             <h2 className="text-sm font-bold text-white uppercase tracking-wide">Official Feed</h2>
-                            <p className="text-[10px] text-emerald-400 font-medium">Auto-post dengan hashtag <span className="bg-emerald-500/20 px-1 rounded text-white">#kreata</span></p>
+                            <p className="text-[10px] text-emerald-400 font-medium">Kreata Community adalah wadah kolaborasi yang menaungi komunitas Koloxe, Amethyst, dan McCreata untuk mengembangkan aktivitas komunitas secara berkelanjutan. Melalui kerja sama dengan BguneNet, Kreata Community mendapatkan ruang komunitas digital sebagai sarana pendukung aktivitas, sementara BguneNet memperoleh partisipasi komunitas yang aktif dalam ekosistemnya. Biar muncul Disini posting menggunakan hastag<span className="bg-emerald-500/20 px-1 rounded text-white">#kreata</span></p>
                         </div>
                     </div>
                     <div className="flex gap-2 mt-4">
