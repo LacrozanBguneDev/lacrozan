@@ -387,8 +387,8 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
 const processMentions = async (text, currentUser, postId, type = 'mention') => {
     if (!text || !currentUser || !db) return;
     
-    // Regex untuk menangkap @username
-    const mentionRegex = /@(\w+)/g;
+    // UPDATED REGEX: Menangkap username dengan spasi (yang sudah diubah jadi hyphen)
+    const mentionRegex = /@([\w-]+)/g;
     const matches = text.match(mentionRegex);
     
     if (!matches) return;
@@ -397,10 +397,11 @@ const processMentions = async (text, currentUser, postId, type = 'mention') => {
     const uniqueMentions = [...new Set(matches)].slice(0, 5);
     
     for (const mention of uniqueMentions) {
-        const username = mention.substring(1); // Hilangkan @
+        // Hapus @ dan ubah hyphen kembali jadi spasi untuk query ke DB
+        const username = mention.substring(1).replace(/-/g, ' '); 
         
         try {
-            // Cari user berdasarkan username (perlu query karena kita cuma punya username)
+            // Cari user berdasarkan username
             const usersRef = collection(db, getPublicCollection('userProfiles'));
             const q = query(usersRef, where('username', '==', username), limit(1));
             const querySnapshot = await getDocs(q);
@@ -1412,7 +1413,7 @@ const SkeletonPost = () => (
 
 // PERBAIKAN 1 & 3: Anti-XSS (Security Wise) & Layout
 // FIX: TOKENIZATION LOGIC TO PREVENT BROKEN LINKS IN DESCRIPTION
-const renderMarkdown = (text, onHashtagClick) => {
+const renderMarkdown = (text, onHashtagClick, onMentionClick) => {
     if (!text) return <p className="text-gray-400 italic">Tidak ada konten.</p>;
     
     let html = text;
@@ -1447,7 +1448,8 @@ const renderMarkdown = (text, onHashtagClick) => {
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     
     // 5. Mentions (@username) - Link ke profil (Kosmetik/Navigasi)
-    html = html.replace(/@(\w+)/g, '<span class="text-sky-600 font-bold cursor-pointer hover:underline">@$1</span>');
+    // FITUR BARU: Handle mention dengan tanda hubung untuk username berspasi
+    html = html.replace(/@([\w-]+)/g, '<span class="text-sky-600 font-bold cursor-pointer hover:underline mention" data-username="$1">@$1</span>');
     
     html = html.replace(/\n/g, '<br>');
 
@@ -1458,7 +1460,7 @@ const renderMarkdown = (text, onHashtagClick) => {
 
     // 7. Sanitasi Akhir dengan DOMPurify (Hapus XSS)
     const cleanHtml = DOMPurify.sanitize(html, {
-        ADD_ATTR: ['target', 'class', 'data-tag'], 
+        ADD_ATTR: ['target', 'class', 'data-tag', 'data-username'], 
         ADD_TAGS: ['svg', 'path', 'polyline', 'line'], 
     });
     
@@ -1470,6 +1472,12 @@ const renderMarkdown = (text, onHashtagClick) => {
                 if (e.target.classList.contains('hashtag')) { 
                     e.stopPropagation(); 
                     if(onHashtagClick) onHashtagClick(e.target.getAttribute('data-tag')); 
+                }
+                if (e.target.classList.contains('mention')) {
+                    e.stopPropagation();
+                    // Ubah kembali hyphen jadi spasi untuk pencarian
+                    const username = e.target.getAttribute('data-username').replace(/-/g, ' ');
+                    if(onMentionClick) onMentionClick(username);
                 }
                 const link = e.target.closest('a');
                 if (link) { e.stopPropagation(); }
@@ -1896,9 +1904,24 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
     };
 
     const insertMention = (username) => {
-        const newVal = newComment.replace(/@(\w*)$/, `@${username} `);
+        // FITUR BARU: Ganti spasi dengan tanda hubung saat insert mention
+        const safeUsername = username.replace(/\s+/g, '-');
+        const newVal = newComment.replace(/@(\w*)$/, `@${safeUsername} `);
         setNewComment(newVal);
         setShowMentionList(false);
+    };
+
+    // FITUR BARU: Handle click mention tag
+    const handleMentionClick = (username) => {
+        if (!users) return;
+        const target = users.find(u => u.username === username);
+        if (target) {
+            goToProfile(target.uid);
+        } else if (onNavigate) {
+             // Fallback jika users tidak lengkap (jarang terjadi)
+             // Atau bisa arahkan ke search page
+             onHashtagClick(username); // Search user
+        }
     };
 
     const handleLike = async () => {
@@ -1996,7 +2019,7 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
                             </div>
                             {/* FIX: Render text komentar dengan markdown agar mention bisa diklik */}
                             <div className="text-gray-600 dark:text-gray-400 leading-relaxed block">
-                                {renderMarkdown(c.text, onHashtagClick)}
+                                {renderMarkdown(c.text, onHashtagClick, handleMentionClick)}
                             </div>
                         </div>
                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">{!isGuest && <button onClick={()=>setReplyTo(c)} className="text-gray-400 hover:text-sky-500"><Reply size={12}/></button>}{(currentUserId === c.userId || isMeDeveloper) && <button onClick={() => handleDeleteComment(c.id)} className="text-gray-400 hover:text-red-500">{isMeDeveloper && currentUserId !== c.userId ? <ShieldAlert size={12}/> : <Trash size={12}/>}</button>}</div>
@@ -2088,7 +2111,8 @@ const PostItem = ({ post, currentUserId, profile, handleFollow, goToProfile, isM
             ) : (
                 <div className="mb-3">
                     {post.title && <h3 className="font-bold text-gray-900 dark:text-white mb-2 text-base">{post.title}</h3>}
-                    <div className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-line mb-3">{renderMarkdown(displayText, onHashtagClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
+                    {/* PASS handleMentionClick to renderMarkdown */}
+                    <div className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-line mb-3">{renderMarkdown(displayText, onHashtagClick, handleMentionClick)}{isLongText && <button onClick={() => setIsExpanded(!isExpanded)} className="text-sky-600 font-bold text-xs ml-1 hover:underline inline-block mt-1">{isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>}</div>
                     
                     <div onDoubleClick={handleDoubleTap} className="relative mt-2 rounded-xl overflow-hidden">
                          {showHeartOverlay && <div className="absolute inset-0 z-20 flex items-center justify-center animate-in zoom-in-50 fade-out duration-700 pointer-events-none"><Heart size={100} className="text-white drop-shadow-2xl fill-white" /></div>}
@@ -2181,7 +2205,9 @@ const CreatePost = ({ setPage, userId, username, userPhoto, onSuccess, users }) 
     };
 
     const insertMention = (username) => {
-        const newVal = form.content.replace(/@(\w*)$/, `@${username} `);
+        // FITUR BARU: Ganti spasi dengan tanda hubung
+        const safeUsername = username.replace(/\s+/g, '-');
+        const newVal = form.content.replace(/@(\w*)$/, `@${safeUsername} `);
         setForm({...form, content: newVal});
         setShowMentionList(false);
     };
@@ -3172,36 +3198,34 @@ const MainAppContent = () => {
                         
                         {/* Halaman Kreata */}
   
-{/* GANTI BAGIAN RENDER KREATA ROOM DI App.jsx DENGAN INI */}
-{page === 'kreata' && (
-    <KreataRoom 
-        setPage={setPage} 
-        user={user} 
-        // Karena di App.jsx tidak ada fungsi global handleLike, 
-        // kita buat fungsi sederhana untuk dikirim ke KreataRoom
-        onLike={async (postId) => {
-            if (!user) {
-                setShowAuthModal(true);
-                return;
-            }
-            // Logika Like manual jika fungsi global tidak tersedia
-            const postRef = doc(db, `artifacts/${appId}/public/data/posts`, postId);
-            try {
-                await updateDoc(postRef, {
-                    likes: arrayUnion(user.uid)
-                });
-            } catch (e) {
-                console.error("Gagal Like dari KreataRoom", e);
-            }
-        }}
-        onComment={(post) => {
-            // Karena App.jsx kamu menggunakan state showComments di dalam PostItem, 
-            // Untuk sementara kita arahkan user ke post tersebut atau tampilkan alert
-            alert("Fitur komentar sedang dihubungkan...");
-        }}
-    />
-)}
-
+                        {/* GANTI BAGIAN RENDER KREATA ROOM DI App.jsx DENGAN INI */}
+                        {page === 'kreata' && (
+                            <KreataRoom 
+                                setPage={setPage} 
+                                user={user} 
+                                // Karena di App.jsx tidak ada fungsi global handleLike, 
+                                // kita buat fungsi sederhana untuk dikirim ke KreataRoom
+                                onLike={async (postId) => {
+                                    if (!user) {
+                                        setShowAuthModal(true);
+                                        return;
+                                    }
+                                    // Logika Like manual jika fungsi global tidak tersedia
+                                    const postRef = doc(db, `artifacts/${appId}/public/data/posts`, postId);
+                                    try {
+                                        await updateDoc(postRef, {
+                                            likes: arrayUnion(user.uid)
+                                        });
+                                    } catch (e) {
+                                        console.error("Gagal Like dari KreataRoom", e);
+                                    }
+                                }}
+                                onComment={(post) => {
+                                    // Karena App.jsx kamu menggunakan state showComments di dalam PostItem, 
+                                    // Untuk sementara kita arahkan user ke post tersebut atau tampilkan alert
+                                    alert("Fitur komentar sedang dihubungkan...");
+                                }}
+                            />
                         )}
 
                     </main>
@@ -3210,22 +3234,22 @@ const MainAppContent = () => {
                     {showHeader && ( <nav className="md:hidden fixed bottom-0 w-full bg-white dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 pb-safe pt-2 px-6 flex justify-between items-center z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"><NavBtn icon={Home} active={page==='home'} onClick={()=>updateURL('home')}/><NavBtn icon={Search} active={page==='search'} onClick={()=>updateURL('search')}/><button onClick={()=> isGuest ? setShowAuthModal(true) : updateURL('create')} className="bg-sky-500 text-white p-3.5 rounded-full shadow-xl shadow-sky-300 hover:scale-110 transition -mt-8 border-4 border-[#F0F4F8] dark:border-gray-900"><Plus size={28} strokeWidth={3}/></button><NavBtn icon={Trophy} active={page==='leaderboard'} onClick={()=>updateURL('leaderboard')}/>{isGuest ? ( <NavBtn icon={LogIn} active={false} onClick={()=>setShowAuthModal(true)}/> ) : ( <NavBtn icon={User} active={page==='profile'} onClick={()=>updateURL('profile')}/> )}</nav> )}
                     
                    
-{showAuthModal && (
-    <AuthModal onClose={() => setShowAuthModal(false)} />
-)}
+                    {showAuthModal && (
+                        <AuthModal onClose={() => setShowAuthModal(false)} />
+                    )}
 
-{showOnboarding && user && (
-    <OnboardingScreen
-        user={user}
-        onComplete={() => setShowOnboarding(false)}
-    />
-)}
+                    {showOnboarding && user && (
+                        <OnboardingScreen
+                            user={user}
+                            onComplete={() => setShowOnboarding(false)}
+                        />
+                    )}
 
-<PWAInstallPrompt />
-</div>
-</div>
-</ErrorBoundary>
-);
+                    <PWAInstallPrompt />
+                </div>
+            </div>
+        </ErrorBoundary>
+    );
 };
 
 const NavBtn = ({ icon: Icon, active, onClick }) => (
