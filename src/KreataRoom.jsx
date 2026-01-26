@@ -98,7 +98,7 @@ const KreataRoom = ({ setPage }) => {
     const fetchKreataPosts = async () => {
         try {
             setLoading(true);
-            const res = await fetch('https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=20');
+            const res = await fetch('https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=50');
             const data = await res.json();
 
             const sanitizedPosts = (data.posts || []).map(post => {
