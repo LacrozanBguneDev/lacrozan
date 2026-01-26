@@ -18,6 +18,6 @@ messaging.onBackgroundMessage(payload => {
   const n = payload.notification;
   self.registration.showNotification(n.title, {
     body: n.body,
-    icon: '/icon.png'
+    icon: 'https://n.uguu.se/qXDmMTZB.jpg'
   });
 });
