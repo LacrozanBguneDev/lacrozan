@@ -1,4 +1,3 @@
-// IMPORTS Wajib
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging-compat.js');
 
@@ -15,38 +14,10 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Background notif (Firebase)
-messaging.onBackgroundMessage((payload) => {
+messaging.onBackgroundMessage(payload => {
   const n = payload.notification;
   self.registration.showNotification(n.title, {
     body: n.body,
-    icon: 'https://n.uguu.se/qXDmMTZB.jpg',
-    badge: 'https://n.uguu.se/qXDmMTZB.jpg'
+    icon: '/icon.png'
   });
-});
-
-// ======== Fitur PWA ========
-
-// Install SW
-self.addEventListener('install', () => {
-  console.log('[SW] Installed');
-});
-
-// Push Notif Manual
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
-
-  const data = event.data.json();
-  self.registration.showNotification(data.title, {
-    body: data.body,
-    icon: data.icon || 'https://n.uguu.se/qXDmMTZB.jpg',
-    badge: 'https://n.uguu.se/qXDmMTZB.jpg',
-    data: { url: data.click_action || '/' }
-  });
-});
-
-// Klik Notif
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  event.waitUntil(clients.openWindow(event.notification.data.url));
 });
