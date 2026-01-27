@@ -10,6 +10,7 @@ const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376
 // --- HELPER: YOUTUBE PARSER ---
 const getYoutubeId = (url) => {
     if (!url) return null;
+    // Support berbagai format URL YouTube (short, embed, watch)
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
     return (match && match[2].length === 11) ? match[2] : null;
@@ -94,21 +95,34 @@ const ExpandableText = ({ content }) => {
 };
 
 const KreataRoom = ({ setPage }) => {
+    // State Data
     const [posts, setPosts] = useState([]);
+    
+    // State Infinite Scroll & API
     const [loading, setLoading] = useState(false);
-    const [nextCursor, setNextCursor] = useState(null); // State kursor halaman
-    const [hasMore, setHasMore] = useState(true); // Cek apakah masih ada data
+    const [nextCursor, setNextCursor] = useState(null); // Menyimpan cursor halaman berikutnya
+    const [hasMore, setHasMore] = useState(true); // Apakah masih ada data di server?
+    
+    // State UI/UX
     const [isMuted, setIsMuted] = useState(false);
     const [hasStarted, setHasStarted] = useState(false);
 
-    // Ref untuk Infinite Scroll
+    // Audio Refs
+    // Kita inisialisasi di sini, tapi play() dilakukan saat user click
+    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3')); 
+    const bgMusic = useRef(new Audio('https://cdn.pixabay.com/audio/2021/08/08/audio_c1c73a0c0e.mp3')); 
+
+    // --- INFINITE SCROLL LOGIC ---
+    // Menggunakan teknik "Sentinel" (elemen pemantau di paling bawah)
     const observer = useRef();
-    const lastPostElementRef = useCallback(node => {
-        if (loading) return;
+    const lastElementRef = useCallback(node => {
+        if (loading) return; // Jangan observe jika sedang loading
+        
         if (observer.current) observer.current.disconnect();
         
         observer.current = new IntersectionObserver(entries => {
             if (entries[0].isIntersecting && hasMore) {
+                // Jika elemen terlihat DAN masih ada data, fetch lagi
                 fetchKreataPosts(nextCursor);
             }
         });
@@ -116,44 +130,43 @@ const KreataRoom = ({ setPage }) => {
         if (node) observer.current.observe(node);
     }, [loading, hasMore, nextCursor]);
 
-    // Audio Refs
-    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3')); 
-    const bgMusic = useRef(new Audio('https://cdn.pixabay.com/audio/2021/08/08/audio_c1c73a0c0e.mp3')); 
 
-    useEffect(() => {
-        if (hasStarted) {
-            fetchKreataPosts(); // Fetch awal (tanpa cursor)
-            bgMusic.current.loop = true;
-            bgMusic.current.volume = 0.3;
-            bgMusic.current.play().catch(() => console.log("Autoplay blocked"));
-        }
-        return () => {
-            bgMusic.current.pause();
-        };
-    // eslint-disable-next-line
-    }, [hasStarted]);
+    // Fungsi Fetch Utama
+    const fetchKreataPosts = async (cursorToUse = null) => {
+        // Guard: Jangan fetch jika sudah loading
+        if (loading) return;
 
-    const fetchKreataPosts = async (cursor = null) => {
+        setLoading(true);
         try {
-            setLoading(true);
+            // Bangun URL
+            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10';
             
-            // Bangun URL dengan kursor jika ada
-            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10'; // Limit dikecilkan biar scroll terasa
-            if (cursor) {
-                url += `&cursor=${cursor}`;
+            // PENTING: Tambahkan parameter cursor jika ada
+            if (cursorToUse) {
+                url += `&cursor=${cursorToUse}`;
             }
+
+            console.log("Fetching URL:", url); // Debugging di console
 
             const res = await fetch(url);
             const data = await res.json();
-            const newPostsRaw = data.posts || [];
+            
+            const rawPosts = data.posts || [];
+            
+            // Jika API mengembalikan array kosong, berarti data habis
+            if (rawPosts.length === 0) {
+                setHasMore(false);
+                setLoading(false);
+                return;
+            }
 
-            // Sanitasi dan format data
-            const sanitizedNewPosts = newPostsRaw.map(post => {
+            // Sanitasi Data (Deteksi Youtube/Gambar)
+            const sanitizedNewPosts = rawPosts.map(post => {
                 let finalImage = null;
                 let isVideo = false;
                 let videoUrl = null;
 
-                // Logika Deteksi Media (Gambar vs Video)
+                // Cek Media URL
                 if (post.mediaUrl && post.mediaUrl.length > 5) {
                     if (getYoutubeId(post.mediaUrl)) {
                         isVideo = true;
@@ -162,7 +175,6 @@ const KreataRoom = ({ setPage }) => {
                         finalImage = post.mediaUrl;
                     }
                 } else if (post.mediaUrls && post.mediaUrls.length > 0) {
-                     // Cek array mediaUrls
                     const firstMedia = post.mediaUrls[0];
                     if (getYoutubeId(firstMedia)) {
                         isVideo = true;
@@ -172,7 +184,7 @@ const KreataRoom = ({ setPage }) => {
                     }
                 }
 
-                // Fallback: Cek di dalam konten teks jika tidak ada mediaUrl tapi ada link youtube
+                // Cek Content Text jika tidak ada media
                 if (!finalImage && !isVideo) {
                      const ytIdInContent = getYoutubeId(post.content || post.text || "");
                      if (ytIdInContent) {
@@ -189,19 +201,25 @@ const KreataRoom = ({ setPage }) => {
                     avatar: post.user?.photoURL || post.authorAvatar || null,
                     image: finalImage,
                     isVideo: isVideo,
-                    videoUrl: videoUrl
+                    videoUrl: videoUrl,
+                    timestamp: post.timestamp // Bisa berguna untuk key unik
                 };
             });
 
-            // Update State dengan Mencegah Duplikat
+            // Update State Posts (Anti Duplikat)
             setPosts(prevPosts => {
                 const existingIds = new Set(prevPosts.map(p => p.id));
+                // Filter postingan yang ID-nya sudah ada
                 const uniqueNewPosts = sanitizedNewPosts.filter(p => !existingIds.has(p.id));
+                
+                // Jika setelah difilter ternyata kosong, tapi API bilang masih ada nextCursor,
+                // ini bisa terjadi jika API mengirim data overlapping.
+                // Tetap return gabungan untuk keamanan.
                 return [...prevPosts, ...uniqueNewPosts];
             });
 
-            // Set Next Cursor
-            if (data.nextCursor && sanitizedNewPosts.length > 0) {
+            // Update Cursor untuk fetch berikutnya
+            if (data.nextCursor) {
                 setNextCursor(data.nextCursor);
                 setHasMore(true);
             } else {
@@ -210,26 +228,57 @@ const KreataRoom = ({ setPage }) => {
             }
 
         } catch (e) {
-            console.error("Gagal load Kreata posts", e);
+            console.error("Error fetching posts:", e);
         } finally {
             setLoading(false);
         }
     };
 
+    // Efek Samping Audio (Cleanup only)
+    useEffect(() => {
+        // Kita hanya atur loop dan volume di sini
+        bgMusic.current.loop = true;
+        bgMusic.current.volume = 0.3;
+        
+        return () => {
+            bgMusic.current.pause();
+        };
+    }, []);
+
+    // Helper Audio
     const playClick = () => {
         audioClick.current.currentTime = 0;
-        audioClick.current.play().catch(() => {});
+        audioClick.current.play().catch(() => {}); // Ignore error on click sound
     };
 
     const toggleMusic = () => {
-        if (isMuted) bgMusic.current.play().catch(() => {});
-        else bgMusic.current.pause();
+        if (isMuted) {
+            bgMusic.current.play().catch(e => console.log("Play blocked", e));
+        } else {
+            bgMusic.current.pause();
+        }
         setIsMuted(!isMuted);
     };
 
+    // --- FUNGSI MULAI (PENTING UNTUK AUTOPLAY) ---
     const startRoom = () => {
-        playClick();
+        playClick(); // Mainkan efek klik
+        
+        // PENTING: Audio dimainkan DI DALAM event handler click ini
+        // Browser akan mengizinkan karena ada interaksi user
+        bgMusic.current.play()
+            .then(() => {
+                console.log("Audio started successfully");
+            })
+            .catch(e => {
+                console.warn("Audio autoplay blocked by browser policy:", e);
+                // Fallback: User harus unmute manual nanti
+                setIsMuted(true); 
+            });
+
         setHasStarted(true);
+        // Fetch data pertama kali
+        fetchKreataPosts(); 
     };
 
     const handleViewDetail = (postId) => {
@@ -338,7 +387,8 @@ const KreataRoom = ({ setPage }) => {
                             <Sparkles size={16} className="text-emerald-500 fill-emerald-500" />
                             <h3 className="text-sm font-black uppercase text-white tracking-widest">Karya Terbaru</h3>
                         </div>
-                        {loading && <Loader2 className="animate-spin text-emerald-500" size={18} />}
+                        {/* Indikator Loading di atas hanya muncul saat initial load */}
+                        {loading && posts.length === 0 && <Loader2 className="animate-spin text-emerald-500" size={18} />}
                     </div>
 
                     {posts.length === 0 && !loading ? (
@@ -346,95 +396,86 @@ const KreataRoom = ({ setPage }) => {
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Belum ada karya baru</p>
                         </div>
                     ) : (
-                        posts.map((post, index) => {
-                            // Cek jika ini elemen terakhir untuk dipasangi trigger infinite scroll
-                            const isLastElement = posts.length === index + 1;
-                            
-                            return (
-                                <div 
-                                    key={post.id} 
-                                    ref={isLastElement ? lastPostElementRef : null}
-                                    className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors"
-                                >
+                        posts.map((post) => (
+                            <div key={post.id} className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors">
 
-                                    {/* AUTHOR HEADER */}
-                                    <div className="p-4 flex items-center gap-3 bg-[#131620]/50 backdrop-blur-sm">
-                                        <div className="relative">
-                                            <div className="absolute inset-0 bg-emerald-500 blur opacity-20 rounded-full"></div>
-                                            <img 
-                                                src={post.avatar || `https://ui-avatars.com/api/?name=${post.author}&background=random`} 
-                                                onError={(e) => {
-                                                    e.target.onerror = null; 
-                                                    e.target.src = `https://ui-avatars.com/api/?name=${post.author}&background=10b981&color=fff&size=128`;
-                                                }}
-                                                className="relative w-10 h-10 rounded-full bg-slate-800 object-cover ring-2 ring-[#1e293b]" 
-                                                alt="Avatar" 
-                                            />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <h4 className="text-sm font-bold text-white truncate">{post.author}</h4>
-                                            <p className="text-[10px] text-emerald-500/80 uppercase tracking-wider font-bold">Creator</p>
-                                        </div>
-                                        <button onClick={() => handleShare(post)} className="text-slate-600 hover:text-white p-2 transition-colors">
-                                            <Share2 size={18} />
-                                        </button>
+                                {/* AUTHOR HEADER */}
+                                <div className="p-4 flex items-center gap-3 bg-[#131620]/50 backdrop-blur-sm">
+                                    <div className="relative">
+                                        <div className="absolute inset-0 bg-emerald-500 blur opacity-20 rounded-full"></div>
+                                        <img 
+                                            src={post.avatar || `https://ui-avatars.com/api/?name=${post.author}&background=random`} 
+                                            onError={(e) => {
+                                                e.target.onerror = null; 
+                                                e.target.src = `https://ui-avatars.com/api/?name=${post.author}&background=10b981&color=fff&size=128`;
+                                            }}
+                                            className="relative w-10 h-10 rounded-full bg-slate-800 object-cover ring-2 ring-[#1e293b]" 
+                                            alt="Avatar" 
+                                        />
                                     </div>
-
-                                    {/* CONTENT BODY */}
-                                    <div>
-                                        {/* Media Logic: Video YouTube atau Gambar */}
-                                        {post.isVideo ? (
-                                            <YouTubeEmbed url={post.videoUrl} />
-                                        ) : (
-                                            post.image && (
-                                                <div className="w-full bg-black relative border-y border-white/5 group-hover:border-white/10 transition-colors">
-                                                    <img 
-                                                        src={post.image} 
-                                                        className="w-full h-auto max-h-[500px] object-contain mx-auto" 
-                                                        alt="Content" 
-                                                        loading="lazy" 
-                                                    />
-                                                </div>
-                                            )
-                                        )}
-
-                                        {/* Text Area */}
-                                        <div className="p-5 bg-gradient-to-b from-[#0f111a] to-[#0a0c12]">
-                                            <ExpandableText content={post.content} />
-                                        </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className="text-sm font-bold text-white truncate">{post.author}</h4>
+                                        <p className="text-[10px] text-emerald-500/80 uppercase tracking-wider font-bold">Creator</p>
                                     </div>
+                                    <button onClick={() => handleShare(post)} className="text-slate-600 hover:text-white p-2 transition-colors">
+                                        <Share2 size={18} />
+                                    </button>
+                                </div>
 
-                                    {/* ACTION BUTTONS */}
-                                    <div className="p-4 pt-0 flex gap-3">
-                                        <button 
-                                            onClick={() => handleShare(post)}
-                                            className="flex-1 bg-slate-800/50 hover:bg-slate-800 text-slate-300 py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all border border-white/5 hover:border-white/20"
-                                        >
-                                            <Share2 size={16} /> Share
-                                        </button>
-                                        <button 
-                                            onClick={() => handleViewDetail(post.id)}
-                                            className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98]"
-                                        >
-                                            <ExternalLink size={16} /> Buka Postingan
-                                        </button>
+                                {/* CONTENT BODY */}
+                                <div>
+                                    {post.isVideo ? (
+                                        <YouTubeEmbed url={post.videoUrl} />
+                                    ) : (
+                                        post.image && (
+                                            <div className="w-full bg-black relative border-y border-white/5 group-hover:border-white/10 transition-colors">
+                                                <img 
+                                                    src={post.image} 
+                                                    className="w-full h-auto max-h-[500px] object-contain mx-auto" 
+                                                    alt="Content" 
+                                                    loading="lazy" 
+                                                />
+                                            </div>
+                                        )
+                                    )}
+
+                                    <div className="p-5 bg-gradient-to-b from-[#0f111a] to-[#0a0c12]">
+                                        <ExpandableText content={post.content} />
                                     </div>
                                 </div>
-                            );
-                        })
+
+                                {/* ACTION BUTTONS */}
+                                <div className="p-4 pt-0 flex gap-3">
+                                    <button 
+                                        onClick={() => handleShare(post)}
+                                        className="flex-1 bg-slate-800/50 hover:bg-slate-800 text-slate-300 py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all border border-white/5 hover:border-white/20"
+                                    >
+                                        <Share2 size={16} /> Share
+                                    </button>
+                                    <button 
+                                        onClick={() => handleViewDetail(post.id)}
+                                        className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98]"
+                                    >
+                                        <ExternalLink size={16} /> Buka Postingan
+                                    </button>
+                                </div>
+                            </div>
+                        ))
                     )}
                     
-                    {/* Loader saat load more */}
-                    {loading && hasMore && posts.length > 0 && (
-                         <div className="flex justify-center py-6">
-                            <Loader2 className="animate-spin text-emerald-500" size={24} />
-                         </div>
-                    )}
-                </div>
-
-                {/* Bottom Spacer */}
-                <div className="pb-10 pt-4 flex justify-center opacity-20">
-                     <div className="w-16 h-1.5 bg-slate-700 rounded-full"></div>
+                    {/* SENTINEL / LOADER ELEMENT */}
+                    {/* Elemen ini diletakkan di paling bawah. Saat terlihat layar, fungsi fetch ketrigger */}
+                    <div ref={lastElementRef} className="py-6 flex flex-col items-center justify-center min-h-[50px] opacity-80">
+                         {loading && hasMore && (
+                             <>
+                                <Loader2 className="animate-spin text-emerald-500 mb-2" size={24} />
+                                <span className="text-[10px] text-slate-500 uppercase tracking-widest animate-pulse">Memuat karya lainnya...</span>
+                             </>
+                         )}
+                         {!hasMore && posts.length > 0 && (
+                             <span className="text-[10px] text-slate-600 uppercase tracking-widest">Semua karya sudah ditampilkan</span>
+                         )}
+                    </div>
                 </div>
             </div>
         </div>
