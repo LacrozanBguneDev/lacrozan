@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
     ArrowLeft, Sparkles, Volume2, VolumeX, 
     Bell, Loader2, Play, Eye, 
@@ -7,10 +7,52 @@ import {
 
 const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
+// --- HELPER YOUTUBE ---
+const getYoutubeId = (url) => {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+};
+
+// --- KOMPONEN MEDIA (GAMBAR / YOUTUBE) ---
+const MediaRenderer = ({ url, title }) => {
+    if (!url) return null;
+
+    const youtubeId = getYoutubeId(url);
+
+    // 1. Jika terdeteksi link YouTube
+    if (youtubeId) {
+        return (
+            <div className="w-full aspect-video bg-black relative border-y border-white/5 group-hover:border-white/10 transition-colors">
+                <iframe
+                    src={`https://www.youtube.com/embed/${youtubeId}`}
+                    title={title || "YouTube video player"}
+                    className="w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    style={{ border: 0 }}
+                ></iframe>
+            </div>
+        );
+    }
+
+    // 2. Default: Render sebagai Gambar
+    return (
+        <div className="w-full bg-black relative border-y border-white/5 group-hover:border-white/10 transition-colors">
+            <img 
+                src={url} 
+                className="w-full h-auto max-h-[500px] object-contain mx-auto" 
+                alt="Content" 
+                loading="lazy" 
+            />
+        </div>
+    );
+};
+
 // --- KOMPONEN RENDER TEKS (PARSER) ---
 const RichTextRenderer = ({ text }) => {
     if (!text) return null;
-    // Regex untuk URL, Bold (**), Italic (*)
     const regex = /(\bhttps?:\/\/[^\s]+)|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
     const parts = text.split(regex).filter(Boolean);
 
@@ -35,24 +77,18 @@ const RichTextRenderer = ({ text }) => {
     );
 };
 
-// --- KOMPONEN BACA SELENGKAPNYA & NEWLINE FIX ---
+// --- KOMPONEN BACA SELENGKAPNYA ---
 const ExpandableText = ({ content }) => {
     const [isExpanded, setIsExpanded] = useState(false);
-    const limit = 150; // Batas karakter sebelum muncul "Baca Selengkapnya"
-    
-    // Cek apakah konten panjang
+    const limit = 150;
     const isLong = content.length > limit;
-    
-    // Teks yang akan ditampilkan (dipotong atau full)
     const textToShow = isExpanded || !isLong ? content : content.slice(0, limit) + "...";
 
     return (
         <div className="text-slate-300 text-[13px] leading-6 font-light">
-            {/* whitespace-pre-wrap ADALAH KUNCI AGAR ENTER TERBACA */}
             <div className="whitespace-pre-wrap break-words">
                 <RichTextRenderer text={textToShow} />
             </div>
-
             {isLong && (
                 <button 
                     onClick={(e) => {
@@ -74,37 +110,72 @@ const ExpandableText = ({ content }) => {
 
 const KreataRoom = ({ setPage }) => {
     const [posts, setPosts] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const [nextCursor, setNextCursor] = useState(null); // Cursor untuk pagination
+    const [hasMore, setHasMore] = useState(true); // Cek apakah masih ada data
     const [isMuted, setIsMuted] = useState(false);
     const [hasStarted, setHasStarted] = useState(false);
 
-    // Audio Refs (Musik Fun Game / Upbeat)
-    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3')); // Tetap SFX klik
-    // Ganti ke musik yang lebih "Fun/Game"
+    // Refs
+    const observer = useRef();
+    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'));
     const bgMusic = useRef(new Audio('https://cdn.pixabay.com/audio/2021/08/08/audio_c1c73a0c0e.mp3')); 
+
+    // --- INFINITE SCROLL OBSERVER ---
+    const lastPostElementRef = useCallback(node => {
+        if (loading) return;
+        if (observer.current) observer.current.disconnect();
+        
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                // Trigger fetch next page jika elemen terakhir terlihat
+                fetchKreataPosts(nextCursor);
+            }
+        });
+        
+        if (node) observer.current.observe(node);
+    }, [loading, hasMore, nextCursor]);
 
     useEffect(() => {
         if (hasStarted) {
+            // Fetch pertama kali (tanpa cursor)
             fetchKreataPosts();
             bgMusic.current.loop = true;
-            bgMusic.current.volume = 0.3; // Volume sedikit diturunkan agar tidak berisik
+            bgMusic.current.volume = 0.3;
             bgMusic.current.play().catch(() => console.log("Autoplay blocked"));
         }
         return () => {
             bgMusic.current.pause();
         };
+        // eslint-disable-next-line
     }, [hasStarted]);
 
-    const fetchKreataPosts = async () => {
+    const fetchKreataPosts = async (cursor = null) => {
+        if (loading) return; // Mencegah double fetch
+        setLoading(true);
+
         try {
-            setLoading(true);
-            const res = await fetch('https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=50');
+            // Buat URL dinamis berdasarkan cursor
+            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=20'; // Limit dikecilkan agar loading per batch lebih cepat
+            if (cursor) {
+                url += `&cursor=${cursor}`;
+            }
+
+            const res = await fetch(url);
             const data = await res.json();
 
-            const sanitizedPosts = (data.posts || []).map(post => {
-                let finalImage = null;
-                if (post.mediaUrl && post.mediaUrl.length > 5) finalImage = post.mediaUrl;
-                else if (post.mediaUrls && post.mediaUrls.length > 0) finalImage = post.mediaUrls[0];
+            const incomingPosts = data.posts || [];
+            
+            // Simpan next cursor dari response API
+            // Note: Struktur response API mungkin 'nextCursor', 'cursor', atau di dalam meta. 
+            // Sesuaikan baris di bawah ini dengan respon asli API kamu.
+            const newCursor = data.nextCursor || data.cursor || data.meta?.nextCursor || null;
+
+            const sanitizedPosts = incomingPosts.map(post => {
+                let finalMedia = null;
+                // Cek priority: mediaUrl > mediaUrls[0]
+                if (post.mediaUrl && post.mediaUrl.length > 5) finalMedia = post.mediaUrl;
+                else if (post.mediaUrls && post.mediaUrls.length > 0) finalMedia = post.mediaUrls[0];
 
                 return {
                     id: post.id || Math.random().toString(36),
@@ -112,10 +183,20 @@ const KreataRoom = ({ setPage }) => {
                     content: post.content || post.text || "",
                     author: post.user?.username || "Anonymous",
                     avatar: post.user?.photoURL || null,
-                    image: finalImage,
+                    media: finalMedia, // Diganti jadi 'media' biar lebih general (bisa img/video)
                 };
             });
-            setPosts(sanitizedPosts);
+
+            // LOGIC NO DUPLICATE: Gabungkan post lama dengan baru, filter jika ID sudah ada
+            setPosts(prevPosts => {
+                const existingIds = new Set(prevPosts.map(p => p.id));
+                const uniqueNewPosts = sanitizedPosts.filter(p => !existingIds.has(p.id));
+                return [...prevPosts, ...uniqueNewPosts];
+            });
+
+            setNextCursor(newCursor);
+            setHasMore(!!newCursor && incomingPosts.length > 0);
+
         } catch (e) {
             console.error("Gagal load Kreata posts", e);
         } finally {
@@ -162,25 +243,22 @@ const KreataRoom = ({ setPage }) => {
         }
     };
 
-    // --- HALAMAN INTRO ---
+    // --- HALAMAN INTRO (TIDAK BERUBAH) ---
     if (!hasStarted) {
         return (
             <div className="fixed inset-0 z-[999] bg-[#020617] flex flex-col items-center justify-center p-6 text-center overflow-hidden">
                 <div className="absolute w-[500px] h-[500px] bg-emerald-600/20 rounded-full blur-[120px] animate-pulse"></div>
-
                 <div className="relative z-10 animate-fade-in">
                     <div className="relative mb-8 inline-block cursor-pointer group" onClick={startRoom}>
                         <div className="absolute inset-0 bg-emerald-500 rounded-[35px] blur-xl opacity-40 group-hover:opacity-60 transition duration-500"></div>
                         <img src={KREATA_LOGO} className="relative w-36 h-36 rounded-[35px] border-4 border-[#020617] shadow-2xl object-cover transform group-hover:scale-105 transition duration-500" alt="Logo" />
                     </div>
-
                     <h1 className="text-5xl font-black text-white italic mb-3 tracking-tighter drop-shadow-2xl">
                         KREATA <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">ROOM</span>
                     </h1>
                     <p className="text-slate-400 text-sm mb-12 font-medium tracking-widest uppercase">
                         Tempat Karya Berkumpul
                     </p>
-
                     <button onClick={startRoom} className="relative group bg-white text-black pl-8 pr-10 py-4 rounded-full font-black uppercase text-sm tracking-[0.2em] transition-all hover:bg-emerald-400 hover:scale-105 shadow-[0_0_40px_rgba(255,255,255,0.1)] flex items-center gap-3 mx-auto overflow-hidden">
                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent w-full -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
                         <Play size={20} fill="black" /> MASUK SEKARANG
@@ -193,7 +271,7 @@ const KreataRoom = ({ setPage }) => {
     // --- HALAMAN UTAMA ---
     return (
         <div className="min-h-screen bg-[#020617] text-slate-200 font-sans selection:bg-emerald-500/40 pb-32">
-
+            
             {/* HEADER */}
             <nav className="fixed top-0 inset-x-0 z-50 h-16 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 px-4 flex items-center justify-between">
                 <button onClick={() => { playClick(); setPage && setPage('home'); }} className="p-2 rounded-xl active:scale-95 transition-transform hover:bg-white/5">
@@ -221,12 +299,9 @@ const KreataRoom = ({ setPage }) => {
                             </div>
                         </div>
                     </div>
-                    
-                    {/* Collapsible Info (Simplified for visual cleaness) */}
                     <div className="mt-3 text-[10px] text-slate-500 leading-4 line-clamp-2 hover:line-clamp-none transition-all cursor-pointer">
-                       Kreata Community adalah wadah kolaborasi komunitas Koloxe, Amethyst, dan McCreata bersama BguneNet.
+                        Kreata Community adalah wadah kolaborasi komunitas Koloxe, Amethyst, dan McCreata bersama BguneNet.
                     </div>
-
                     <div className="flex gap-3 mt-5">
                         <a href="https://chat.whatsapp.com/FFrhElhRj4bFLCy0HZszss" target="_blank" rel="noreferrer" onClick={playClick}
                            className="flex-1 flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#20bd5a] text-black py-2.5 rounded-xl font-bold text-[10px] uppercase shadow-lg active:scale-95 transition-all">
@@ -254,75 +329,82 @@ const KreataRoom = ({ setPage }) => {
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Belum ada karya baru</p>
                         </div>
                     ) : (
-                        posts.map((post) => (
-                            <div key={post.id} className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors">
-
-                                {/* AUTHOR HEADER */}
-                                <div className="p-4 flex items-center gap-3 bg-[#131620]/50 backdrop-blur-sm">
-                                    <div className="relative">
-                                        <div className="absolute inset-0 bg-emerald-500 blur opacity-20 rounded-full"></div>
-                                        <img 
-                                            src={post.avatar || `https://ui-avatars.com/api/?name=${post.author}&background=random`} 
-                                            onError={(e) => {
-                                                e.target.onerror = null; 
-                                                e.target.src = `https://ui-avatars.com/api/?name=${post.author}&background=10b981&color=fff&size=128`;
-                                            }}
-                                            className="relative w-10 h-10 rounded-full bg-slate-800 object-cover ring-2 ring-[#1e293b]" 
-                                            alt="Avatar" 
-                                        />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <h4 className="text-sm font-bold text-white truncate">{post.author}</h4>
-                                        <p className="text-[10px] text-emerald-500/80 uppercase tracking-wider font-bold">Creator</p>
-                                    </div>
-                                    <button onClick={() => handleShare(post)} className="text-slate-600 hover:text-white p-2 transition-colors">
-                                        <Share2 size={18} />
-                                    </button>
-                                </div>
-
-                                {/* CONTENT BODY */}
-                                <div>
-                                    {/* Image */}
-                                    {post.image && (
-                                        <div className="w-full bg-black relative border-y border-white/5 group-hover:border-white/10 transition-colors">
+                        posts.map((post, index) => {
+                            // Cek jika ini elemen terakhir untuk trigger infinite scroll
+                            const isLastElement = posts.length === index + 1;
+                            
+                            return (
+                                <div 
+                                    key={post.id} 
+                                    ref={isLastElement ? lastPostElementRef : null}
+                                    className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors"
+                                >
+                                    {/* AUTHOR HEADER */}
+                                    <div className="p-4 flex items-center gap-3 bg-[#131620]/50 backdrop-blur-sm">
+                                        <div className="relative">
+                                            <div className="absolute inset-0 bg-emerald-500 blur opacity-20 rounded-full"></div>
                                             <img 
-                                                src={post.image} 
-                                                className="w-full h-auto max-h-[500px] object-contain mx-auto" 
-                                                alt="Content" 
-                                                loading="lazy" 
+                                                src={post.avatar || `https://ui-avatars.com/api/?name=${post.author}&background=random`} 
+                                                onError={(e) => {
+                                                    e.target.onerror = null; 
+                                                    e.target.src = `https://ui-avatars.com/api/?name=${post.author}&background=10b981&color=fff&size=128`;
+                                                }}
+                                                className="relative w-10 h-10 rounded-full bg-slate-800 object-cover ring-2 ring-[#1e293b]" 
+                                                alt="Avatar" 
                                             />
                                         </div>
-                                    )}
+                                        <div className="flex-1 min-w-0">
+                                            <h4 className="text-sm font-bold text-white truncate">{post.author}</h4>
+                                            <p className="text-[10px] text-emerald-500/80 uppercase tracking-wider font-bold">Creator</p>
+                                        </div>
+                                        <button onClick={() => handleShare(post)} className="text-slate-600 hover:text-white p-2 transition-colors">
+                                            <Share2 size={18} />
+                                        </button>
+                                    </div>
 
-                                    {/* Text Area dengan Fitur Baca Selengkapnya & Fix Newline */}
-                                    <div className="p-5 bg-gradient-to-b from-[#0f111a] to-[#0a0c12]">
-                                        <ExpandableText content={post.content} />
+                                    {/* CONTENT BODY */}
+                                    <div>
+                                        {/* Ganti direct img dengan MediaRenderer untuk support YouTube */}
+                                        <MediaRenderer url={post.media} title={post.title} />
+
+                                        {/* Text Area */}
+                                        <div className="p-5 bg-gradient-to-b from-[#0f111a] to-[#0a0c12]">
+                                            <ExpandableText content={post.content} />
+                                        </div>
+                                    </div>
+
+                                    {/* ACTION BUTTONS */}
+                                    <div className="p-4 pt-0 flex gap-3">
+                                        <button 
+                                            onClick={() => handleShare(post)}
+                                            className="flex-1 bg-slate-800/50 hover:bg-slate-800 text-slate-300 py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all border border-white/5 hover:border-white/20"
+                                        >
+                                            <Share2 size={16} /> Share
+                                        </button>
+                                        <button 
+                                            onClick={() => handleViewDetail(post.id)}
+                                            className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98]"
+                                        >
+                                            <ExternalLink size={16} /> Buka Postingan
+                                        </button>
                                     </div>
                                 </div>
-
-                                {/* ACTION BUTTONS */}
-                                <div className="p-4 pt-0 flex gap-3">
-                                    <button 
-                                        onClick={() => handleShare(post)}
-                                        className="flex-1 bg-slate-800/50 hover:bg-slate-800 text-slate-300 py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all border border-white/5 hover:border-white/20"
-                                    >
-                                        <Share2 size={16} /> Share
-                                    </button>
-                                    <button 
-                                        onClick={() => handleViewDetail(post.id)}
-                                        className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-wide flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98]"
-                                    >
-                                        <ExternalLink size={16} /> Buka Postingan
-                                    </button>
-                                </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
-                </div>
-
-                {/* Bottom Spacer */}
-                <div className="pb-10 pt-4 flex justify-center opacity-20">
-                     <div className="w-16 h-1.5 bg-slate-700 rounded-full"></div>
+                    
+                    {/* Loading indicator saat fetching halaman berikutnya */}
+                    {loading && posts.length > 0 && (
+                        <div className="py-4 flex justify-center">
+                            <Loader2 className="animate-spin text-emerald-500" size={24} />
+                        </div>
+                    )}
+                    
+                    {!hasMore && posts.length > 0 && (
+                         <div className="pb-10 pt-4 flex justify-center opacity-20">
+                             <p className="text-[10px] uppercase font-bold text-slate-500">Sudah habis</p>
+                         </div>
+                    )}
                 </div>
             </div>
         </div>
