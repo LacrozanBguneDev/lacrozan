@@ -7,7 +7,11 @@ import {
 
 const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
-// --- HELPER: DETEKSI YOUTUBE ID (SUPPORT SHORTS & BIASA) ---
+// Audio Backsound Baru (Lebih stabil)
+const BGM_URL = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112778.mp3"; 
+const CLICK_SFX = "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3";
+
+// --- HELPER: DETEKSI YOUTUBE ID ---
 const getYouTubeId = (url) => {
     if (!url) return null;
     const regExp = /(?:youtu\.be\/|youtube\.com\/(?:.*v\/|.*u\/\w\/|embed\/|shorts\/|watch\?v=))([^#\&\?]*).*/;
@@ -93,48 +97,64 @@ const KreataRoom = ({ setPage }) => {
     const [hasMore, setHasMore] = useState(true);
     const [isMuted, setIsMuted] = useState(false);
     const [hasStarted, setHasStarted] = useState(false);
+    const [errorMsg, setErrorMsg] = useState('');
 
-    // --- REFS ---
-    // isFetchingRef adalah kunci agar tidak terjadi double request (PENTING!)
+    // --- REFS (PENTING: Mencegah Spam Request) ---
+    // isFetchingRef menyimpan status request yang sedang berjalan
+    // State 'loading' di React kadang terlambat update, ref tidak.
     const isFetchingRef = useRef(false); 
     const observer = useRef();
-    
-    // Audio Refs
-    const audioClick = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3')); 
-    const bgMusic = useRef(new Audio('https://cdn.pixabay.com/audio/2021/08/08/audio_c1c73a0c0e.mp3')); 
 
-    // --- LOGIKA FETCH API ---
-    const fetchKreataPosts = async (cursorToUse = null) => {
-        // PENGAMAN GANDA: Cek state loading dan ref isFetching
+    // Audio Refs
+    const audioClick = useRef(null); 
+    const bgMusic = useRef(null); 
+
+    // Inisialisasi Audio saat komponen mount
+    useEffect(() => {
+        audioClick.current = new Audio(CLICK_SFX);
+        bgMusic.current = new Audio(BGM_URL);
+        bgMusic.current.loop = true;
+        bgMusic.current.volume = 0.5;
+
+        // Cleanup audio saat komponen unmount
+        return () => {
+            if (bgMusic.current) {
+                bgMusic.current.pause();
+                bgMusic.current.currentTime = 0;
+            }
+        };
+    }, []);
+
+    // --- LOGIKA FETCH API (DIJAMIN FIX) ---
+    const fetchKreataPosts = useCallback(async (cursorToUse) => {
+        // [BLOCKER UTAMA] Jika sedang fetching, STOP DISINI.
         if (isFetchingRef.current) return;
-        
+
+        // Kunci pintu request
         isFetchingRef.current = true;
         setLoading(true);
+        setErrorMsg('');
 
         try {
-            // Base URL
+            // Setup URL
             let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10';
-            
-            // Aturan Pagination: Kirim cursor jika ada (bukan null)
             if (cursorToUse) {
-                url += `&cursor=${cursorToUse}`;
+                url += `&cursor=${encodeURIComponent(cursorToUse)}`;
             }
 
-            console.log("Fetching:", url); // Debugging di Console
+            console.log("Fetching data...", { cursor: cursorToUse }); // Debug log
 
             const res = await fetch(url);
-            
-            if (!res.ok) throw new Error('Network response was not ok');
-            
-            const data = await res.json();
+            if (!res.ok) throw new Error('Gagal mengambil data server');
 
-            // Mapping Data
+            const data = await res.json();
+            
+            // Proses Data Post
             const newPosts = (data.posts || []).map(post => {
                 let finalImage = null;
+                // Prioritaskan gambar pertama yang valid
                 if (post.mediaUrl && post.mediaUrl.length > 5) finalImage = post.mediaUrl;
                 else if (post.mediaUrls && post.mediaUrls.length > 0) finalImage = post.mediaUrls[0];
-
-                const isYoutube = getYouTubeId(finalImage) !== null;
 
                 return {
                     id: post.id,
@@ -143,25 +163,21 @@ const KreataRoom = ({ setPage }) => {
                     author: post.authorName || post.user?.username || "Anonymous",
                     avatar: post.authorAvatar || post.user?.photoURL || null,
                     image: finalImage,
-                    isYoutube: isYoutube,
+                    isYoutube: getYouTubeId(finalImage) !== null,
                     timestamp: post.timestamp
                 };
             });
 
-            // Filter Duplikat (Agar tidak numpuk data yang sama)
+            // Update State Posts (Hanya tambahkan yang unik)
             setPosts(prevPosts => {
                 const existingIds = new Set(prevPosts.map(p => p.id));
                 const uniqueNewPosts = newPosts.filter(p => !existingIds.has(p.id));
-                
-                // Jika data baru ada tapi semuanya duplikat, dan masih ada nextCursor,
-                // UI tidak akan berubah. User akan merasa 'stuck'.
-                // Tapi kita biarkan user scroll lagi sedikit untuk trigger observer lagi.
-                
                 return [...prevPosts, ...uniqueNewPosts];
             });
 
             // Update Cursor untuk next request
-            if (data.nextCursor) {
+            // Jika API memberikan nextCursor baru, simpan. Jika tidak, tandai habis.
+            if (data.nextCursor && data.nextCursor !== cursorToUse) {
                 setNextCursor(data.nextCursor);
                 setHasMore(true);
             } else {
@@ -170,35 +186,40 @@ const KreataRoom = ({ setPage }) => {
             }
 
         } catch (e) {
-            console.error("Gagal load Kreata posts", e);
+            console.error("Error Fetch:", e);
+            setErrorMsg('Gagal memuat konten. Cek koneksi internet.');
         } finally {
-            // PENTING: Reset lock agar bisa fetch lagi
+            // [BUKA KUNCI] Request selesai, boleh request lagi nanti
             setLoading(false);
             isFetchingRef.current = false;
         }
-    };
+    }, []);
 
-    // --- INFINITE SCROLL OBSERVER ---
+    // --- INFINITE SCROLL OBSERVER (DIPERBAIKI) ---
     const lastPostElementRef = useCallback(node => {
-        // Jangan observasi jika sedang loading
-        if (loading) return;
-        
-        // Disconnect observer lama
+        // Jangan jalankan jika sedang loading (cek ref agar akurat)
+        if (loading || isFetchingRef.current) return;
+
+        // Disconnect observer lama agar tidak numpuk
         if (observer.current) observer.current.disconnect();
-        
+
         // Buat observer baru
         observer.current = new IntersectionObserver(entries => {
-            // Jika elemen terakhir terlihat DAN masih ada data (hasMore) DAN tidak sedang fetching
+            // Syarat fetch ulang:
+            // 1. Elemen terakhir terlihat (isIntersecting)
+            // 2. Masih ada data (hasMore)
+            // 3. TIDAK SEDANG FETCHING (Double check ref)
             if (entries[0].isIntersecting && hasMore && !isFetchingRef.current) {
-                // Panggil fetch dengan cursor yang tersimpan di state saat ini
+                console.log("Trigger next page..."); // Debug
                 fetchKreataPosts(nextCursor);
             }
         });
-        
-        if (node) observer.current.observe(node);
-    }, [loading, hasMore, nextCursor]);
 
-    // --- AUDIO HANDLING ---
+        if (node) observer.current.observe(node);
+    }, [loading, hasMore, nextCursor, fetchKreataPosts]);
+
+
+    // --- AUDIO CONTROLS ---
     const playClick = () => {
         if(audioClick.current) {
             audioClick.current.currentTime = 0;
@@ -208,6 +229,8 @@ const KreataRoom = ({ setPage }) => {
     };
 
     const toggleMusic = () => {
+        if (!bgMusic.current) return;
+        
         if (isMuted) {
             bgMusic.current.play().catch(e => console.log("Audio play failed:", e));
         } else {
@@ -218,24 +241,23 @@ const KreataRoom = ({ setPage }) => {
 
     const startRoom = () => {
         playClick();
-        
-        bgMusic.current.loop = true;
-        bgMusic.current.volume = 0.3;
-        
-        // Trik agar audio jalan di mobile/browser modern
-        const playPromise = bgMusic.current.play();
-        if (playPromise !== undefined) {
-            playPromise
-                .then(_ => setIsMuted(false))
-                .catch(error => {
-                    console.log("Autoplay blocked, user interaction needed");
-                    setIsMuted(true);
-                });
-        }
-
         setHasStarted(true);
-        // Load data pertama kali (cursor null)
+
+        // Fetch pertama kali (cursor null)
         fetchKreataPosts(null);
+
+        // Play Music (Harus dipanggil setelah user interaksi/klik)
+        if (bgMusic.current) {
+            const playPromise = bgMusic.current.play();
+            if (playPromise !== undefined) {
+                playPromise
+                    .then(() => setIsMuted(false))
+                    .catch(() => {
+                        // Browser memblokir autoplay, set ke mute
+                        setIsMuted(true);
+                    });
+            }
+        }
     };
 
     const handleShare = async (post) => {
@@ -249,8 +271,18 @@ const KreataRoom = ({ setPage }) => {
                 });
             } catch (error) { console.log('Error sharing:', error); }
         } else {
-            navigator.clipboard.writeText(`https://app.bgunenet.my.id/?post=${post.id}`);
-            alert('Link disalin ke clipboard!');
+            // Fallback clipboard
+            const textArea = document.createElement("textarea");
+            textArea.value = `https://app.bgunenet.my.id/?post=${post.id}`;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('Link disalin ke clipboard!');
+            } catch (err) {
+                console.error('Gagal menyalin', err);
+            }
+            document.body.removeChild(textArea);
         }
     };
 
@@ -262,7 +294,7 @@ const KreataRoom = ({ setPage }) => {
     // --- INTRO SCREEN ---
     if (!hasStarted) {
         return (
-            <div className="fixed inset-0 z-[999] bg-[#020617] flex flex-col items-center justify-center p-6 text-center overflow-hidden">
+            <div className="fixed inset-0 z-[999] bg-[#020617] flex flex-col items-center justify-center p-6 text-center overflow-hidden font-sans">
                 <div className="absolute w-[500px] h-[500px] bg-emerald-600/20 rounded-full blur-[120px] animate-pulse"></div>
 
                 <div className="relative z-10 animate-fade-in">
@@ -293,13 +325,13 @@ const KreataRoom = ({ setPage }) => {
 
             {/* HEADER */}
             <nav className="fixed top-0 inset-x-0 z-50 h-16 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 px-4 flex items-center justify-between">
-                <button onClick={() => { playClick(); setPage && setPage('home'); }} className="p-2 rounded-xl active:scale-95 transition-transform hover:bg-white/5">
+                <button onClick={() => { playClick(); if(setPage) setPage('home'); }} className="p-2 rounded-xl active:scale-95 transition-transform hover:bg-white/5">
                     <ArrowLeft size={24} className="text-slate-100" />
                 </button>
                 <div className="flex flex-col items-center" onClick={() => window.scrollTo({top:0, behavior:'smooth'})}>
                     <span className="font-black italic text-xl text-white uppercase tracking-tighter cursor-pointer">KREATA</span>
                 </div>
-                <button onClick={toggleMusic} className={`p-2 rounded-xl transition-all hover:bg-white/5 ${isMuted ? 'text-slate-500' : 'text-emerald-400'}`}>
+                <button onClick={() => { playClick(); toggleMusic(); }} className={`p-2 rounded-xl transition-all hover:bg-white/5 ${isMuted ? 'text-slate-500' : 'text-emerald-400'}`}>
                     {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} className="animate-pulse" />}
                 </button>
             </nav>
@@ -335,6 +367,14 @@ const KreataRoom = ({ setPage }) => {
                     </div>
                 </div>
 
+                {/* ERROR MESSAGE */}
+                {errorMsg && (
+                    <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-center">
+                        <p className="text-red-400 text-xs font-bold">{errorMsg}</p>
+                        <button onClick={() => fetchKreataPosts(nextCursor)} className="mt-2 text-[10px] bg-red-500/20 px-3 py-1 rounded text-red-200">Coba Lagi</button>
+                    </div>
+                )}
+
                 {/* FEED LIST */}
                 <div className="space-y-8">
                     <div className="flex items-center justify-between px-2">
@@ -353,10 +393,10 @@ const KreataRoom = ({ setPage }) => {
                         posts.map((post, index) => {
                             // Cek jika ini elemen terakhir untuk Infinite Scroll
                             const isLastElement = posts.length === index + 1;
-                            
+
                             return (
                                 <div 
-                                    key={post.id} 
+                                    key={`${post.id}-${index}`} // Key unik agar React tidak bingung
                                     ref={isLastElement ? lastPostElementRef : null}
                                     className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors"
                                 >
@@ -429,7 +469,7 @@ const KreataRoom = ({ setPage }) => {
                 </div>
 
                 {/* LOADER & END MARKER */}
-                {loading && posts.length > 0 && (
+                {loading && (
                      <div className="pb-10 pt-4 flex justify-center">
                         <div className="flex items-center gap-2 bg-emerald-500/10 px-4 py-2 rounded-full border border-emerald-500/20">
                             <Loader2 className="animate-spin text-emerald-500" size={16} />
@@ -437,7 +477,7 @@ const KreataRoom = ({ setPage }) => {
                         </div>
                     </div>
                 )}
-                
+
                 {!hasMore && posts.length > 0 && !loading && (
                     <div className="pb-10 pt-4 flex justify-center opacity-30">
                         <div className="flex flex-col items-center gap-2">
