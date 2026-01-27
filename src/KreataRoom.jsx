@@ -139,7 +139,7 @@ const KreataRoom = ({ setPage }) => {
             else setLoadingMore(true);
 
             // Construct URL dengan cursor jika ada
-            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10';
+            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=50';
             if (cursor) {
                 url += `&cursor=${cursor}`;
             }
