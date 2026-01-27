@@ -7,7 +7,7 @@ import {
 
 const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
 
-// Audio Backsound Baru (Lebih stabil)
+// Audio Backsound
 const BGM_URL = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112778.mp3"; 
 const CLICK_SFX = "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3";
 
@@ -99,9 +99,7 @@ const KreataRoom = ({ setPage }) => {
     const [hasStarted, setHasStarted] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
 
-    // --- REFS (PENTING: Mencegah Spam Request) ---
-    // isFetchingRef menyimpan status request yang sedang berjalan
-    // State 'loading' di React kadang terlambat update, ref tidak.
+    // --- REFS ---
     const isFetchingRef = useRef(false); 
     const observer = useRef();
 
@@ -109,14 +107,13 @@ const KreataRoom = ({ setPage }) => {
     const audioClick = useRef(null); 
     const bgMusic = useRef(null); 
 
-    // Inisialisasi Audio saat komponen mount
+    // Inisialisasi Audio
     useEffect(() => {
         audioClick.current = new Audio(CLICK_SFX);
         bgMusic.current = new Audio(BGM_URL);
         bgMusic.current.loop = true;
         bgMusic.current.volume = 0.5;
 
-        // Cleanup audio saat komponen unmount
         return () => {
             if (bgMusic.current) {
                 bgMusic.current.pause();
@@ -125,12 +122,11 @@ const KreataRoom = ({ setPage }) => {
         };
     }, []);
 
-    // --- LOGIKA FETCH API (DIJAMIN FIX) ---
+    // --- LOGIKA FETCH API (DIPERBAIKI) ---
     const fetchKreataPosts = useCallback(async (cursorToUse) => {
-        // [BLOCKER UTAMA] Jika sedang fetching, STOP DISINI.
+        // Cegah request ganda
         if (isFetchingRef.current) return;
-
-        // Kunci pintu request
+        
         isFetchingRef.current = true;
         setLoading(true);
         setErrorMsg('');
@@ -142,22 +138,34 @@ const KreataRoom = ({ setPage }) => {
                 url += `&cursor=${encodeURIComponent(cursorToUse)}`;
             }
 
-            console.log("Fetching data...", { cursor: cursorToUse }); // Debug log
+            console.log("Fetching URL:", url);
 
             const res = await fetch(url);
             if (!res.ok) throw new Error('Gagal mengambil data server');
 
             const data = await res.json();
             
+            // Log response raw untuk debugging
+            console.log("API Response Raw:", data);
+
+            // Validasi Array
+            const incomingPostsRaw = data.posts || [];
+
+            if (incomingPostsRaw.length === 0) {
+                console.log("API mengembalikan array kosong -> Stop Infinite Scroll");
+                setHasMore(false);
+                setNextCursor(null);
+                return; // Keluar
+            }
+            
             // Proses Data Post
-            const newPosts = (data.posts || []).map(post => {
+            const formattedPosts = incomingPostsRaw.map(post => {
                 let finalImage = null;
-                // Prioritaskan gambar pertama yang valid
                 if (post.mediaUrl && post.mediaUrl.length > 5) finalImage = post.mediaUrl;
                 else if (post.mediaUrls && post.mediaUrls.length > 0) finalImage = post.mediaUrls[0];
 
                 return {
-                    id: post.id,
+                    id: String(post.id), // Pastikan ID string agar Set bekerja benar
                     title: post.title || "",
                     content: post.content || post.text || "",
                     author: post.authorName || post.user?.username || "Anonymous",
@@ -168,19 +176,31 @@ const KreataRoom = ({ setPage }) => {
                 };
             });
 
-            // Update State Posts (Hanya tambahkan yang unik)
+            // Update State Posts dengan Filter Duplikat yang Lebih Aman
             setPosts(prevPosts => {
                 const existingIds = new Set(prevPosts.map(p => p.id));
-                const uniqueNewPosts = newPosts.filter(p => !existingIds.has(p.id));
+                const uniqueNewPosts = formattedPosts.filter(p => !existingIds.has(p.id));
+                
+                console.log(`Menerima ${formattedPosts.length} data. Unik: ${uniqueNewPosts.length}`);
+                
+                // Jika tidak ada data unik baru, tapi API kasih cursor, kita hentikan saja
+                // agar tidak looping request terus menerus
+                if (uniqueNewPosts.length === 0 && prevPosts.length > 0) {
+                     // Opsional: setHasMore(false); jika ingin ketat
+                     console.log("Data duplikat semua, scroll mungkin mentok.");
+                }
+
                 return [...prevPosts, ...uniqueNewPosts];
             });
 
-            // Update Cursor untuk next request
-            // Jika API memberikan nextCursor baru, simpan. Jika tidak, tandai habis.
-            if (data.nextCursor && data.nextCursor !== cursorToUse) {
+            // Update Cursor Logic
+            // Kita cek apakah cursor baru BEDA dengan cursor sekarang
+            if (data.nextCursor && data.nextCursor !== cursorToUse && incomingPostsRaw.length > 0) {
+                console.log("Set Next Cursor:", data.nextCursor);
                 setNextCursor(data.nextCursor);
                 setHasMore(true);
             } else {
+                console.log("Tidak ada cursor baru atau data habis.");
                 setNextCursor(null);
                 setHasMore(false);
             }
@@ -189,7 +209,6 @@ const KreataRoom = ({ setPage }) => {
             console.error("Error Fetch:", e);
             setErrorMsg('Gagal memuat konten. Cek koneksi internet.');
         } finally {
-            // [BUKA KUNCI] Request selesai, boleh request lagi nanti
             setLoading(false);
             isFetchingRef.current = false;
         }
@@ -197,21 +216,20 @@ const KreataRoom = ({ setPage }) => {
 
     // --- INFINITE SCROLL OBSERVER (DIPERBAIKI) ---
     const lastPostElementRef = useCallback(node => {
-        // Jangan jalankan jika sedang loading (cek ref agar akurat)
-        if (loading || isFetchingRef.current) return;
-
-        // Disconnect observer lama agar tidak numpuk
+        if (loading) return; // Jangan trigger jika sedang loading
+        
         if (observer.current) observer.current.disconnect();
 
-        // Buat observer baru
         observer.current = new IntersectionObserver(entries => {
-            // Syarat fetch ulang:
-            // 1. Elemen terakhir terlihat (isIntersecting)
+            // Trigger jika:
+            // 1. Element terlihat
             // 2. Masih ada data (hasMore)
-            // 3. TIDAK SEDANG FETCHING (Double check ref)
+            // 3. TIDAK sedang fetching (cek ref)
             if (entries[0].isIntersecting && hasMore && !isFetchingRef.current) {
-                console.log("Trigger next page..."); // Debug
-                fetchKreataPosts(nextCursor);
+                console.log(">>> Trigger Next Page dengan Cursor:", nextCursor);
+                if (nextCursor) {
+                    fetchKreataPosts(nextCursor);
+                }
             }
         });
 
@@ -242,20 +260,14 @@ const KreataRoom = ({ setPage }) => {
     const startRoom = () => {
         playClick();
         setHasStarted(true);
+        fetchKreataPosts(null); // Fetch halaman pertama
 
-        // Fetch pertama kali (cursor null)
-        fetchKreataPosts(null);
-
-        // Play Music (Harus dipanggil setelah user interaksi/klik)
         if (bgMusic.current) {
             const playPromise = bgMusic.current.play();
             if (playPromise !== undefined) {
                 playPromise
                     .then(() => setIsMuted(false))
-                    .catch(() => {
-                        // Browser memblokir autoplay, set ke mute
-                        setIsMuted(true);
-                    });
+                    .catch(() => setIsMuted(true));
             }
         }
     };
@@ -271,14 +283,14 @@ const KreataRoom = ({ setPage }) => {
                 });
             } catch (error) { console.log('Error sharing:', error); }
         } else {
-            // Fallback clipboard
             const textArea = document.createElement("textarea");
             textArea.value = `https://app.bgunenet.my.id/?post=${post.id}`;
             document.body.appendChild(textArea);
             textArea.select();
             try {
                 document.execCommand('copy');
-                alert('Link disalin ke clipboard!');
+                // Ganti alert dengan UI custom jika mau, tapi alert native paling aman di iframe
+                // alert('Link disalin ke clipboard!'); 
             } catch (err) {
                 console.error('Gagal menyalin', err);
             }
@@ -396,7 +408,7 @@ const KreataRoom = ({ setPage }) => {
 
                             return (
                                 <div 
-                                    key={`${post.id}-${index}`} // Key unik agar React tidak bingung
+                                    key={`${post.id}-${index}`} // Key unik
                                     ref={isLastElement ? lastPostElementRef : null}
                                     className="group bg-[#0f111a] border border-white/5 rounded-[32px] overflow-hidden shadow-2xl hover:border-white/10 transition-colors"
                                 >
