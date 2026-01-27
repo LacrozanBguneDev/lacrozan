@@ -133,7 +133,7 @@ const KreataRoom = ({ setPage }) => {
 
         try {
             // Setup URL
-            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10';
+            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=100';
             if (cursorToUse) {
                 url += `&cursor=${encodeURIComponent(cursorToUse)}`;
             }
