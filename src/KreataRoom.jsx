@@ -122,9 +122,9 @@ const KreataRoom = ({ setPage }) => {
         };
     }, []);
 
-    // --- LOGIKA FETCH API (DIPERBAIKI) ---
+    // --- LOGIKA FETCH API (FINAL FIX) ---
     const fetchKreataPosts = useCallback(async (cursorToUse) => {
-        // Cegah request ganda
+        // Cegah request ganda saat masih loading
         if (isFetchingRef.current) return;
         
         isFetchingRef.current = true;
@@ -133,7 +133,7 @@ const KreataRoom = ({ setPage }) => {
 
         try {
             // Setup URL
-            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=100';
+            let url = 'https://app.bgunenet.my.id/api/feed?mode=search&q=#kreata&limit=10';
             if (cursorToUse) {
                 url += `&cursor=${encodeURIComponent(cursorToUse)}`;
             }
@@ -145,27 +145,29 @@ const KreataRoom = ({ setPage }) => {
 
             const data = await res.json();
             
-            // Log response raw untuk debugging
+            // Log response raw
             console.log("API Response Raw:", data);
 
-            // Validasi Array
             const incomingPostsRaw = data.posts || [];
 
+            // Jika array kosong sama sekali
             if (incomingPostsRaw.length === 0) {
-                console.log("API mengembalikan array kosong -> Stop Infinite Scroll");
+                console.log("Array kosong -> Stop.");
                 setHasMore(false);
                 setNextCursor(null);
-                return; // Keluar
+                setLoading(false);
+                isFetchingRef.current = false;
+                return; 
             }
             
-            // Proses Data Post
+            // Format Data
             const formattedPosts = incomingPostsRaw.map(post => {
                 let finalImage = null;
                 if (post.mediaUrl && post.mediaUrl.length > 5) finalImage = post.mediaUrl;
                 else if (post.mediaUrls && post.mediaUrls.length > 0) finalImage = post.mediaUrls[0];
 
                 return {
-                    id: String(post.id), // Pastikan ID string agar Set bekerja benar
+                    id: String(post.id), 
                     title: post.title || "",
                     content: post.content || post.text || "",
                     author: post.authorName || post.user?.username || "Anonymous",
@@ -176,32 +178,36 @@ const KreataRoom = ({ setPage }) => {
                 };
             });
 
-            // Update State Posts dengan Filter Duplikat yang Lebih Aman
+            // Update State & Cek Duplikat
+            let addedCount = 0;
+
             setPosts(prevPosts => {
                 const existingIds = new Set(prevPosts.map(p => p.id));
                 const uniqueNewPosts = formattedPosts.filter(p => !existingIds.has(p.id));
                 
-                console.log(`Menerima ${formattedPosts.length} data. Unik: ${uniqueNewPosts.length}`);
-                
-                // Jika tidak ada data unik baru, tapi API kasih cursor, kita hentikan saja
-                // agar tidak looping request terus menerus
-                if (uniqueNewPosts.length === 0 && prevPosts.length > 0) {
-                     // Opsional: setHasMore(false); jika ingin ketat
-                     console.log("Data duplikat semua, scroll mungkin mentok.");
-                }
+                addedCount = uniqueNewPosts.length;
+                console.log(`Menerima ${formattedPosts.length} data. Unik (Ditambahkan): ${addedCount}`);
 
                 return [...prevPosts, ...uniqueNewPosts];
             });
 
-            // Update Cursor Logic
-            // Kita cek apakah cursor baru BEDA dengan cursor sekarang
-            if (data.nextCursor && data.nextCursor !== cursorToUse && incomingPostsRaw.length > 0) {
-                console.log("Set Next Cursor:", data.nextCursor);
+            // --- LOGIKA PENENTU NEXT PAGE ---
+            // Kita lanjut HANYA JIKA ada data unik yang ditambahkan
+            // ATAU jika ini fetch pertama (cursorToUse null)
+            
+            // Kita update cursor apapun kondisinya jika API memberikannya
+            if (data.nextCursor) {
                 setNextCursor(data.nextCursor);
+            }
+
+            // Keputusan lanjut atau berhenti:
+            // Lanjut jika: Ada data baru yang unik (addedCount > 0) DAN API kasih nextCursor
+            if (addedCount > 0 && data.nextCursor) {
+                console.log("Ada data baru, lanjut scroll...");
                 setHasMore(true);
             } else {
-                console.log("Tidak ada cursor baru atau data habis.");
-                setNextCursor(null);
+                console.log("Tidak ada data baru (semua duplikat) atau cursor habis. STOP.");
+                // Kalau 0 data baru, berarti kita looping di data lama atau memang habis.
                 setHasMore(false);
             }
 
@@ -214,19 +220,16 @@ const KreataRoom = ({ setPage }) => {
         }
     }, []);
 
-    // --- INFINITE SCROLL OBSERVER (DIPERBAIKI) ---
+    // --- INFINITE SCROLL OBSERVER ---
     const lastPostElementRef = useCallback(node => {
-        if (loading) return; // Jangan trigger jika sedang loading
+        if (loading) return; 
         
         if (observer.current) observer.current.disconnect();
 
         observer.current = new IntersectionObserver(entries => {
-            // Trigger jika:
-            // 1. Element terlihat
-            // 2. Masih ada data (hasMore)
-            // 3. TIDAK sedang fetching (cek ref)
             if (entries[0].isIntersecting && hasMore && !isFetchingRef.current) {
                 console.log(">>> Trigger Next Page dengan Cursor:", nextCursor);
+                // Hanya fetch jika ada nextCursor
                 if (nextCursor) {
                     fetchKreataPosts(nextCursor);
                 }
@@ -260,7 +263,7 @@ const KreataRoom = ({ setPage }) => {
     const startRoom = () => {
         playClick();
         setHasStarted(true);
-        fetchKreataPosts(null); // Fetch halaman pertama
+        fetchKreataPosts(null); 
 
         if (bgMusic.current) {
             const playPromise = bgMusic.current.play();
@@ -289,8 +292,6 @@ const KreataRoom = ({ setPage }) => {
             textArea.select();
             try {
                 document.execCommand('copy');
-                // Ganti alert dengan UI custom jika mau, tapi alert native paling aman di iframe
-                // alert('Link disalin ke clipboard!'); 
             } catch (err) {
                 console.error('Gagal menyalin', err);
             }
