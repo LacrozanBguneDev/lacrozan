@@ -116,57 +116,53 @@ export default async function handler(req, res) {
   try {
     const mode = req.query.mode || "home";
     const limitReq = Math.min(Number(req.query.limit) || 10, 50);
-    const cursorId = req.query.cursor || null;
+    const cursorTs = req.query.cursor ? Number(req.query.cursor) : null;
     const viewerId = req.query.viewerId || null;
     const tagRaw = req.query.tag || null;
-    const searchQuery = req.query.q || req.query.query || null; // Param untuk search
+    const searchQuery = req.query.q || req.query.query || null;
 
     const postsCollection = db.collection(POSTS_PATH);
     let rawPosts = [];
     let nextCursor = null;
 
-    /* ========== MODE SEARCH (BARU & AKURAT) ========== */
+    /* ========== MODE SEARCH (FIXED & STABLE) ========== */
     if (mode === "search" && searchQuery) {
       const needle = searchQuery.toLowerCase().trim();
       let results = [];
-      let lastDoc = null;
-      
-      // Jika ada cursor, load doc referensinya dulu
-      if (cursorId) {
-        const cDoc = await postsCollection.doc(cursorId).get();
-        if (cDoc.exists) lastDoc = cDoc;
-      }
+      let lastTimestamp = cursorTs || Date.now();
 
-      // Loop scan untuk mencari kecocokan teks (Deep Search)
-      // Loop dibatasi agar tidak timeout (max 5 kali fetch @ 100 docs)
-      let safetyLoop = 0; 
+      let safetyLoop = 0;
       while (results.length < limitReq && safetyLoop < 10) {
-        let q = postsCollection.orderBy("timestamp", "desc").limit(100);
-        if (lastDoc) q = q.startAfter(lastDoc);
+        let q = postsCollection
+          .where("timestamp", "<", lastTimestamp)
+          .orderBy("timestamp", "desc")
+          .limit(100);
 
         const snap = await q.get();
         if (snap.empty) break;
 
-        lastDoc = snap.docs[snap.docs.length - 1];
-
         for (const d of snap.docs) {
           const data = d.data();
           const text = (data.text || "").toLowerCase();
-          // Cek apakah text mengandung query pencarian
+          const ts = safeMillis(data.timestamp);
+
+          lastTimestamp = ts;
+
           if (text.includes(needle)) {
             results.push({
               ...data,
               id: d.id,
-              timestamp: safeMillis(data.timestamp)
+              timestamp: ts
             });
             if (results.length >= limitReq) break;
           }
         }
+
         safetyLoop++;
       }
 
       rawPosts = results;
-      nextCursor = lastDoc?.id || null;
+      nextCursor = lastTimestamp || null;
     }
 
     /* ========== MODE HASHTAG ========== */
@@ -176,9 +172,9 @@ export default async function handler(req, res) {
 
       let results = [];
       let lastDoc = null;
-      
-      if (cursorId) {
-        const cDoc = await postsCollection.doc(cursorId).get();
+
+      if (req.query.cursor) {
+        const cDoc = await postsCollection.doc(req.query.cursor).get();
         if (cDoc.exists) lastDoc = cDoc;
       }
 
@@ -224,8 +220,8 @@ export default async function handler(req, res) {
         q = q.where("userId", "in", following.slice(0, 10));
       }
 
-      if (cursorId) {
-        const c = await postsCollection.doc(cursorId).get();
+      if (req.query.cursor) {
+        const c = await postsCollection.doc(req.query.cursor).get();
         if (c.exists) q = q.startAfter(c);
       }
 
@@ -244,8 +240,8 @@ export default async function handler(req, res) {
       const randomLimit = limitReq - freshLimit;
 
       let q = postsCollection.orderBy("timestamp", "desc");
-      if (cursorId) {
-        const c = await postsCollection.doc(cursorId).get();
+      if (req.query.cursor) {
+        const c = await postsCollection.doc(req.query.cursor).get();
         if (c.exists) q = q.startAfter(c);
       }
 
@@ -271,7 +267,6 @@ export default async function handler(req, res) {
 
     /* ========== FINAL PROCESSING ========== */
     let posts = uniqueById(rawPosts);
-    // Filter spam hanya jika bukan mode pencarian user spesifik
     if (mode !== 'user') {
       posts = filterSpamUsers(posts, 2);
     }
