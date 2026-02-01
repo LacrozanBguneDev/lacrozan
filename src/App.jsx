@@ -188,7 +188,7 @@ const CONFIG = {
 };
 
 // URL GAMBAR  ROOM (SESUAI REQUEST)
-const KREATA_ROOM_IMG = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
+const KREATA_ROOM_IMG = "https://c.termai.cc/i178/Np1Zc.jpg";
 
 // Mutable Globals (untuk kompatibilitas dengan kode lama)
 let APP_NAME = CONFIG.APP_NAME;
