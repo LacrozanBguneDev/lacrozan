@@ -5,7 +5,7 @@ import {
     MessageCircle, Share2, ExternalLink, ChevronDown, ChevronUp
 } from 'lucide-react';
 
-const KREATA_LOGO = "https://pps.whatsapp.net/v/t61.24694-24/589137632_699462376256774_4015928659271543310_n.jpg?ccb=11-4&oh=01_Q5Aa3gGcFo2V9Ja8zyVYcgS8UqCyLnu5EF0-CrpWr4rT4w9ACQ&oe=697BB8E2&_nc_sid=5e03e0&_nc_cat=101";
+const KREATA_LOGO = "https://c.termai.cc/i178/Np1Zc.jpg";
 
 // Audio Backsound
 const BGM_URL = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112778.mp3"; 
