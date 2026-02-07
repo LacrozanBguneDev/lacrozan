@@ -387,8 +387,9 @@ const sendNotification = async (toUserId, type, message, fromUser, postId = null
 const processMentions = async (text, currentUser, postId, type = 'mention') => {
     if (!text || !currentUser || !db) return;
     
-    // UPDATED REGEX: Menangkap username dengan spasi (yang sudah diubah jadi hyphen)
-    const mentionRegex = /@([\w-]+)/g;
+    // UPDATED REGEX: Menangkap username dengan karakter ., _, dan alphanumeric
+    // PERBAIKAN: Regex diperluas untuk menangkap titik dan underscore agar tag valid
+    const mentionRegex = /@([a-zA-Z0-9_.]+)/g;
     const matches = text.match(mentionRegex);
     
     if (!matches) return;
@@ -397,8 +398,8 @@ const processMentions = async (text, currentUser, postId, type = 'mention') => {
     const uniqueMentions = [...new Set(matches)].slice(0, 5);
     
     for (const mention of uniqueMentions) {
-        // Hapus @ dan ubah hyphen kembali jadi spasi untuk query ke DB
-        const username = mention.substring(1).replace(/-/g, ' '); 
+        // Hapus @ untuk mendapatkan username bersih
+        const username = mention.substring(1); 
         
         try {
             // Cari user berdasarkan username
@@ -1192,15 +1193,24 @@ const PWAInstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showBanner, setShowBanner] = useState(false);
     useEffect(() => {
-        const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); const lastDismiss = localStorage.getItem('pwa_dismissed'); if (!lastDismiss || Date.now() - parseInt(lastDismiss) > 86400000) { setShowBanner(true); } };
-        window.addEventListener('beforeinstallprompt', handler); return () => window.removeEventListener('beforeinstallprompt', handler);
+        const handler = (e) => { 
+            e.preventDefault(); 
+            setDeferredPrompt(e); 
+            // FIX: Cek jika app BELUM terinstall (bukan mode standalone)
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+            if (!isStandalone) {
+                 setShowBanner(true);
+            }
+        };
+        window.addEventListener('beforeinstallprompt', handler); 
+        return () => window.removeEventListener('beforeinstallprompt', handler);
     }, []);
     const handleInstall = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; if (outcome === 'accepted') { setDeferredPrompt(null); setShowBanner(false); } };
     if (!showBanner) return null;
     return (
         <div className="fixed bottom-24 left-4 right-4 bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center justify-between animate-in slide-in-from-bottom border border-gray-700">
             <div className="flex items-center gap-3"><div className="bg-sky-500 p-2.5 rounded-xl shadow-lg shadow-sky-500/20"><Smartphone size={24}/></div><div><h4 className="font-bold text-sm">Install {APP_NAME}</h4><p className="text-xs text-gray-300">Notifikasi & Fullscreen</p></div></div>
-            <div className="flex items-center gap-2"><button onClick={()=>{setShowBanner(false); localStorage.setItem('pwa_dismissed', Date.now())}} className="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-full"><X size={16}/></button><button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 transition">Pasang</button></div>
+            <div className="flex items-center gap-2"><button onClick={()=>{setShowBanner(false); }} className="p-2 text-gray-400 hover:text-white bg-gray-800 rounded-full"><X size={16}/></button><button onClick={handleInstall} className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-sky-600 transition">Pasang</button></div>
         </div>
     );
 };
@@ -1448,8 +1458,9 @@ const renderMarkdown = (text, onHashtagClick, onMentionClick) => {
     html = html.replace(/#(\w+)/g, '<span class="text-blue-500 font-bold cursor-pointer hover:underline hashtag" data-tag="$1">#$1</span>');
     
     // 5. Mentions (@username) - Link ke profil (Kosmetik/Navigasi)
-    // FITUR BARU: Handle mention dengan tanda hubung untuk username berspasi
-    html = html.replace(/@([\w-]+)/g, '<span class="text-sky-600 font-bold cursor-pointer hover:underline mention" data-username="$1">@$1</span>');
+    // PERBAIKAN: Regex diperluas untuk menangkap titik dan underscore
+    // Sebelumnya hanya /@([\w-]+)/g
+    html = html.replace(/@([a-zA-Z0-9_.]+)/g, '<span class="text-sky-600 font-bold cursor-pointer hover:underline mention" data-username="$1">@$1</span>');
     
     html = html.replace(/\n/g, '<br>');
 
@@ -1475,8 +1486,9 @@ const renderMarkdown = (text, onHashtagClick, onMentionClick) => {
                 }
                 if (e.target.classList.contains('mention')) {
                     e.stopPropagation();
-                    // Ubah kembali hyphen jadi spasi untuk pencarian
-                    const username = e.target.getAttribute('data-username').replace(/-/g, ' ');
+                    // Ubah kembali hyphen jadi spasi untuk pencarian (jika ada logic legacy)
+                    // Tapi sekarang username tidak boleh spasi, jadi aman
+                    const username = e.target.getAttribute('data-username');
                     if(onMentionClick) onMentionClick(username);
                 }
                 const link = e.target.closest('a');
@@ -1629,18 +1641,74 @@ const OnboardingScreen = ({ onComplete, user }) => {
     const { showAlert } = useCustomAlert();
     const [username, setUsername] = useState('');
     const [loading, setLoading] = useState(false);
-    const handleSubmit = async (e) => { e.preventDefault(); if (!username.trim()) return await showAlert("Username wajib diisi!", 'error'); setLoading(true); try { await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { username: username.trim(), email: user.email, uid: user.uid, photoURL: user.photoURL || '', createdAt: serverTimestamp(), following: [], followers: [], savedPosts: [], lastSeen: serverTimestamp(), reputation: 0, lastPostTime: 0 }); onComplete(); } catch (error) { await showAlert("Gagal menyimpan data: " + error.message, 'error'); } finally { setLoading(false); } };
+    
+    // VALIDASI PERKETAT: Submit Handler
+    const handleSubmit = async (e) => { 
+        e.preventDefault(); 
+        
+        // 1. Validasi Input Kosong
+        if (!username.trim()) return await showAlert("Username wajib diisi!", 'error'); 
+        
+        // 2. Validasi Limitasi Karakter (3 - 20)
+        if (username.length < 3 || username.length > 20) {
+            return await showAlert("Username harus 3-20 karakter.", 'error');
+        }
+
+        // 3. Validasi Karakter Aneh (Hanya Huruf, Angka, Titik, Underscore)
+        // Regex: ^[a-zA-Z0-9_.]+$
+        const validUsernameRegex = /^[a-zA-Z0-9_.]+$/;
+        if (!validUsernameRegex.test(username)) {
+            return await showAlert("Username hanya boleh huruf, angka, titik(.), dan garis bawah(_). Tanpa spasi.", 'error');
+        }
+
+        setLoading(true); 
+        
+        try { 
+            // 4. Validasi Keunikan Username (Query ke Firestore)
+            const usersRef = collection(db, getPublicCollection('userProfiles'));
+            const q = query(usersRef, where('username', '==', username.trim()));
+            const querySnapshot = await getDocs(q);
+
+            if (!querySnapshot.empty) {
+                // Username sudah ada
+                setLoading(false);
+                return await showAlert("Username sudah dipakai. Cari yang lain!", 'error');
+            }
+
+            // Jika lolos semua validasi, simpan
+            await setDoc(doc(db, getPublicCollection('userProfiles'), user.uid), { 
+                username: username.trim(), 
+                email: user.email, 
+                uid: user.uid, 
+                photoURL: user.photoURL || '', 
+                createdAt: serverTimestamp(), 
+                following: [], 
+                followers: [], 
+                savedPosts: [], 
+                lastSeen: serverTimestamp(), 
+                reputation: 0, 
+                lastPostTime: 0 
+            }); 
+            onComplete(); 
+        } catch (error) { 
+            await showAlert("Gagal menyimpan data: " + error.message, 'error'); 
+        } finally { 
+            setLoading(false); 
+        } 
+    };
+
     return (
         <div className="fixed inset-0 bg-white z-[80] flex flex-col items-center justify-center p-6 animate-in fade-in">
             <div className="w-full max-w-sm text-center">
                 <img src={APP_LOGO} className="w-24 h-24 mx-auto mb-6 object-contain"/>
                 <h2 className="text-2xl font-black text-gray-800 mb-2">Selamat Datang! 👋</h2>
-                <p className="text-gray-500 mb-8 text-sm">Lengkapi profil Anda untuk mulai berinteraksi.</p>
+                <p className="text-gray-500 mb-8 text-sm">Buat username unik Anda (3-20 karakter, tanpa spasi).</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="text-left">
                         <label className="text-xs font-bold text-gray-600 ml-1">Username Unik</label>
                         {/* FIX: Input text warna kuning (permintaan user) */}
-                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-500 focus:ring-2 focus:ring-sky-500 outline-none placeholder-gray-300"/>
+                        <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Contoh: user_keren.123" className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm font-bold text-yellow-500 focus:ring-2 focus:ring-sky-500 outline-none placeholder-gray-300"/>
+                        <p className="text-[10px] text-gray-400 mt-1 ml-1">*Hanya huruf, angka, titik, dan underscore.</p>
                     </div>
                     <button disabled={loading} className="w-full bg-sky-500 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-sky-600 transition disabled:opacity-50">{loading ? <Loader2 className="animate-spin mx-auto"/> : "Mulai Menjelajah"}</button>
                 </form>
@@ -2403,7 +2471,51 @@ const ProfileScreen = ({ viewerProfile, profileData, allPosts, handleFollow, isG
     const targetFollowing = profileData.following || [];
     const friendsCount = targetFollowing.filter(id => targetFollowers.includes(id)).length;
 
-    const save = async () => { setLoad(true); try { let url = profileData.photoURL; if (file) { url = await compressImageToBase64(file); } await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name}); setEdit(false); } catch(e){alert(e.message)} finally{setLoad(false)}; };
+    // VALIDASI PERKETAT: Edit Profile
+    const save = async () => { 
+        
+        // 1. Validasi Input Kosong
+        if (!name.trim()) return await showAlert("Username wajib diisi!", 'error');
+        
+        // 2. Validasi Limitasi Karakter (3 - 20)
+        if (name.length < 3 || name.length > 20) {
+            return await showAlert("Username harus 3-20 karakter.", 'error');
+        }
+
+        // 3. Validasi Karakter Aneh
+        const validUsernameRegex = /^[a-zA-Z0-9_.]+$/;
+        if (!validUsernameRegex.test(name)) {
+            return await showAlert("Username hanya boleh huruf, angka, titik, dan underscore.", 'error');
+        }
+
+        setLoad(true); 
+
+        try { 
+            // 4. Validasi Keunikan Username (Jika username berubah)
+            if (name !== profileData.username) {
+                const usersRef = collection(db, getPublicCollection('userProfiles'));
+                const q = query(usersRef, where('username', '==', name.trim()));
+                const querySnapshot = await getDocs(q);
+
+                if (!querySnapshot.empty) {
+                    setLoad(false);
+                    return await showAlert("Username sudah dipakai. Cari yang lain!", 'error');
+                }
+            }
+
+            let url = profileData.photoURL; 
+            if (file) { 
+                url = await compressImageToBase64(file); 
+            } 
+            await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), {photoURL:url, username:name.trim()}); 
+            setEdit(false); 
+        } catch(e) { 
+            showAlert("Gagal update profil: " + e.message, 'error');
+        } finally{ 
+            setLoad(false); 
+        }; 
+    };
+
     const saveMood = async () => { try { await updateDoc(doc(db, getPublicCollection('userProfiles'), profileData.uid), { mood: mood }); setIsEditingMood(false); } catch(e) { console.error(e); } };
     const badge = getReputationBadge(followersCount, isDev);
     const isFollowing = viewerProfile ? (viewerProfile.following || []).includes(profileData.uid) : false; 
