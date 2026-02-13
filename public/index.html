@@ -1,69 +1,297 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pengumuman Penting: Transisi BguneNet ke Fourvoid</title>
+    <meta name="description" content="Informasi penting mengenai transformasi BguneNet menjadi Fourvoid dan kebijakan reset data.">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- 🏷️ Title -->
-  <title>BguneNet – Media Sosial Serbaguna untuk Semua Komunitas</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #050505;
+            color: #e5e5e5;
+            overflow-x: hidden;
+        }
 
-<meta name="google-adsense-account" content="ca-pub-8761247251915529">
+        /* Background Animation effect */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-image: 
+                linear-gradient(to right, #1a1a1a 1px, transparent 1px),
+                linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
+            background-size: 40px 40px;
+            z-index: -1;
+            opacity: 0.3;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+        }
 
-<meta name="google-site-verification" content="quYG29nyxoA5No2sOFHNyNBHKTq0KXUkCQzgNnA-HRQ" />
+        .glow-point {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(0, 0, 0, 0) 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: -1;
+            animation: pulse 6s infinite ease-in-out;
+        }
 
-  <!-- 🔍 SEO -->
-  <meta name="description" content="BguneNet adalah platform media sosial serbaguna untuk berbagi teks, foto, video, dan berinteraksi secara aman. Dibuat untuk komunitas game, edukasi, kreativitas, dan pengguna umum." />
-  <meta name="keywords" content="BguneNet, sosial media, komunitas game, komunitas edukasi, platform sosial, media sosial Indonesia, aplikasi Irham" />
-  <meta name="author" content="Muhammad Irham Andika Putra" />
+        @keyframes pulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.2); }
+        }
 
-  <!-- 🌐 Open Graph / Facebook -->
-  <meta property="og:title" content="BguneNet – Media Sosial Serbaguna" />
-  <meta property="og:description" content="Jejaring sosial modern untuk berbagi teks, foto, video, dan pengalaman dalam komunitas yang aman." />
-  <meta property="og:image" content="https://c.termai.cc/i150/VrL65.png" />
-  <meta property="og:url" content="https://bgunenet.vercel.app/" />
-  <meta property="og:type" content="website" />
-  <meta property="og:locale" content="id_ID" />
-  <meta property="og:site_name" content="BguneNet" />
+        .glass-card {
+            background: rgba(20, 20, 20, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
 
-  <!-- 🐦 Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="BguneNet – Media Sosial Serbaguna" />
-  <meta name="twitter:description" content="Tempat berbagi konten dan berinteraksi secara positif dalam komunitas yang beragam." />
-  <meta name="twitter:image" content="https://c.termai.cc/i150/VrL65.png" />
+        .step-line {
+            position: absolute;
+            left: 15px;
+            top: 30px;
+            bottom: 0;
+            width: 2px;
+            background: #333;
+            z-index: 0;
+        }
 
-  <!-- 📱 PWA & Theme -->
-  <meta name="theme-color" content="#ffffff" />
-<link rel="manifest" href="/manifest.json" />
-  <!-- 🖼️ Favicon -->
-  <link rel="icon" href="https://c.termai.cc/i150/VrL65.png" type="image/png" />
+        .fade-in-up {
+            animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        @keyframes fadeInUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .delay-100 { animation-delay: 0.1s; }
+        .delay-200 { animation-delay: 0.2s; }
+        .delay-300 { animation-delay: 0.3s; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0a0a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+    </style>
 </head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
 
-<body>
-  <div id="root"></div>
-  <script type="module" src="/main.jsx"></script>
-    <!-- Vercel Analytics -->
+    <!-- Ambient Background -->
+    <div class="bg-grid"></div>
+    <div class="glow-point top-0 left-0"></div>
+    <div class="glow-point bottom-0 right-0" style="background: radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, rgba(0, 0, 0, 0) 70%);"></div>
+
+    <main class="w-full max-w-3xl relative z-10 my-10">
+        
+        <!-- Header / Logo Area -->
+        <div class="text-center mb-8 fade-in-up">
+            <div class="inline-flex items-center justify-center gap-4 text-2xl md:text-3xl font-bold tracking-tight mb-2">
+                <span class="text-gray-500 line-through decoration-red-500 decoration-2">BguneNet</span>
+                <i data-lucide="arrow-right" class="w-6 h-6 text-indigo-500 animate-pulse"></i>
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">Fourvoid</span>
+            </div>
+            <p class="text-gray-400 text-sm uppercase tracking-widest mt-2">PENGUMUMAN RESMI</p>
+        </div>
+
+        <!-- Main Card -->
+        <div class="glass-card rounded-2xl p-6 md:p-10 fade-in-up delay-100">
+            
+            <!-- Welcome -->
+            <div class="flex items-center gap-3 mb-6">
+                <div class="bg-indigo-500/10 p-2 rounded-lg text-indigo-400">
+                    <i data-lucide="megaphone" class="w-6 h-6"></i>
+                </div>
+                <h1 class="text-xl md:text-2xl font-bold text-white">Halo semuanya 👋</h1>
+            </div>
+
+            <p class="text-gray-300 leading-relaxed mb-6">
+                Kami ingin menyampaikan informasi penting terkait perubahan besar ini. 
+                Seiring dengan transformasi <strong class="text-white">BguneNet</strong> menjadi <strong class="text-indigo-400">Fourvoid</strong>, 
+                seluruh data lama akan dihapus dan sistem akan dimulai dari awal 
+                <span class="inline-block bg-gray-800 text-xs px-2 py-1 rounded border border-gray-700 ml-1">Fresh Start</span>.
+            </p>
+
+            <!-- Security Assurance Box -->
+            <div class="bg-gray-900/50 border border-green-900/30 rounded-xl p-5 mb-8 relative overflow-hidden group">
+                <div class="absolute top-0 left-0 w-1 h-full bg-green-500"></div>
+                <h3 class="text-green-400 font-semibold flex items-center gap-2 mb-3">
+                    <i data-lucide="shield-check" class="w-5 h-5"></i>
+                    Tenang, data Anda aman
+                </h3>
+                <ul class="space-y-3 text-sm text-gray-300">
+                    <li class="flex items-start gap-3">
+                        <i data-lucide="check-circle-2" class="w-4 h-4 text-green-600 mt-0.5 shrink-0"></i>
+                        <span>Data diamankan terlebih dahulu sebelum penghapusan.</span>
+                    </li>
+                    <li class="flex items-start gap-3">
+                        <i data-lucide="check-circle-2" class="w-4 h-4 text-green-600 mt-0.5 shrink-0"></i>
+                        <span>Tidak disebarluaskan ke pihak mana pun.</span>
+                    </li>
+                    <li class="flex items-start gap-3">
+                        <i data-lucide="check-circle-2" class="w-4 h-4 text-green-600 mt-0.5 shrink-0"></i>
+                        <span>Tidak digunakan untuk keperluan lain.</span>
+                    </li>
+                </ul>
+                <p class="text-xs text-gray-500 mt-4 italic border-t border-gray-800 pt-3">
+                    *Setelah proses ini, data akan dihapus permanen dari sistem kami.
+                </p>
+            </div>
+
+            <!-- New Platform Features -->
+            <div class="mb-8">
+                <h2 class="text-lg font-semibold text-white mb-4">Kenapa Fourvoid?</h2>
+                <p class="text-gray-400 text-sm mb-5">
+                    Fourvoid dibangun sebagai platform baru dengan konsep <strong>sosial media federasi</strong>.
+                </p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-gray-800/50 p-4 rounded-xl border border-gray-700 hover:border-indigo-500/50 transition-colors">
+                        <i data-lucide="lock" class="w-6 h-6 text-indigo-400 mb-3"></i>
+                        <h4 class="font-semibold text-white">Lebih Aman</h4>
+                        <p class="text-xs text-gray-400 mt-1">Privasi pengguna adalah prioritas utama arsitektur baru kami.</p>
+                    </div>
+                    <div class="bg-gray-800/50 p-4 rounded-xl border border-gray-700 hover:border-purple-500/50 transition-colors">
+                        <i data-lucide="zap" class="w-6 h-6 text-purple-400 mb-3"></i>
+                        <h4 class="font-semibold text-white">Lebih Bebas</h4>
+                        <p class="text-xs text-gray-400 mt-1">Struktur federasi memberikan kebebasan interaksi tanpa batas.</p>
+                    </div>
+                    <div class="bg-gray-800/50 p-4 rounded-xl border border-gray-700 hover:border-blue-500/50 transition-colors">
+                        <i data-lucide="eye" class="w-6 h-6 text-blue-400 mb-3"></i>
+                        <h4 class="font-semibold text-white">Lebih Transparan</h4>
+                        <p class="text-xs text-gray-400 mt-1">Sistem open source yang dapat diaudit oleh komunitas.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="bg-indigo-600/10 rounded-lg p-4 text-center mb-8 border border-indigo-500/20">
+                <p class="text-indigo-200 font-medium text-sm md:text-base">
+                    "BguneNet selesai. Fourvoid mulai dari nol, dengan sistem yang lebih sehat."
+                </p>
+            </div>
+
+            <!-- CTA Actions -->
+            <div class="flex flex-col md:flex-row gap-4 justify-center items-center">
+                <a href="fourvo.id" class="w-full md:w-auto bg-white text-black px-8 py-3 rounded-full font-bold hover:bg-gray-200 transition-all flex items-center justify-center gap-2 group">
+                    Kunjungi Fourvoid
+                    <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-1 transition-transform"></i>
+                </a>
+                <button onclick="copyLink()" class="w-full md:w-auto px-6 py-3 rounded-full font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all flex items-center justify-center gap-2 border border-gray-700">
+                    <i data-lucide="share-2" class="w-4 h-4"></i>
+                    Bagikan Info
+                </button>
+            </div>
+
+            <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg opacity-0 transition-opacity duration-300 pointer-events-none text-sm z-50">
+                Link tersalin!
+            </div>
+
+        </div>
+
+        <!-- Footer Message -->
+        <div class="text-center mt-10 fade-in-up delay-300">
+            <h3 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-200 to-gray-500">
+                Ini bukan kehilangan,<br>ini awal baru 🚀
+            </h3>
+            <p class="text-gray-500 text-sm mt-4">— Tim Fourvoid</p>
+            <p class="text-gray-600 text-xs mt-8">&copy; 2026 Fourvoid Project.</p>
+        </div>
+
+    </main>
+
     <script>
-    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+        // Initialize Icons
+        lucide.createIcons();
+
+        // Copy Link Function with Robust Fallback
+        function copyLink() {
+            const url = window.location.href;
+            
+            // Try standard API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast();
+                }).catch(err => {
+                    // If blocked, try fallback
+                    console.warn('Clipboard API blocked, trying fallback:', err);
+                    fallbackCopy(url);
+                });
+            } else {
+                // If API not available, use fallback
+                fallbackCopy(url);
+            }
+        }
+
+        // Fallback for older browsers or restricted permissions
+        function fallbackCopy(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            
+            // Ensure textarea is not visible but part of DOM
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast();
+                } else {
+                    console.error('Fallback copy failed.');
+                    alert("Maaf, browser Anda memblokir fitur salin otomatis. Silakan salin link dari address bar secara manual.");
+                }
+            } catch (err) {
+                console.error('Fallback copy error:', err);
+                alert("Gagal menyalin link.");
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        function showToast() {
+            const toast = document.getElementById('toast');
+            toast.classList.remove('opacity-0');
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+            }, 2000);
+        }
     </script>
-    <script defer src="/_vercel/insights/script.js"></script>
-
-<script>
-window.addEventListener("load", () => {
-  // Cek apakah browser mendukung Service Worker
-  if ('serviceWorker' in navigator) {
-    // Daftarkan Service Worker utama Anda
-    navigator.serviceWorker.register('/service-worker.js')
-      .then(registration => {
-        console.log('Service Worker berhasil didaftarkan. Scope:', registration.scope);
-      })
-      .catch(error => {
-        console.error('Pendaftaran Service Worker gagal:', error);
-      });
-  }
-});
-</script>
-
-
-
 </body>
 </html>
