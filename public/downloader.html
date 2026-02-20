@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BguneDownloader - Multi Platform Media Downloader</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        pixel: ['"Silkscreen"', 'cursive'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6', // Main Blue
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        },
+                        darkBg: '#020617',
+                        darkCard: '#0f172a'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --pixel-size: 4px;
+        }
+
+        body {
+            transition: background-color 0.3s ease;
+        }
+
+        /* Pixel-ish Border Style */
+        .pixel-border {
+            border: 3px solid currentColor;
+            box-shadow: var(--pixel-size) var(--pixel-size) 0px 0px rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+
+        .dark .pixel-border {
+            box-shadow: var(--pixel-size) var(--pixel-size) 0px 0px rgba(59, 130, 246, 0.3);
+        }
+
+        .pixel-btn {
+            border: 3px solid currentColor;
+            box-shadow: 4px 4px 0px 0px currentColor;
+            transition: all 0.1s;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .pixel-btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px 0px currentColor;
+        }
+
+        .ad-slot {
+            background-image: radial-gradient(circle at 1px 1px, rgba(59, 130, 246, 0.1) 1px, transparent 0);
+            background-size: 20px 20px;
+            border: 2px dashed rgba(59, 130, 246, 0.3);
+        }
+
+        /* Custom Video Player Style for Pixel Theme */
+        video::-webkit-media-controls-panel {
+            background-color: rgba(15, 23, 42, 0.9);
+        }
+
+        .glass-effect {
+            backdrop-filter: blur(8px);
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .dark .glass-effect {
+            background: rgba(15, 23, 42, 0.8);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-darkBg text-slate-900 dark:text-slate-100 font-sans">
+
+    <!-- Header -->
+    <nav class="sticky top-0 z-50 border-b-4 border-primary-500 glass-effect">
+        <div class="max-w-6xl mx-auto px-4 h-20 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <!-- LOGO BOX -->
+                <div class="w-10 h-10 bg-primary-600 pixel-border text-white flex items-center justify-center">
+                    <i data-lucide="cloud-download" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="font-pixel text-xl md:text-2xl text-primary-600 dark:text-primary-400">BGUNE.DWNLD</h1>
+                    <p class="text-[10px] font-bold tracking-[0.2em] opacity-60">PRODUCTION_VER_2.1</p>
+                </div>
+            </div>
+            
+            <button id="themeToggle" class="pixel-border p-2 text-primary-600 border-primary-600 hover:bg-primary-600 hover:text-white transition-colors">
+                <i data-lucide="sun" id="sun-icon" class="hidden dark:block w-5 h-5"></i>
+                <i data-lucide="moon" id="moon-icon" class="block dark:hidden w-5 h-5"></i>
+            </button>
+        </div>
+    </nav>
+
+    <main class="max-w-5xl mx-auto px-4 py-8 space-y-12">
+        
+        <!-- Iklan Banner Atas -->
+        <div class="w-full flex flex-col items-center">
+            <p class="text-[9px] font-pixel opacity-40 mb-2 tracking-widest">ADV_SPACE_TOP</p>
+            <div class="ad-slot w-full max-w-[728px] h-[90px] flex items-center justify-center text-[10px] font-pixel opacity-30">
+                PASANG_IKLAN_BANNER_DI_SINI
+            </div>
+        </div>
+
+        <!-- Download Engine -->
+        <section class="pixel-border border-primary-500 bg-white dark:bg-darkCard p-6 md:p-10 relative overflow-hidden">
+            <!-- Background Decorative Grid -->
+            <div class="absolute inset-0 opacity-[0.03] pointer-events-none" style="background-image: linear-gradient(#3b82f6 1px, transparent 1px), linear-gradient(90deg, #3b82f6 1px, transparent 1px); background-size: 20px 20px;"></div>
+
+            <div class="relative z-10 text-center mb-8">
+                <h2 class="font-pixel text-2xl md:text-3xl text-primary-600 dark:text-primary-400 mb-2">UNIVERSAL_DOWNLOADER</h2>
+                <p class="text-xs md:text-sm font-semibold opacity-70">Salin link media dari platform manapun, tempel, dan unduh tanpa ribet.</p>
+            </div>
+
+            <form id="downloadForm" class="relative z-10 space-y-6">
+                <div class="flex flex-col gap-2">
+                    <label class="text-[10px] font-pixel text-primary-600 uppercase">Input_Terminal_Link</label>
+                    <div class="relative">
+                        <input type="url" id="targetUrl" required
+                            placeholder="https://www.tiktok.com/@user/video/..." 
+                            class="w-full bg-slate-50 dark:bg-slate-900 border-2 border-primary-200 dark:border-primary-900/50 p-4 pl-12 focus:border-primary-500 outline-none font-semibold transition-all">
+                        <i data-lucide="link-2" class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-500"></i>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap justify-center gap-4">
+                    <label class="cursor-pointer group">
+                        <input type="radio" name="mode" value="aio" class="peer hidden" checked>
+                        <div class="px-6 py-3 border-2 border-primary-200 dark:border-primary-900/50 peer-checked:border-primary-500 peer-checked:bg-primary-500/10 text-xs font-bold transition-all flex items-center gap-2">
+                            <i data-lucide="play-circle" class="w-4 h-4"></i> ALL-IN-ONE
+                        </div>
+                    </label>
+                    <label class="cursor-pointer group">
+                        <input type="radio" name="mode" value="ytmp3" class="peer hidden">
+                        <div class="px-6 py-3 border-2 border-primary-200 dark:border-primary-900/50 peer-checked:border-primary-500 peer-checked:bg-primary-500/10 text-xs font-bold transition-all flex items-center gap-2">
+                            <i data-lucide="music" class="w-4 h-4"></i> YT_MP3_SPECIAL
+                        </div>
+                    </label>
+                </div>
+
+                <button type="submit" id="submitBtn" class="pixel-btn w-full bg-primary-600 text-white py-4 font-pixel tracking-widest flex items-center justify-center gap-3">
+                    <span id="btnText">EXECUTE_REQUEST</span>
+                    <div id="loading" class="hidden w-5 h-5 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                </button>
+            </form>
+        </section>
+
+        <!-- Dynamic Results Section -->
+        <section id="resultContainer" class="hidden animate-in fade-in slide-in-from-bottom-8 duration-500">
+            <div class="pixel-border border-primary-500 bg-white dark:bg-darkCard overflow-hidden">
+                <div class="flex flex-col md:flex-row">
+                    <!-- Preview Area -->
+                    <div id="previewArea" class="w-full md:w-2/5 bg-black flex items-center justify-center min-h-[250px] relative">
+                        <!-- Content will be injected here (Image or Video) -->
+                    </div>
+
+                    <!-- Details Area -->
+                    <div class="flex-1 p-6 md:p-8 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="bg-primary-500 text-white text-[9px] font-pixel px-2 py-0.5">MEDIA_FOUND</span>
+                                <span id="sourceType" class="text-[9px] font-bold opacity-50 uppercase tracking-widest">UNKNOWN_SOURCE</span>
+                            </div>
+                            <h3 id="resTitle" class="text-xl font-bold leading-tight mb-4">Judul Media Terdeteksi</h3>
+                            
+                            <!-- Audio Preview for MP3 -->
+                            <div id="audioBox" class="hidden mb-6 p-3 bg-primary-50 dark:bg-primary-900/20 border-l-4 border-primary-500">
+                                <p class="text-[10px] font-bold text-primary-600 mb-2 uppercase">Audio_Preview</p>
+                                <audio id="audioPlayer" controls class="w-full h-8"></audio>
+                            </div>
+                        </div>
+
+                        <div class="space-y-3">
+                            <a id="downloadMain" href="#" target="_blank" class="pixel-btn bg-primary-600 text-white w-full py-4 flex items-center justify-center gap-2">
+                                <i data-lucide="download" class="w-5 h-5"></i> DOWNLOAD_SEKARANG [HD]
+                            </a>
+                            <p class="text-[10px] text-center font-semibold opacity-50 italic">*Proses download langsung ke perangkat Anda.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Supported Platforms & Benefits -->
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="pixel-border border-slate-200 dark:border-slate-800 p-6 bg-white dark:bg-darkCard space-y-4">
+                <div class="flex items-center gap-2 text-primary-500">
+                    <i data-lucide="layers" class="w-5 h-5"></i>
+                    <h3 class="font-pixel text-sm">SUPPORT_LIST</h3>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <span class="text-[10px] border border-slate-300 dark:border-slate-700 px-2 py-1 font-bold">INSTAGRAM</span>
+                    <span class="text-[10px] border border-slate-300 dark:border-slate-700 px-2 py-1 font-bold text-primary-500">TIKTOK_WM</span>
+                    <span class="text-[10px] border border-slate-300 dark:border-slate-700 px-2 py-1 font-bold">FACEBOOK</span>
+                    <span class="text-[10px] border border-slate-300 dark:border-slate-700 px-2 py-1 font-bold text-red-500">YOUTUBE</span>
+                    <span class="text-[10px] border border-slate-300 dark:border-slate-700 px-2 py-1 font-bold">TWITTER_X</span>
+                </div>
+                <p class="text-[11px] opacity-70 font-semibold leading-relaxed">Mendukung lebih dari 20+ platform sosial media populer dengan sistem update otomatis.</p>
+            </div>
+
+            <div class="pixel-border border-slate-200 dark:border-slate-800 p-6 bg-white dark:bg-darkCard space-y-4">
+                <div class="flex items-center gap-2 text-primary-500">
+                    <i data-lucide="zap" class="w-5 h-5"></i>
+                    <h3 class="font-pixel text-sm">BENEFITS</h3>
+                </div>
+                <ul class="text-[11px] font-bold space-y-2 opacity-80">
+                    <li class="flex items-center gap-2"><i data-lucide="check" class="w-3 h-3 text-primary-500"></i> No Watermark (TikTok)</li>
+                    <li class="flex items-center gap-2"><i data-lucide="check" class="w-3 h-3 text-primary-500"></i> Kualitas HD & Full HD</li>
+                    <li class="flex items-center gap-2"><i data-lucide="check" class="w-3 h-3 text-primary-500"></i> Kecepatan Server Tinggi</li>
+                    <li class="flex items-center gap-2"><i data-lucide="check" class="w-3 h-3 text-primary-500"></i> Gratis Selamanya</li>
+                </ul>
+            </div>
+
+            <div class="pixel-border border-slate-200 dark:border-slate-800 p-6 bg-white dark:bg-darkCard space-y-4">
+                <div class="flex items-center gap-2 text-primary-500">
+                    <i data-lucide="shield-check" class="w-5 h-5"></i>
+                    <h3 class="font-pixel text-sm">SECURITY</h3>
+                </div>
+                <p class="text-[11px] font-semibold opacity-70 leading-relaxed">Privasi Anda prioritas kami. Kami menggunakan teknologi enkripsi peer-to-peer dan tidak menyimpan log aktivitas unduhan Anda di database kami.</p>
+            </div>
+        </section>
+
+        <!-- Iklan Tengah -->
+        <div class="w-full flex justify-center py-4">
+            <div class="ad-slot w-full max-w-[300px] h-[250px] flex items-center justify-center text-[10px] font-pixel opacity-30">
+                IKLAN_NATIVE_300x250
+            </div>
+        </div>
+
+        <!-- Developer Section -->
+        <section class="pixel-border border-primary-500 bg-primary-600 text-white p-8 md:p-12 relative overflow-hidden">
+            <div class="absolute right-0 bottom-0 opacity-10 translate-x-10 translate-y-10 scale-150">
+                <i data-lucide="code-2" class="w-48 h-48"></i>
+            </div>
+            
+            <div class="relative z-10 flex flex-col md:flex-row items-center gap-8">
+                <div class="w-32 h-32 pixel-border border-white bg-white shrink-0 overflow-hidden">
+                    <!-- Foto Profil Irham -->
+                    <img src="https://ui-avatars.com/api/?name=Muhammad+Irham+Andika+Putra&background=1e40af&color=fff&size=200&bold=true" 
+                         alt="Developer" class="w-full h-full object-cover">
+                </div>
+                
+                <div class="text-center md:text-left">
+                    <p class="text-[10px] font-pixel mb-1 tracking-widest opacity-80">// CREATOR_IDENTITY</p>
+                    <h3 class="text-2xl md:text-3xl font-bold mb-3 uppercase tracking-tighter">Muhammad Irham Andika Putra</h3>
+                    <p class="text-sm md:text-base font-semibold opacity-90 max-w-xl mb-6">Software Architect & Creative Developer. Membangun infrastruktur digital yang memudahkan miliaran orang untuk mengakses konten secara bebas dan aman.</p>
+                    
+                    <div class="flex flex-wrap justify-center md:justify-start gap-4">
+                        <a href="https://portofolio-anda.com" target="_blank" class="pixel-border border-white bg-white text-primary-600 px-6 py-2 text-xs font-bold hover:bg-primary-50 transition-colors">
+                            VIEW_PORTFOLIO
+                        </a>
+                        <div class="flex items-center gap-4 opacity-70">
+                            <i data-lucide="instagram" class="w-5 h-5 cursor-pointer hover:opacity-100"></i>
+                            <i data-lucide="github" class="w-5 h-5 cursor-pointer hover:opacity-100"></i>
+                            <i data-lucide="linkedin" class="w-5 h-5 cursor-pointer hover:opacity-100"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="py-12 text-center border-t-4 border-primary-500 mt-20">
+        <div class="max-w-6xl mx-auto px-4">
+            <p class="text-[10px] font-pixel text-primary-600 opacity-60 tracking-[0.5em] mb-4 uppercase">
+                &copy; 2024 BGUNEDOWNLOADER // POWERED BY FAA_API
+            </p>
+            <div class="flex justify-center gap-4 text-[10px] font-bold opacity-40">
+                <a href="#" class="hover:underline">TERMS_OF_SERVICE</a>
+                <span>/</span>
+                <a href="#" class="hover:underline">PRIVACY_POLICY</a>
+                <span>/</span>
+                <a href="#" class="hover:underline">DMCA</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Init Icons
+        lucide.createIcons();
+
+        // Theme Switcher Logic
+        const themeBtn = document.getElementById('themeToggle');
+        const html = document.documentElement;
+
+        if (localStorage.theme === 'light') {
+            html.classList.remove('dark');
+        }
+
+        themeBtn.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            localStorage.theme = html.classList.contains('dark') ? 'dark' : 'light';
+        });
+
+        // Core App Logic
+        const form = document.getElementById('downloadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+        const loader = document.getElementById('loading');
+        const resultContainer = document.getElementById('resultContainer');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('targetUrl').value.trim();
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+
+            // Reset UI
+            submitBtn.disabled = true;
+            btnText.innerText = 'FETCHING_DATA...';
+            loader.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+
+            try {
+                const encodedUrl = encodeURIComponent(url);
+                const endpoint = mode === 'aio' 
+                    ? `https://api-faa.my.id/faa/aio?url=${encodedUrl}`
+                    : `https://api-faa.my.id/faa/ytmp3?url=${encodedUrl}`;
+
+                const response = await fetch(endpoint);
+                const data = await response.json();
+
+                if (data.status && data.result) {
+                    processResult(data.result, mode, url);
+                } else {
+                    alert("Gagal mengambil data. Pastikan URL benar atau coba link lain.");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Koneksi Error. Periksa internet atau API sedang bermasalah.");
+            } finally {
+                submitBtn.disabled = false;
+                btnText.innerText = 'EXECUTE_REQUEST';
+                loader.classList.add('hidden');
+            }
+        });
+
+        function processResult(res, mode, originalUrl) {
+            const previewArea = document.getElementById('previewArea');
+            const resTitle = document.getElementById('resTitle');
+            const sourceType = document.getElementById('sourceType');
+            const mainBtn = document.getElementById('downloadMain');
+            const audioBox = document.getElementById('audioBox');
+            const audioPlayer = document.getElementById('audioPlayer');
+
+            resTitle.innerText = res.title || "Media File Detected";
+            
+            // Detect Source
+            if (originalUrl.includes('tiktok')) sourceType.innerText = "TIKTOK_SOURCE";
+            else if (originalUrl.includes('instagram')) sourceType.innerText = "INSTAGRAM_SOURCE";
+            else if (originalUrl.includes('youtube') || originalUrl.includes('youtu.be')) sourceType.innerText = "YOUTUBE_SOURCE";
+            else sourceType.innerText = "WEB_SOURCE";
+
+            // Preview Logic
+            previewArea.innerHTML = '';
+            
+            if (mode === 'ytmp3') {
+                // Show Thumbnail for Music
+                previewArea.innerHTML = `<img src="${res.thumbnail}" class="w-full h-full object-cover opacity-60">`;
+                audioBox.classList.remove('hidden');
+                audioPlayer.src = res.mp3;
+                mainBtn.href = res.mp3;
+                mainBtn.innerHTML = `<i data-lucide="music" class="w-5 h-5"></i> DOWNLOAD_MP3_HD`;
+            } else {
+                audioBox.classList.add('hidden');
+                mainBtn.href = res.download_url;
+                mainBtn.innerHTML = `<i data-lucide="download" class="w-5 h-5"></i> DOWNLOAD_VIDEO_HD`;
+
+                // Smart Preview (Video for TikTok/IG, Image for YouTube)
+                if (originalUrl.includes('youtube') || originalUrl.includes('youtu.be')) {
+                    previewArea.innerHTML = `<img src="${res.thumbnail}" class="w-full h-full object-cover">`;
+                } else {
+                    // Coba tampilkan video preview jika tersedia
+                    previewArea.innerHTML = `
+                        <video controls class="w-full h-full object-contain bg-black">
+                            <source src="${res.download_url}" type="video/mp4">
+                            Browser tidak mendukung preview video.
+                        </video>`;
+                }
+            }
+
+            lucide.createIcons();
+            resultContainer.classList.remove('hidden');
+            resultContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    </script>
+</body>
+</html>
