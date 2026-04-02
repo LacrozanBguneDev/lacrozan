@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Sopyan Ahsan | Visual Storyteller & Creative Editor</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Safe tailwind config (prevents "tailwind is not defined" error)
+        window.addEventListener('load', function() {
+            if (typeof tailwind !== 'undefined') {
+                tailwind.config = {
+                    darkMode: 'class',
+                    theme: {
+                        extend: {
+                            fontFamily: {
+                                sans: ['Plus Jakarta Sans', 'sans-serif'],
+                                outfit: ['Outfit', 'sans-serif'],
+                            },
+                            colors: {
+                                primary: {
+                                    50: '#eff6ff',
+                                    500: '#3b82f6',
+                                    600: '#2563eb',
+                                    700: '#1d4ed8',
+                                    800: '#1e40af',
+                                },
+                                dark: {
+                                    bg: '#0a0f1a',
+                                    card: '#151c2c'
+                                }
+                            },
+                            animation: {
+                                'float': 'float 6s ease-in-out infinite',
+                            },
+                            keyframes: {
+                                float: {
+                                    '0%, 100%': { transform: 'translateY(0px)' },
+                                    '50%': { transform: 'translateY(-12px)' },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+
+    <!-- Lucide Icons (latest) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.3s ease, color 0.2s ease;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+        }
+        .dark .glass-card {
+            background: rgba(21, 28, 44, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+        }
+        .nav-active {
+            background: #2563eb;
+            color: white !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
+        }
+        .route-section {
+            display: none;
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity 0.5s cubic-bezier(0.2, 0.9, 0.4, 1.1), transform 0.5s ease;
+        }
+        .route-section.active {
+            display: block;
+        }
+        .route-section.fade-in {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .profile-blob {
+            border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%;
+            background: linear-gradient(135deg, #3b82f6, #2dd4bf);
+            animation: morph 10s ease-in-out infinite;
+        }
+        @keyframes morph {
+            0% { border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%; }
+            50% { border-radius: 58% 42% 38% 62% / 55% 55% 45% 45%; }
+            100% { border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%; }
+        }
+        .skill-badge {
+            transition: all 0.2s;
+        }
+        .skill-badge:hover {
+            transform: translateY(-2px);
+            background: #3b82f620;
+            border-color: #3b82f6;
+        }
+        .menu-popup {
+            transform-origin: bottom center;
+            transition: all 0.25s cubic-bezier(0.34, 1.2, 0.64, 1);
+        }
+        .light-gradient-bg {
+            background: radial-gradient(circle at 10% 20%, rgba(59,130,246,0.03) 0%, rgba(255,255,255,0) 70%);
+        }
+        .dark .light-gradient-bg {
+            background: radial-gradient(circle at 10% 20%, rgba(59,130,246,0.08) 0%, rgba(10,15,26,0) 70%);
+        }
+        .video-wrapper iframe {
+            border-radius: 1.5rem;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-white to-slate-100 dark:from-dark-bg dark:via-dark-bg dark:to-slate-900 text-slate-800 dark:text-slate-100 antialiased selection:bg-primary-500/30 light-gradient-bg">
+
+    <!-- Navbar -->
+    <nav class="fixed top-0 inset-x-0 h-16 z-50 px-6 flex items-center justify-between border-b border-slate-200/60 dark:border-white/10 bg-white/80 dark:bg-dark-bg/80 backdrop-blur-lg shadow-sm">
+        <div class="flex items-center gap-2 cursor-pointer group" onclick="navigate('home')">
+            <div class="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center text-white shadow-md shadow-primary-600/25 group-hover:scale-105 transition-transform duration-200">
+                <span class="font-bold text-lg font-outfit">SA</span>
+            </div>
+            <span class="font-bold text-xl tracking-tight font-outfit bg-gradient-to-r from-slate-800 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">Sopyan<span class="text-primary-600">.</span></span>
+        </div>
+        <button id="themeToggle" class="p-2.5 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all border border-slate-200 dark:border-slate-700">
+            <i data-lucide="moon" class="w-5 h-5 dark:hidden text-slate-700"></i>
+            <i data-lucide="sun" class="w-5 h-5 hidden dark:block text-yellow-400"></i>
+        </button>
+    </nav>
+
+    <!-- Main Content Container -->
+    <main class="max-w-6xl mx-auto px-6 pt-28 pb-36">
+        
+        <!-- HOME -->
+        <section id="home" class="route-section active">
+            <div class="flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
+                <div class="flex-1 text-center lg:text-left order-2 lg:order-1">
+                    <div class="inline-flex items-center gap-2 px-5 py-2 rounded-full glass-card mb-6 text-sm font-bold text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        Visual Storyteller
+                    </div>
+                    <h1 class="text-5xl md:text-7xl font-extrabold mb-6 leading-[1.1] font-outfit tracking-tight">
+                        Sopyan <span class="text-primary-600">Ahsan</span><br>
+                        <span class="text-slate-400 dark:text-slate-500 font-light text-3xl md:text-5xl">Editor & Fotografer</span>
+                    </h1>
+                    <p class="text-lg text-slate-600 dark:text-slate-300 mb-10 max-w-xl mx-auto lg:mx-0 leading-relaxed">
+                        Mengubah momen menjadi masterpiece visual. Spesialis <span class="font-semibold text-primary-600">Foto, Video, & Desain</span> dengan sentuhan artistik & storytelling yang kuat.
+                    </p>
+                    <div class="flex flex-wrap justify-center lg:justify-start gap-4">
+                        <button onclick="navigate('portfolio')" class="px-8 py-4 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold hover:scale-105 transition-transform flex items-center gap-2 shadow-xl shadow-slate-900/20">
+                            <i data-lucide="sparkles" class="w-5 h-5"></i> Eksplorasi Karya
+                        </button>
+                        <button onclick="navigate('shop')" class="px-8 py-4 rounded-2xl glass-card font-bold hover:bg-white dark:hover:bg-slate-800 transition-all flex items-center gap-2 border border-slate-300 dark:border-slate-700">
+                            <i data-lucide="shopping-bag" class="w-5 h-5"></i> Pesan Jasa
+                        </button>
+                    </div>
+                    <div class="flex flex-wrap gap-8 justify-center lg:justify-start mt-12 pt-4 border-t border-slate-200 dark:border-slate-800">
+                        <div><span class="font-black text-2xl text-primary-600">4+</span><p class="text-xs uppercase tracking-wider">Tahun Pengalaman</p></div>
+                        <div><span class="font-black text-2xl text-primary-600">120+</span><p class="text-xs uppercase tracking-wider">Proyek Selesai</p></div>
+                        <div><span class="font-black text-2xl text-primary-600">100%</span><p class="text-xs uppercase tracking-wider">Kepuasan Klien</p></div>
+                    </div>
+                </div>
+                <div class="flex-1 flex justify-center order-1 lg:order-2">
+                    <div class="relative w-64 h-64 md:w-80 md:h-80 lg:w-96 lg:h-96 animate-float">
+                        <div class="absolute inset-0 profile-blob opacity-20 blur-2xl"></div>
+                        <div class="absolute inset-2 border-2 border-primary-400/30 rounded-[3rem] rotate-6"></div>
+                        <div class="absolute inset-0 rounded-[3rem] overflow-hidden bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-800 dark:to-slate-700 border-4 border-white dark:border-slate-900 shadow-2xl flex items-center justify-center">
+                            <div class="text-center">
+                                <i data-lucide="user" class="w-28 h-28 text-slate-500 dark:text-slate-400"></i>
+                                <p class="text-sm font-black text-slate-500 dark:text-slate-300 mt-3 tracking-wider">SOPYAN AHSAN</p>
+                                <p class="text-[11px] font-medium text-primary-600">Creative Professional</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ABOUT (diperkaya info dari PDF) -->
+        <section id="about" class="route-section">
+            <h2 class="text-3xl font-bold mb-10 flex items-center gap-4"><span class="w-12 h-1 rounded-full bg-primary-600"></span> Tentang Saya</h2>
+            <div class="grid md:grid-cols-2 gap-8">
+                <div class="glass-card p-8 rounded-3xl">
+                    <h3 class="text-2xl font-bold mb-4 flex gap-2"><i data-lucide="user-check" class="w-6 h-6 text-primary-600"></i> Profil Kreatif</h3>
+                    <p class="text-slate-600 dark:text-slate-300 leading-relaxed mb-5">
+                        Sopyan Ahsan — freelancer di bidang fotografi & editing dengan kepekaan artistik tinggi. Berpengalaman dari pengambilan gambar hingga pascaproduksi, memastikan setiap visual memiliki pesan kuat.
+                    </p>
+                    <div class="flex flex-wrap gap-2 mt-4">
+                        <span class="skill-badge px-4 py-2 rounded-xl bg-white/70 dark:bg-slate-800/70 text-xs font-bold border border-slate-200 dark:border-slate-700">Adobe Photoshop</span>
+                        <span class="skill-badge px-4 py-2 rounded-xl bg-white/70 dark:bg-slate-800/70 text-xs font-bold border border-slate-200 dark:border-slate-700">Premiere Pro</span>
+                        <span class="skill-badge px-4 py-2 rounded-xl bg-white/70 dark:bg-slate-800/70 text-xs font-bold border border-slate-200 dark:border-slate-700">Lightroom Classic</span>
+                        <span class="skill-badge px-4 py-2 rounded-xl bg-white/70 dark:bg-slate-800/70 text-xs font-bold border border-slate-200 dark:border-slate-700">CapCut</span>
+                        <span class="skill-badge px-4 py-2 rounded-xl bg-white/70 dark:bg-slate-800/70 text-xs font-bold border border-slate-200 dark:border-slate-700">Canva Pro</span>
+                    </div>
+                </div>
+                <div class="space-y-5">
+                    <div class="glass-card p-6 rounded-2xl flex gap-5 items-start">
+                        <div class="p-3 rounded-2xl bg-blue-100 dark:bg-blue-900/40 text-blue-600"><i data-lucide="graduation-cap" class="w-6 h-6"></i></div>
+                        <div><h4 class="font-extrabold text-lg">Pendidikan</h4><p class="text-sm text-slate-500">MA AI - Hanif IPA (2016-2019)</p><p class="text-sm font-semibold">UNPI Cianjur - Teknik Informatika (2021-2025)</p></div>
+                    </div>
+                    <div class="glass-card p-6 rounded-2xl flex gap-5 items-start">
+                        <div class="p-3 rounded-2xl bg-purple-100 dark:bg-purple-900/40 text-purple-600"><i data-lucide="briefcase" class="w-6 h-6"></i></div>
+                        <div><h4 class="font-extrabold text-lg">Pengalaman</h4><p class="text-sm">Graphic Designer @ Digital Technology Shop (2021-2022)</p><p class="text-sm">Photographer @ Moment Photography (2020-2024)</p><p class="text-sm text-primary-600 mt-1">+ freelance event & wedding</p></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SERVICES -->
+        <section id="services" class="route-section">
+            <h2 class="text-3xl font-bold mb-12 text-center">Layanan Unggulan</h2>
+            <div class="grid md:grid-cols-3 gap-7">
+                <div class="glass-card p-7 rounded-3xl text-center hover:scale-[1.02] transition-all duration-300 border border-primary-100 dark:border-primary-900/30">
+                    <div class="w-16 h-16 rounded-2xl bg-primary-600 text-white mx-auto flex items-center justify-center mb-5 shadow-xl"><i data-lucide="palette" class="w-8 h-8"></i></div>
+                    <h3 class="text-xl font-bold mb-2">Graphic Design</h3>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm">Logo, feed Instagram, banner, dan branding identitas visual yang modern & komunikatif.</p>
+                </div>
+                <div class="glass-card p-7 rounded-3xl text-center hover:scale-[1.02] transition-all duration-300">
+                    <div class="w-16 h-16 rounded-2xl bg-purple-600 text-white mx-auto flex items-center justify-center mb-5 shadow-xl"><i data-lucide="clapperboard" class="w-8 h-8"></i></div>
+                    <h3 class="text-xl font-bold mb-2">Video Editing</h3>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm">Editing cinematic, wedding highlight, video produk, reels dengan transisi profesional + color grading.</p>
+                </div>
+                <div class="glass-card p-7 rounded-3xl text-center hover:scale-[1.02] transition-all duration-300">
+                    <div class="w-16 h-16 rounded-2xl bg-orange-500 text-white mx-auto flex items-center justify-center mb-5 shadow-xl"><i data-lucide="camera" class="w-8 h-8"></i></div>
+                    <h3 class="text-xl font-bold mb-2">Photography</h3>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm">Pre-wedding, wedding, potret produk, dan event. Hasil foto artistik dengan sentuhan fine-art.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- PORTFOLIO -->
+        <section id="portfolio" class="route-section">
+            <h2 class="text-3xl font-bold mb-6 flex items-center justify-between flex-wrap gap-2">
+                <span>Portfolio Highlights</span>
+                <span class="text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">Wedding • Branding • Cinematic</span>
+            </h2>
+            <div class="grid md:grid-cols-2 gap-8 mb-12">
+                <div class="group relative bg-slate-200 dark:bg-slate-800 rounded-3xl overflow-hidden aspect-[4/3] shadow-xl">
+                    <div class="absolute inset-0 flex items-center justify-center opacity-30 group-hover:scale-110 transition-transform"><i data-lucide="camera" class="w-20 h-20"></i></div>
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent flex flex-col justify-end p-7">
+                        <p class="text-primary-300 font-bold text-xs uppercase tracking-wider">Fotografi Pernikahan</p>
+                        <h3 class="text-2xl font-bold text-white mb-1">Moment Wedding Series</h3>
+                        <p class="text-slate-200 text-sm">Dokumentasi 20+ pasangan dengan gaya candid & artistic. Software: Adobe Lightroom & Photoshop.</p>
+                    </div>
+                </div>
+                <div class="group relative bg-slate-200 dark:bg-slate-800 rounded-3xl overflow-hidden aspect-[4/3] shadow-xl">
+                    <div class="absolute inset-0 flex items-center justify-center opacity-30 group-hover:scale-110 transition-transform"><i data-lucide="video" class="w-20 h-20"></i></div>
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent flex flex-col justify-end p-7">
+                        <p class="text-purple-300 font-bold text-xs uppercase">Editing Video Iklan</p>
+                        <h3 class="text-2xl font-bold text-white">Commercial Product Reel</h3>
+                        <p class="text-slate-200 text-sm">Iklan produk Xiaomi, skincare & fashion. Transisi dinamis, sound design, Premiere Pro & CapCut.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-6 mb-12">
+                <div class="glass-card p-5 rounded-2xl text-center border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="layers" class="w-10 h-10 text-primary-500 mx-auto mb-3"></i>
+                    <h4 class="font-bold">Feed Instagram Branding</h4>
+                    <p class="text-xs text-slate-500">Desain template untuk usaha lokal & UMKM</p>
+                </div>
+                <div class="glass-card p-5 rounded-2xl text-center border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="image" class="w-10 h-10 text-primary-500 mx-auto mb-3"></i>
+                    <h4 class="font-bold">Poster & Pamflet Event</h4>
+                    <p class="text-xs text-slate-500">Konser, bazaar, gathering perusahaan</p>
+                </div>
+                <div class="glass-card p-5 rounded-2xl text-center border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="pen-tool" class="w-10 h-10 text-primary-500 mx-auto mb-3"></i>
+                    <h4 class="font-bold">Logo & Identitas</h4>
+                    <p class="text-xs text-slate-500">Merek modern, minimalis, dan berkesan</p>
+                </div>
+            </div>
+
+            <!-- YouTube Demo Reel (fixed icon) -->
+            <div class="glass-card p-6 md:p-8 rounded-3xl mt-6 border border-primary-200 dark:border-primary-800">
+                <div class="flex items-center gap-3 mb-5 flex-wrap">
+                    <i data-lucide="youtube" class="w-7 h-7 text-red-500"></i>
+                    <h3 class="text-2xl font-bold">Demo Reel: Wedding Cinematic</h3>
+                    <span class="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 px-3 py-1 rounded-full">Featured Project</span>
+                </div>
+                <p class="text-slate-600 dark:text-slate-300 mb-5">Preview proses editing video pernikahan — color grading, transisi artistik, dan storytelling emosional. (Contoh portofolio klien)</p>
+                <div class="video-wrapper rounded-2xl overflow-hidden shadow-2xl">
+                    <iframe class="w-full aspect-video" src="https://www.youtube.com/embed/9bZkp7q19f0?si=placeholder" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                </div>
+                <p class="text-xs text-center text-slate-400 mt-4 italic">*Video representatif — untuk melihat portofolio lengkap, hubungi kontak di bawah.</p>
+            </div>
+        </section>
+
+        <!-- SHOP / Layanan Commerce -->
+        <section id="shop" class="route-section">
+            <h2 class="text-3xl font-bold mb-3 text-center">Paket Kreatif</h2>
+            <p class="text-center text-slate-500 mb-10 max-w-lg mx-auto">Pilih layanan sesuai kebutuhan proyek anda. Mulai dari foto produk hingga video company profile.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
+                <div class="glass-card p-6 rounded-3xl border border-slate-200 dark:border-slate-700 hover:shadow-xl transition">
+                    <i data-lucide="image" class="w-12 h-12 text-primary-500 mb-4"></i>
+                    <h3 class="text-xl font-bold">Foto Produk Premium</h3>
+                    <p class="text-sm text-slate-500 my-3">10-15 foto produk studio lighting + editing high-res. Termasuk 3 revisi.</p>
+                    <button onclick="openModal('Paket Foto Produk Premium')" class="mt-4 w-full py-3 rounded-xl bg-primary-600 text-white font-semibold hover:bg-primary-700 transition">Pesan Sekarang →</button>
+                </div>
+                <div class="glass-card p-6 rounded-3xl border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="clapperboard" class="w-12 h-12 text-purple-500 mb-4"></i>
+                    <h3 class="text-xl font-bold">Video Company Profile</h3>
+                    <p class="text-sm text-slate-500 my-3">Video durasi 1-2 menit, script + editing cinematic, audio desain, warna profesional.</p>
+                    <button onclick="openModal('Paket Video Company Profile')" class="mt-4 w-full py-3 rounded-xl bg-primary-600 text-white font-semibold hover:bg-primary-700 transition">Pesan Sekarang →</button>
+                </div>
+                <div class="glass-card p-6 rounded-3xl border border-slate-200 dark:border-slate-700">
+                    <i data-lucide="instagram" class="w-12 h-12 text-pink-500 mb-4"></i>
+                    <h3 class="text-xl font-bold">Desain Feed Instagram</h3>
+                    <p class="text-sm text-slate-500 my-3">9 desain feed + story template, riset estetika brand, siap posting.</p>
+                    <button onclick="openModal('Paket Desain Feed Instagram')" class="mt-4 w-full py-3 rounded-xl bg-primary-600 text-white font-semibold hover:bg-primary-700 transition">Pesan Sekarang →</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- KONTAK -->
+        <section id="contact" class="route-section">
+            <div class="glass-card p-10 rounded-[3rem] text-center max-w-3xl mx-auto border border-primary-100 dark:border-primary-800">
+                <h2 class="text-4xl font-bold mb-5 font-outfit">Hubungi Saya</h2>
+                <p class="text-slate-600 dark:text-slate-300 mb-8">Siap wujudkan ide visual anda? Mari berkolaborasi untuk hasil terbaik.</p>
+                <div class="flex flex-col sm:flex-row gap-5 justify-center mb-8">
+                    <a href="https://wa.me/6282120349220" target="_blank" class="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-green-600 text-white font-bold hover:scale-105 transition shadow-lg"><i data-lucide="message-circle" class="w-5 h-5"></i> WhatsApp</a>
+                    <a href="https://instagram.com/sopyanahsan" target="_blank" class="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold hover:scale-105 transition shadow-lg"><i data-lucide="instagram" class="w-5 h-5"></i> Instagram</a>
+                    <a href="https://linkedin.com/in/sopyanahsan" target="_blank" class="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-slate-800 text-white font-bold hover:scale-105 transition"><i data-lucide="linkedin" class="w-5 h-5"></i> LinkedIn</a>
+                </div>
+                <div class="space-y-2 text-slate-500 dark:text-slate-400">
+                    <p class="flex items-center justify-center gap-2"><i data-lucide="mail" class="w-4 h-4"></i> mmsopyan@gmail.com</p>
+                    <p class="flex items-center justify-center gap-2"><i data-lucide="phone" class="w-4 h-4"></i> +62 821-2034-9220</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Floating Navigation Menu -->
+    <div class="fixed bottom-8 inset-x-0 z-50 flex justify-center pointer-events-none">
+        <div class="relative pointer-events-auto">
+            <div id="navPopup" class="menu-popup absolute bottom-20 left-1/2 -translate-x-1/2 glass-card rounded-3xl p-3 shadow-2xl opacity-0 translate-y-5 scale-90 pointer-events-none w-72 border border-slate-200 dark:border-slate-700">
+                <div class="grid grid-cols-3 gap-2">
+                    <button onclick="navigate('home')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="home"><i data-lucide="home" class="w-5 h-5"></i><span class="text-[10px] font-bold">Beranda</span></button>
+                    <button onclick="navigate('about')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="about"><i data-lucide="user" class="w-5 h-5"></i><span class="text-[10px] font-bold">Profil</span></button>
+                    <button onclick="navigate('services')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="services"><i data-lucide="layers" class="w-5 h-5"></i><span class="text-[10px] font-bold">Jasa</span></button>
+                    <button onclick="navigate('portfolio')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="portfolio"><i data-lucide="image" class="w-5 h-5"></i><span class="text-[10px] font-bold">Karya</span></button>
+                    <button onclick="navigate('shop')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="shop"><i data-lucide="shopping-cart" class="w-5 h-5"></i><span class="text-[10px] font-bold">Shop</span></button>
+                    <button onclick="navigate('contact')" class="p-3 rounded-xl flex flex-col items-center gap-1 hover:bg-slate-100 dark:hover:bg-slate-800 transition nav-item" data-target="contact"><i data-lucide="send" class="w-5 h-5"></i><span class="text-[10px] font-bold">Kontak</span></button>
+                </div>
+            </div>
+            <button id="navTrigger" class="glass-card px-8 py-5 rounded-full shadow-2xl flex items-center gap-3 border border-primary-500/30 active:scale-95 transition-all font-bold">
+                <i data-lucide="compass" class="w-6 h-6 text-primary-600"></i>
+                <span class="font-bold text-sm uppercase tracking-widest">Menu Navigasi</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal Order -->
+    <div id="orderModal" class="fixed inset-0 z-[60] flex items-center justify-center px-4 hidden backdrop-blur-md bg-black/30">
+        <div class="glass-card w-full max-w-md p-8 rounded-3xl relative scale-95 opacity-0 transition-all duration-300" id="modalContainer">
+            <button onclick="closeModal()" class="absolute top-5 right-5 text-slate-500 hover:text-slate-900"><i data-lucide="x" class="w-5 h-5"></i></button>
+            <h3 class="text-2xl font-bold mb-2">Pesan Layanan</h3>
+            <p id="selectedService" class="text-primary-600 font-bold mb-5 text-lg">Service</p>
+            <input type="text" id="custName" placeholder="Nama lengkap Anda" class="w-full px-5 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 border-0 focus:ring-2 focus:ring-primary-500 mb-5">
+            <button onclick="sendWA()" class="w-full py-4 rounded-xl bg-green-600 text-white font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition">Lanjut ke WhatsApp <i data-lucide="send" class="w-5 h-5"></i></button>
+        </div>
+    </div>
+
+    <script>
+        // Reusable icon initialization
+        function refreshIcons() {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            }
+        }
+
+        // Theme
+        const themeBtn = document.getElementById('themeToggle');
+        if (themeBtn) {
+            themeBtn.onclick = () => {
+                document.documentElement.classList.toggle('dark');
+                localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+                refreshIcons();
+            };
+        }
+        if (localStorage.getItem('theme') === 'dark' || (!localStorage.theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+
+        // SPA Navigation
+        const sections = document.querySelectorAll('.route-section');
+        const navItems = document.querySelectorAll('.nav-item');
+        function navigate(id) {
+            const target = document.getElementById(id);
+            if (!target) return;
+            sections.forEach(sec => {
+                if (sec.classList.contains('active')) {
+                    sec.classList.remove('fade-in');
+                    setTimeout(() => sec.classList.remove('active'), 200);
+                }
+            });
+            setTimeout(() => {
+                target.classList.add('active');
+                setTimeout(() => target.classList.add('fade-in'), 20);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                refreshIcons();
+            }, 220);
+            navItems.forEach(item => {
+                item.classList.remove('nav-active');
+                if (item.dataset.target === id) item.classList.add('nav-active');
+            });
+            if (isMenuOpen) toggleMenu();
+        }
+
+        // Popup Menu
+        const navTrigger = document.getElementById('navTrigger');
+        const navPopup = document.getElementById('navPopup');
+        let isMenuOpen = false;
+        function toggleMenu() {
+            isMenuOpen = !isMenuOpen;
+            if (isMenuOpen) {
+                navPopup.classList.remove('opacity-0', 'translate-y-5', 'scale-90', 'pointer-events-none');
+                navPopup.classList.add('opacity-100', 'translate-y-0', 'scale-100', 'pointer-events-auto');
+                navTrigger.innerHTML = `<i data-lucide="x" class="w-6 h-6 text-primary-600"></i><span class="font-bold text-sm uppercase tracking-widest">Tutup</span>`;
+            } else {
+                navPopup.classList.add('opacity-0', 'translate-y-5', 'scale-90', 'pointer-events-none');
+                navPopup.classList.remove('opacity-100', 'translate-y-0', 'scale-100', 'pointer-events-auto');
+                navTrigger.innerHTML = `<i data-lucide="compass" class="w-6 h-6 text-primary-600"></i><span class="font-bold text-sm uppercase tracking-widest">Menu Navigasi</span>`;
+            }
+            refreshIcons();
+        }
+        if (navTrigger) navTrigger.onclick = (e) => { e.stopPropagation(); toggleMenu(); };
+        document.onclick = () => { if (isMenuOpen) toggleMenu(); };
+        if (navPopup) navPopup.onclick = (e) => e.stopPropagation();
+
+        // Modal
+        const modal = document.getElementById('orderModal');
+        const modalContainer = document.getElementById('modalContainer');
+        const selectedServiceSpan = document.getElementById('selectedService');
+        let currentService = "";
+        window.openModal = (name) => {
+            currentService = name;
+            selectedServiceSpan.innerText = name;
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modalContainer.classList.remove('opacity-0', 'scale-95');
+                modalContainer.classList.add('opacity-100', 'scale-100');
+                refreshIcons();
+            }, 20);
+        };
+        window.closeModal = () => {
+            modalContainer.classList.add('opacity-0', 'scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 250);
+        };
+        window.sendWA = () => {
+            const name = document.getElementById('custName')?.value || "Calon Klien";
+            const text = `Halo Sopyan Ahsan, saya ${name} ingin memesan layanan: *${currentService}*. Mohon info detail dan harga. Terima kasih.`;
+            window.open(`https://wa.me/6282120349220?text=${encodeURIComponent(text)}`, '_blank');
+            closeModal();
+        };
+        window.navigate = navigate;
+        window.onload = () => {
+            navigate('home');
+            refreshIcons();
+        };
+    </script>
+</body>
+</html>
