@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lacrozan CMS - Website Builder</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/builder.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/png" href="../favicon.ico">
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="#6366f1"/>
+                    <path d="M8 12h16M8 16h12M8 20h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span class="logo-text">Lacrozan CMS</span>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-page="dashboard">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-item" data-page="pages">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>Halaman</span>
+            </a>
+            <a href="#" class="nav-item" data-page="templates">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                <span>Template</span>
+            </a>
+            <a href="#" class="nav-item" data-page="media">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span>Media</span>
+            </a>
+            <a href="#" class="nav-item" data-page="settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                <span>Pengaturan</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">M</div>
+                <div class="user-details">
+                    <span class="user-name">Admin</span>
+                    <span class="user-role">Administrator</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content" id="mainContent">
+        <!-- Top Bar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <button class="mobile-menu-btn" id="mobileMenuBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+                </button>
+                <h1 class="page-title" id="pageTitle">Dashboard</h1>
+            </div>
+            <div class="topbar-right">
+                <button class="btn btn-primary" id="newPageBtn" onclick="CMS.showNewPageModal()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    Buat Halaman Baru
+                </button>
+            </div>
+        </header>
+
+        <!-- Page Content Container -->
+        <div class="content-area" id="contentArea">
+            <!-- Dashboard Page -->
+            <section class="page-section" id="page-dashboard">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #eef2ff; color: #6366f1;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-number" id="totalPages">0</span>
+                            <span class="stat-label">Total Halaman</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #ecfdf5; color: #10b981;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-number" id="publishedPages">0</span>
+                            <span class="stat-label">Dipublikasi</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #fef3c7; color: #f59e0b;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-number" id="draftPages">0</span>
+                            <span class="stat-label">Draft</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #fce7f3; color: #ec4899;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-number" id="totalTemplates">6</span>
+                            <span class="stat-label">Template</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="card recent-pages">
+                        <div class="card-header">
+                            <h3>Halaman Terbaru</h3>
+                            <a href="#" onclick="CMS.navigateTo('pages'); return false;" class="card-link">Lihat Semua</a>
+                        </div>
+                        <div class="card-body" id="recentPagesList">
+                            <div class="empty-state small">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                <p>Belum ada halaman. Buat halaman pertama Anda!</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card quick-actions">
+                        <div class="card-header">
+                            <h3>Aksi Cepat</h3>
+                        </div>
+                        <div class="card-body">
+                            <button class="quick-action-btn" onclick="CMS.showNewPageModal()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                                Buat Halaman Baru
+                            </button>
+                            <button class="quick-action-btn" onclick="CMS.navigateTo('templates')">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                                Jelajahi Template
+                            </button>
+                            <button class="quick-action-btn" onclick="CMS.navigateTo('media')">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                Upload Media
+                            </button>
+                            <button class="quick-action-btn" onclick="CMS.exportAllPages()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Export Semua
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Pages List -->
+            <section class="page-section hidden" id="page-pages">
+                <div class="page-header">
+                    <div class="page-header-left">
+                        <div class="search-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                            <input type="text" placeholder="Cari halaman..." id="searchPages" oninput="CMS.filterPages(this.value)">
+                        </div>
+                    </div>
+                    <div class="page-header-right">
+                        <select id="filterStatus" onchange="CMS.filterByStatus(this.value)">
+                            <option value="all">Semua Status</option>
+                            <option value="published">Dipublikasi</option>
+                            <option value="draft">Draft</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="pages-grid" id="pagesGrid">
+                    <div class="empty-state">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <h3>Belum Ada Halaman</h3>
+                        <p>Mulai buat halaman website pertama Anda dengan page builder kami.</p>
+                        <button class="btn btn-primary" onclick="CMS.showNewPageModal()">Buat Halaman Pertama</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Templates Page -->
+            <section class="page-section hidden" id="page-templates">
+                <div class="templates-grid" id="templatesGrid"></div>
+            </section>
+
+            <!-- Media Page -->
+            <section class="page-section hidden" id="page-media">
+                <div class="media-header">
+                    <button class="btn btn-primary" onclick="CMS.showUploadModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Upload File
+                    </button>
+                </div>
+                <div class="media-grid" id="mediaGrid">
+                    <div class="empty-state">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        <h3>Belum Ada Media</h3>
+                        <p>Upload gambar dan file untuk digunakan di halaman Anda.</p>
+                        <button class="btn btn-primary" onclick="CMS.showUploadModal()">Upload File Pertama</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings Page -->
+            <section class="page-section hidden" id="page-settings">
+                <div class="settings-container">
+                    <div class="card">
+                        <div class="card-header"><h3>Pengaturan Umum</h3></div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label>Nama Website</label>
+                                <input type="text" id="siteName" value="My Website" class="form-input" onchange="CMS.saveSiteSettings()">
+                            </div>
+                            <div class="form-group">
+                                <label>Deskripsi Website</label>
+                                <textarea id="siteDescription" class="form-input" rows="3" onchange="CMS.saveSiteSettings()">Website yang dibuat dengan Lacrozan CMS</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Favicon URL</label>
+                                <input type="text" id="siteFavicon" class="form-input" placeholder="https://example.com/favicon.ico" onchange="CMS.saveSiteSettings()">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3>Tampilan</h3></div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label>Warna Primer</label>
+                                <div class="color-picker-group">
+                                    <input type="color" id="primaryColor" value="#6366f1" onchange="CMS.saveSiteSettings()">
+                                    <input type="text" id="primaryColorText" value="#6366f1" class="form-input" onchange="document.getElementById('primaryColor').value=this.value; CMS.saveSiteSettings()">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Font</label>
+                                <select id="siteFont" class="form-input" onchange="CMS.saveSiteSettings()">
+                                    <option value="Inter">Inter</option>
+                                    <option value="Roboto">Roboto</option>
+                                    <option value="Open Sans">Open Sans</option>
+                                    <option value="Poppins">Poppins</option>
+                                    <option value="Montserrat">Montserrat</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3>Data</h3></div>
+                        <div class="card-body">
+                            <div class="settings-actions">
+                                <button class="btn btn-secondary" onclick="CMS.exportData()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Export Data
+                                </button>
+                                <button class="btn btn-secondary" onclick="document.getElementById('importDataInput').click()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                    Import Data
+                                </button>
+                                <input type="file" id="importDataInput" accept=".json" style="display:none" onchange="CMS.importData(event)">
+                                <button class="btn btn-danger" onclick="CMS.clearAllData()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    Hapus Semua Data
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Page Builder (Full Screen Overlay) -->
+    <div class="builder-overlay hidden" id="builderOverlay">
+        <div class="builder-topbar">
+            <div class="builder-topbar-left">
+                <button class="btn btn-ghost" onclick="CMS.closeBuilder()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                    Kembali
+                </button>
+                <input type="text" class="builder-page-title" id="builderPageTitle" value="Halaman Baru" placeholder="Nama Halaman">
+            </div>
+            <div class="builder-topbar-center">
+                <div class="device-switcher">
+                    <button class="device-btn active" data-device="desktop" onclick="CMS.switchDevice('desktop')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    </button>
+                    <button class="device-btn" data-device="tablet" onclick="CMS.switchDevice('tablet')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                    </button>
+                    <button class="device-btn" data-device="mobile" onclick="CMS.switchDevice('mobile')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="builder-topbar-right">
+                <button class="btn btn-ghost" onclick="CMS.previewPage()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Preview
+                </button>
+                <button class="btn btn-ghost" onclick="CMS.exportCurrentPage()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export
+                </button>
+                <button class="btn btn-primary" onclick="CMS.savePage()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    Simpan
+                </button>
+            </div>
+        </div>
+        <div class="builder-body">
+            <!-- Component Panel -->
+            <div class="component-panel" id="componentPanel">
+                <div class="panel-header">
+                    <h3>Komponen</h3>
+                    <button class="panel-toggle" onclick="CMS.toggleComponentPanel()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                    </button>
+                </div>
+                <div class="component-list" id="componentList"></div>
+            </div>
+
+            <!-- Canvas -->
+            <div class="builder-canvas-wrapper">
+                <div class="builder-canvas" id="builderCanvas">
+                    <div class="canvas-empty-state" id="canvasEmptyState">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+                        <h3>Mulai Membuat Halaman</h3>
+                        <p>Seret komponen dari panel kiri atau klik untuk menambahkan.</p>
+                    </div>
+                    <div class="canvas-content" id="canvasContent"></div>
+                </div>
+            </div>
+
+            <!-- Properties Panel -->
+            <div class="properties-panel hidden" id="propertiesPanel">
+                <div class="panel-header">
+                    <h3>Properti</h3>
+                    <button class="panel-close" onclick="CMS.closePropertiesPanel()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="properties-content" id="propertiesContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Page Modal -->
+    <div class="modal-overlay hidden" id="newPageModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Buat Halaman Baru</h3>
+                <button class="modal-close" onclick="CMS.closeModal('newPageModal')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nama Halaman</label>
+                    <input type="text" id="newPageName" class="form-input" placeholder="Contoh: Beranda, Tentang Kami, Kontak">
+                </div>
+                <div class="form-group">
+                    <label>Pilih Template (Opsional)</label>
+                    <div class="template-picker" id="templatePicker"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="CMS.closeModal('newPageModal')">Batal</button>
+                <button class="btn btn-primary" onclick="CMS.createNewPage()">Buat Halaman</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal-overlay hidden" id="uploadModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Upload File</h3>
+                <button class="modal-close" onclick="CMS.closeModal('uploadModal')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()" ondrop="CMS.handleDrop(event)" ondragover="CMS.handleDragOver(event)" ondragleave="CMS.handleDragLeave(event)">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <p>Seret file ke sini atau <strong>klik untuk memilih</strong></p>
+                    <span class="upload-hint">Mendukung: JPG, PNG, GIF, SVG, PDF (Max 5MB)</span>
+                    <input type="file" id="fileInput" multiple accept="image/*,.pdf,.svg" style="display:none" onchange="CMS.handleFileSelect(event)">
+                </div>
+                <div class="upload-preview" id="uploadPreview"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="CMS.closeModal('uploadModal')">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="preview-overlay hidden" id="previewOverlay">
+        <div class="preview-topbar">
+            <div class="preview-topbar-left">
+                <button class="btn btn-ghost" onclick="CMS.closePreview()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+                <span class="preview-title">Preview</span>
+            </div>
+            <div class="preview-topbar-center">
+                <div class="device-switcher">
+                    <button class="device-btn active" data-device="desktop" onclick="CMS.switchPreviewDevice('desktop')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    </button>
+                    <button class="device-btn" data-device="tablet" onclick="CMS.switchPreviewDevice('tablet')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                    </button>
+                    <button class="device-btn" data-device="mobile" onclick="CMS.switchPreviewDevice('mobile')">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="preview-topbar-right">
+                <button class="btn btn-primary" onclick="CMS.exportCurrentPage()">Export HTML</button>
+            </div>
+        </div>
+        <div class="preview-body">
+            <iframe id="previewFrame" class="preview-frame"></iframe>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/templates.js"></script>
+    <script src="js/builder.js"></script>
+    <script src="js/export.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
